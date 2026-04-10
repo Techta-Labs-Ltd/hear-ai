@@ -116,4 +116,4 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(api_router)
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, workers=1, reload=False)
+    uvicorn.run("app.main:app", host="194.68.245.69", port=8000, workers=1, reload=False)
