@@ -9,6 +9,21 @@ from app.config import settings
 
 MODERATION_MODEL = "unitary/toxic-bert"
 
+SEVERITY_NONE = "none"
+SEVERITY_LOW = "low"
+SEVERITY_MEDIUM = "medium"
+SEVERITY_HIGH = "high"
+SEVERITY_CRITICAL = "critical"
+
+TOXIC_CATEGORIES = {
+    "toxic": "General toxicity",
+    "severe_toxic": "Severe toxicity",
+    "obscene": "Obscene language",
+    "threat": "Threats of violence",
+    "insult": "Personal attacks or insults",
+    "identity_hate": "Identity-based hate speech",
+}
+
 
 class ModerationService:
     def __init__(self):
@@ -29,23 +44,36 @@ class ModerationService:
 
     async def moderate(self, text: str, blocked_keywords: list[str] = None) -> dict:
         if not text or not text.strip():
-            return {"flagged": False, "categories": {}, "scores": {}, "openai": {}, "blocked_words": []}
+            return {
+                "flagged": False,
+                "severity": SEVERITY_NONE,
+                "intent": "safe",
+                "reason": "",
+                "flagged_categories": [],
+                "blocked_words_found": [],
+            }
 
         loop = asyncio.get_event_loop()
+
         local_task = loop.run_in_executor(None, self._classify_local, text)
-        openai_task = self._classify_openai(text)
-        keyword_task = loop.run_in_executor(None, self._check_blocked_keywords, text, blocked_keywords or [])
+        context_task = self._classify_with_context(text, blocked_keywords or [])
+        keyword_hits = self._check_keywords(text, blocked_keywords or [])
 
-        local_result, openai_result, blocked_result = await asyncio.gather(local_task, openai_task, keyword_task)
+        local_result, context_result = await asyncio.gather(local_task, context_task)
 
-        flagged = local_result["flagged"] or openai_result.get("flagged", False) or blocked_result["flagged"]
+        severity = self._compute_severity(local_result, context_result)
+        flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
+        intent = context_result.get("intent", "unknown")
+        reason = self._build_reason(local_result, context_result, keyword_hits, intent, severity)
+        flagged_categories = self._get_flagged_categories(local_result, context_result)
 
         return {
             "flagged": flagged,
-            "categories": local_result["categories"],
-            "scores": local_result["scores"],
-            "openai": openai_result,
-            "blocked_words": blocked_result["matched"],
+            "severity": severity,
+            "intent": intent,
+            "reason": reason,
+            "flagged_categories": flagged_categories,
+            "blocked_words_found": context_result.get("blocked_words", keyword_hits),
         }
 
     def _classify_local(self, text: str) -> dict:
@@ -53,54 +81,149 @@ class ModerationService:
         if isinstance(results, list) and results and isinstance(results[0], list):
             results = results[0]
 
-        categories = {}
         scores = {}
         for item in results:
             label = item["label"].lower()
-            score = round(item["score"], 4)
-            scores[label] = score
-            categories[label] = score > 0.5
+            scores[label] = round(item["score"], 4)
+
+        high_scores = {k: v for k, v in scores.items() if v > 0.5}
 
         return {
-            "flagged": any(categories.values()),
-            "categories": categories,
+            "flagged": any(v > 0.7 for k, v in scores.items() if k in ("severe_toxic", "threat", "identity_hate")),
+            "max_score": max(scores.values()) if scores else 0,
+            "high_scores": high_scores,
             "scores": scores,
         }
 
-    async def _classify_openai(self, text: str) -> dict:
+    async def _classify_with_context(self, text: str, blocked_keywords: list[str]) -> dict:
         if not settings.OPENAI_API_KEY:
-            return {"flagged": False, "categories": {}, "scores": {}}
+            keyword_hits = self._check_keywords(text, blocked_keywords)
+            if keyword_hits:
+                return {
+                    "intent": "cautionary",
+                    "reason": f"Contains monitored words: {', '.join(keyword_hits)}",
+                    "blocked_words": keyword_hits,
+                }
+            return {"intent": "safe", "reason": "", "blocked_words": []}
+
+        blocked_section = ""
+        if blocked_keywords:
+            blocked_section = f"\nMonitored keywords: [{', '.join(blocked_keywords)}]\n"
+
+        prompt = (
+            "You are a content moderation system for an audio recording platform. "
+            "Analyze this transcript and determine if the SPEAKER is producing harmful content.\n\n"
+            "IMPORTANT RULES:\n"
+            "- A reporter discussing crime, robbery, scams = NOT harmful (reporting)\n"
+            "- Someone warning others about scams = NOT harmful (educational)\n"
+            "- A podcast about war or politics = NOT harmful (discussion)\n"
+            "- Someone directly threatening violence = harmful\n"
+            "- Someone promoting hate or discrimination = harmful\n"
+            "- Someone producing explicit sexual content targeting minors = harmful\n"
+            "- Profanity alone is NOT harmful unless directed at someone as abuse\n\n"
+            "Determine the INTENT:\n"
+            "- 'safe': normal discussion, reporting, educating, informing\n"
+            "- 'cautionary': sensitive topics discussed neutrally, mild language\n"
+            "- 'questionable': borderline, may benefit from human review\n"
+            "- 'harmful': speaker is threatening, promoting violence/hate, or producing genuinely harmful content\n\n"
+            f"{blocked_section}"
+            "If monitored keywords appear, only flag them if used in a genuinely harmful way.\n\n"
+            f"Transcript:\n{text[:3000]}\n\n"
+            "Return ONLY valid JSON:\n"
+            '{"intent": "safe|cautionary|questionable|harmful", '
+            '"reason": "one clear sentence explaining your decision", '
+            '"blocked_words_in_harmful_context": ["only words used harmfully, empty if none"]}'
+        )
 
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=20) as client:
                 response = await client.post(
-                    f"{settings.OPENAI_BASE_URL}/moderations",
+                    f"{settings.OPENAI_BASE_URL}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
                         "Content-Type": "application/json",
                     },
-                    json={"input": text[:4000]},
+                    json={
+                        "model": settings.OPENAI_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.0,
+                        "max_tokens": 200,
+                    },
                 )
                 response.raise_for_status()
                 data = response.json()
 
-            result = data["results"][0]
+            content = data["choices"][0]["message"]["content"].strip()
+            content = content.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(content)
+
             return {
-                "flagged": result["flagged"],
-                "categories": result["categories"],
-                "scores": {k: round(v, 4) for k, v in result["category_scores"].items()},
+                "intent": parsed.get("intent", "safe"),
+                "reason": parsed.get("reason", ""),
+                "blocked_words": parsed.get("blocked_words_in_harmful_context", []),
             }
         except Exception:
-            return {"flagged": False, "categories": {}, "scores": {}}
+            keyword_hits = self._check_keywords(text, blocked_keywords)
+            if keyword_hits:
+                return {
+                    "intent": "cautionary",
+                    "reason": f"Contains monitored words: {', '.join(keyword_hits)}. Context analysis unavailable.",
+                    "blocked_words": keyword_hits,
+                }
+            return {"intent": "safe", "reason": "", "blocked_words": []}
 
-    def _check_blocked_keywords(self, text: str, blocked_keywords: list[str]) -> dict:
+    def _check_keywords(self, text: str, blocked_keywords: list[str]) -> list[str]:
         if not blocked_keywords:
-            return {"flagged": False, "matched": []}
-
+            return []
         text_lower = text.lower()
-        matched = [kw for kw in blocked_keywords if kw.lower() in text_lower]
+        return [kw for kw in blocked_keywords if kw.lower() in text_lower]
 
-        return {
-            "flagged": len(matched) > 0,
-            "matched": matched,
-        }
+    def _compute_severity(self, local_result: dict, context_result: dict) -> str:
+        intent = context_result.get("intent", "safe")
+        max_toxic = local_result.get("max_score", 0)
+        local_flagged = local_result.get("flagged", False)
+
+        if intent == "harmful" and local_flagged:
+            return SEVERITY_CRITICAL
+
+        if intent == "harmful":
+            return SEVERITY_HIGH
+
+        if local_flagged and intent in ("safe", "cautionary"):
+            return SEVERITY_MEDIUM
+
+        if intent == "questionable":
+            return SEVERITY_MEDIUM
+
+        if intent == "cautionary" or max_toxic > 0.5:
+            return SEVERITY_LOW
+
+        return SEVERITY_NONE
+
+    def _get_flagged_categories(self, local_result: dict, context_result: dict) -> list[str]:
+        categories = []
+        for label, score in local_result.get("high_scores", {}).items():
+            if label in TOXIC_CATEGORIES:
+                categories.append(TOXIC_CATEGORIES[label])
+        return categories
+
+    def _build_reason(self, local_result: dict, context_result: dict, keyword_hits: list[str], intent: str, severity: str) -> str:
+        context_reason = context_result.get("reason", "")
+        if context_reason:
+            return context_reason
+
+        parts = []
+        high = local_result.get("high_scores", {})
+        if high:
+            labels = [TOXIC_CATEGORIES.get(k, k) for k in high.keys()]
+            parts.append(f"Detected: {', '.join(labels)}")
+
+        if keyword_hits:
+            parts.append(f"Monitored words found: {', '.join(keyword_hits)}")
+
+        if not parts:
+            if severity == SEVERITY_NONE:
+                return "Content appears safe"
+            return "Content flagged by automated analysis"
+
+        return ". ".join(parts)

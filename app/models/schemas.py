@@ -21,7 +21,6 @@ class PipelineRequest(BaseModel):
     skip_enhancement: bool = False
     skip_transcription: bool = False
     existing_transcript: Optional[str] = None
-    custom_tags: list[str] = Field(default_factory=list)
     max_tags: int = 8
 
 

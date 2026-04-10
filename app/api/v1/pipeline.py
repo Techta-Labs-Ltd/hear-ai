@@ -35,7 +35,6 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_s
             skip_enhancement=body.skip_enhancement,
             skip_transcription=body.skip_transcription,
             existing_transcript=body.existing_transcript,
-            custom_tags=body.custom_tags,
             created_at=datetime.utcnow(),
         )
         db.add(job)

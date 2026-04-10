@@ -235,18 +235,38 @@ class PipelineWorker:
             if transcript_text:
                 job.status = "categorizing"
                 db.commit()
-                custom_tags = list(set((job.custom_tags or []) + platform.auto_tag_keywords))
                 categorization_data = await self._categorizer.categorize(
                     transcript=transcript_text,
                     segments=segments,
-                    custom_tags=custom_tags,
+                    custom_tags=platform.auto_tag_keywords,
                 )
 
             moderation_data = None
             if transcript_text:
                 job.status = "moderating"
                 db.commit()
-                moderation_data = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
+
+                combined_mod = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
+
+                track_moderations = {}
+                worst = combined_mod
+                severity_order = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+                for track_id, t_data in per_track_transcriptions.items():
+                    t_text = t_data.get("transcript", "")
+                    if not t_text.strip():
+                        continue
+                    t_mod = await self._moderator.moderate(t_text, platform.blocked_keywords)
+                    track_moderations[track_id] = t_mod
+                    if severity_order.get(t_mod["severity"], 0) > severity_order.get(worst["severity"], 0):
+                        worst = t_mod
+                        worst["reason"] = f"Track {track_id}: {t_mod['reason']}"
+
+                moderation_data = worst
+                moderation_data["per_track"] = {
+                    tid: {"flagged": m["flagged"], "severity": m["severity"], "reason": m["reason"]}
+                    for tid, m in track_moderations.items()
+                }
 
             result_payload = {
                 "job_id": job.id,

@@ -1,5 +1,6 @@
 [CATEGORIES]
 News
+Breaking News
 Entertainment
 Sports
 Weather
@@ -63,6 +64,360 @@ Opinion
 Investigation
 Documentary
 Podcast
+Personal Finance
+Investing
+Insurance
+Banking
+E-Commerce
+Marketing
+Advertising
+Public Relations
+Hospitality
+Tourism
+Aviation
+Shipping
+Logistics
+Manufacturing
+Mining
+Construction
+Architecture
+Interior Design
+Photography
+Film
+Television
+Streaming
+Animation
+Virtual Reality
+Augmented Reality
+Robotics
+Internet of Things
+Cloud Computing
+Data Science
+Machine Learning
+Software Development
+Web Development
+Mobile Apps
+Hardware
+Semiconductors
+Quantum Computing
+Biotechnology
+Pharmaceuticals
+Medical Devices
+Fitness
+Nutrition
+Wellness
+Yoga
+Meditation
+Psychology
+Therapy
+Counselling
+Social Work
+Nonprofits
+Activism
+Civil Rights
+Democracy
+Diplomacy
+International Relations
+Geopolitics
+Economics
+Trade
+Supply Chain
+Entrepreneurship
+Venture Capital
+Mergers and Acquisitions
+Intellectual Property
+Patents
+Copyright
+Privacy
+Data Protection
+Elections
+Legislation
+Regulation
+Compliance
+Taxation
+Accounting
+Auditing
+Human Resources
+Recruitment
+Workplace
+Remote Work
+Freelancing
+Gig Economy
+Labor Rights
+Unions
+Diversity
+Inclusion
+Gender
+LGBTQ
+Indigenous
+Ethnic Affairs
+Migration
+Diaspora
+Refugees
+Humanitarian Aid
+Disaster Relief
+Peacekeeping
+Conflict
+Terrorism
+Defense
+Intelligence
+Nuclear
+Arms Control
+Climate Change
+Renewable Energy
+Solar Energy
+Wind Energy
+Electric Vehicles
+Carbon Emissions
+Conservation
+Biodiversity
+Deforestation
+Oceans
+Rivers
+Pollution
+Recycling
+Circular Economy
+Green Technology
+Urban Planning
+Smart Cities
+Rural Development
+Community Development
+Social Enterprise
+Impact Investing
+Crowdfunding
+Blockchain
+NFTs
+DeFi
+Web3
+Metaverse
+Esports
+Board Games
+Puzzles
+Comics
+Anime
+Manga
+K-Pop
+Hip Hop
+Rock
+Jazz
+Classical Music
+Country Music
+Electronic Music
+R&B
+Reggae
+Latin Music
+African Music
+World Music
+Dance
+Ballet
+Opera
+Stand-up Comedy
+Satire
+Improv
+Poetry
+Fiction
+Non-fiction
+Memoir
+Biography
+Self-help
+True Crime
+Mystery
+Horror
+Romance
+Sci-Fi
+Fantasy
+Thriller
+Action
+Adventure
+Family
+Children
+Pets
+Animals
+Gardening
+DIY
+Home Improvement
+Cooking
+Baking
+Restaurants
+Wine
+Beer
+Coffee
+Vegan
+Vegetarian
+Organic
+Superfoods
+Dieting
+Weight Loss
+Bodybuilding
+Running
+Cycling
+Swimming
+Hiking
+Camping
+Mountaineering
+Surfing
+Skiing
+Snowboarding
+Martial Arts
+Boxing
+Wrestling
+Gymnastics
+Olympics
+Paralympics
+World Cup
+Championship
+Tournament
+League
+College Sports
+Amateur Sports
+Extreme Sports
+Water Sports
+Motor Sports
+Horse Racing
+Golf
+Baseball
+Basketball
+American Football
+Soccer
+Hockey
+Volleyball
+Table Tennis
+Badminton
+Archery
+Fencing
+Sailing
+Rowing
+Kayaking
+Skateboarding
+BMX
+Formula 1
+NASCAR
+MotoGP
+Rally
+Triathlon
+Marathon
+CrossFit
+Powerlifting
+Weightlifting
+Amusement Parks
+Festivals
+Concerts
+Live Events
+Conferences
+Exhibitions
+Trade Shows
+Seminars
+Workshops
+Webinars
+Online Learning
+Certifications
+Degrees
+Scholarships
+Internships
+Apprenticeships
+Mentoring
+Coaching
+Leadership
+Management
+Strategy
+Innovation
+Digital Transformation
+Automation
+Productivity
+Time Management
+Project Management
+Agile
+Scrum
+DevOps
+Open Source
+APIs
+Microservices
+Serverless
+Edge Computing
+5G
+6G
+Fiber Optics
+Satellites
+GPS
+Drones
+3D Printing
+Nanotechnology
+Materials Science
+Chemical Engineering
+Civil Engineering
+Electrical Engineering
+Mechanical Engineering
+Aerospace
+Defense Technology
+Surveillance
+Encryption
+Hacking
+Malware
+Ransomware
+Phishing
+Identity Theft
+Fraud
+Scams
+Consumer Protection
+Product Safety
+Food Safety
+Drug Safety
+Clinical Trials
+Vaccines
+Pandemic
+Epidemic
+Public Safety
+Fire Safety
+Road Safety
+Workplace Safety
+Occupational Health
+Ergonomics
+Sleep
+Aging
+Longevity
+Genetics
+Genomics
+Stem Cells
+Organ Donation
+Transplants
+Surgery
+Dentistry
+Optometry
+Dermatology
+Cardiology
+Oncology
+Neurology
+Psychiatry
+Pediatrics
+Geriatrics
+Veterinary
+Zoology
+Botany
+Ecology
+Geology
+Meteorology
+Oceanography
+Astronomy
+Astrophysics
+Cosmology
+Physics
+Chemistry
+Mathematics
+Statistics
+Philosophy
+Ethics
+Sociology
+Anthropology
+Archaeology
+Linguistics
+Literature
+Art History
+Museum Studies
+Library Science
+Archives
+Genealogy
+Folklore
+Mythology
 
 [TAGS]
 #BreakingNews
@@ -73,192 +428,622 @@ Podcast
 #Government
 #Parliament
 #Council
+#Democracy
+#Legislation
+#Policy
+#Reform
+#Campaign
+#Debate
+#Cabinet
 #Crime
 #Justice
 #Court
 #Police
+#Fraud
+#Theft
+#Arrest
+#Trial
+#Verdict
+#Sentence
+#Investigation
+#ColdCase
+#Cybercrime
 #Technology
 #AI
+#MachineLearning
+#DeepLearning
+#NeuralNetwork
 #Cyber
+#CyberSecurity
+#DataBreach
+#Hacking
 #Digital
 #Innovation
+#Startup
+#Tech
+#SaaS
+#Cloud
+#BigData
+#IoT
+#5G
+#Blockchain
+#Web3
+#Metaverse
+#VR
+#AR
+#Robotics
+#Automation
+#DevOps
+#OpenSource
+#API
 #Community
 #Charity
 #Volunteer
+#Fundraising
+#Nonprofit
+#SocialImpact
+#Giving
+#Donation
 #Interview
 #Events
 #Festival
+#Carnival
+#Parade
+#Conference
+#Summit
+#Expo
+#Workshop
+#Seminar
 #Sports
 #Football
+#Soccer
 #Cricket
 #Rugby
 #Tennis
 #Athletics
+#Olympics
+#Paralympics
+#Basketball
+#Baseball
+#Golf
+#Hockey
+#Volleyball
+#Swimming
+#Boxing
+#MMA
+#Wrestling
+#Formula1
+#NASCAR
+#MotoGP
+#Cycling
+#Marathon
+#Triathlon
+#Surfing
+#Skiing
+#Snowboarding
+#Skateboarding
+#Esports
+#FIFA
+#NBA
+#NFL
+#MLB
+#PremierLeague
+#ChampionsLeague
+#WorldCup
 #Entertainment
 #Music
 #Film
+#Movie
+#Cinema
 #Theatre
 #Television
+#TV
+#Streaming
+#Netflix
+#Spotify
+#YouTube
+#TikTok
+#Instagram
 #Celebrity
+#RedCarpet
+#Awards
+#Oscar
+#Grammy
+#Emmy
+#Concert
+#Album
+#Playlist
+#Podcast
+#Radio
+#Comedy
+#StandUp
+#Improv
+#Anime
+#Manga
+#KPop
+#HipHop
+#Rock
+#Jazz
+#Classical
+#EDM
+#Country
+#RnB
+#Reggae
+#Latin
 #Weather
 #Storm
 #Flooding
+#Flood
 #Heatwave
+#Hurricane
+#Tornado
+#Blizzard
+#Drought
+#Wildfire
+#Earthquake
+#Tsunami
+#ClimateChange
+#GlobalWarming
 #Business
 #Economy
 #Markets
+#StockMarket
+#WallStreet
 #StartUp
+#Entrepreneur
 #Employment
+#Jobs
+#Hiring
+#Layoffs
+#Recession
+#Inflation
+#GDP
+#Revenue
+#Profit
+#Investment
+#VentureCapital
+#IPO
+#Merger
+#Acquisition
+#Supply
+#Demand
+#Trade
+#Tariff
+#Sanctions
 #Health
 #NHS
 #MentalHealth
 #Wellbeing
 #Medical
+#Healthcare
+#Hospital
+#Doctor
+#Nurse
+#Patient
+#Surgery
+#Diagnosis
+#Treatment
+#Therapy
+#Vaccine
+#Pandemic
+#COVID
+#Cancer
+#Diabetes
+#HeartDisease
+#Stroke
+#Alzheimers
+#Autism
+#ADHD
+#Depression
+#Anxiety
+#PTSD
+#Addiction
+#Recovery
+#Fitness
+#Nutrition
+#Diet
+#Wellness
+#Yoga
+#Meditation
+#Mindfulness
 #Education
 #Schools
 #University
+#College
 #Students
 #Teachers
+#Professor
+#Scholarship
+#Degree
+#Diploma
+#Exam
+#Curriculum
+#STEM
+#Research
+#PhD
+#OnlineLearning
+#EdTech
 #Culture
 #Arts
 #Heritage
 #Literature
+#Poetry
+#Museum
+#Gallery
+#Photography
+#Sculpture
+#Painting
+#Architecture
+#Design
+#StreetArt
 #Environment
 #Climate
 #Wildlife
 #Conservation
 #Pollution
+#Recycling
+#Sustainability
+#GreenEnergy
+#Renewable
+#Solar
+#Wind
+#EV
+#ElectricVehicle
+#Carbon
+#Emissions
+#Deforestation
+#Biodiversity
+#Coral
+#Plastic
+#Ocean
 #Science
 #Research
 #Space
+#NASA
+#SpaceX
+#Mars
+#Moon
+#ISS
+#Satellite
+#Telescope
 #Discovery
+#Physics
+#Chemistry
+#Biology
+#Genetics
+#DNA
+#CRISPR
+#StemCell
+#Biotech
+#Pharmaceutical
+#ClinicalTrial
 #Religion
 #Faith
 #Church
 #Mosque
 #Synagogue
+#Temple
+#Spirituality
+#Prayer
+#Scripture
+#Pope
 #Military
 #Defence
+#Defense
 #Veterans
+#Army
+#Navy
+#AirForce
+#Marines
+#NATO
+#Peacekeeping
+#Conflict
+#War
+#Weapon
+#Missile
+#Nuclear
 #Transport
 #Railways
 #Roads
 #Aviation
 #Shipping
+#Logistics
+#Traffic
+#Commute
+#PublicTransport
+#Train
+#Bus
+#Subway
+#Airport
+#Airline
+#Cargo
+#Freight
 #Housing
 #Property
+#RealEstate
 #Homeless
+#Affordable
+#Mortgage
+#Rent
 #Planning
+#Construction
+#Development
+#Renovation
+#SmartHome
 #Food
 #Farming
 #Agriculture
 #Cooking
+#Recipe
+#Chef
+#Restaurant
+#Organic
+#Vegan
+#Vegetarian
+#PlantBased
+#FoodSafety
+#FoodWaste
 #Immigration
 #Asylum
 #Borders
 #Refugees
+#Visa
+#Migration
+#Citizenship
+#Deportation
+#Integration
 #Energy
-#Renewable
 #Oil
 #Gas
 #Nuclear
+#Solar
+#Wind
+#Hydrogen
+#Battery
+#Grid
+#Power
+#Electricity
+#Fossil
 #Legal
 #Law
 #Legislation
+#Regulation
 #Rights
+#Patent
+#Copyright
+#IP
+#Privacy
+#GDPR
+#Compliance
 #HumanRights
 #Equality
 #Diversity
+#Inclusion
+#DEI
+#Discrimination
+#Racism
+#Sexism
 #Disability
 #Accessibility
+#LGBTQ
+#Pride
+#Feminism
 #Children
 #Family
 #Parenting
+#Baby
 #Youth
+#Teenager
+#Childcare
+#Safeguarding
+#Adoption
+#Foster
 #Seniors
 #Elderly
+#Retirement
+#Pension
+#Aging
+#Longevity
 #Emergency
 #Fire
 #Ambulance
 #Rescue
+#Disaster
+#Evacuation
+#FirstResponder
+#Paramedic
+#Firefighter
 #History
 #Archaeology
+#Heritage
+#Museum
+#Ancient
+#Medieval
+#WW1
+#WW2
+#ColdWar
+#Revolution
+#Monument
+#Archive
 #Travel
 #Tourism
+#Holiday
+#Vacation
 #Adventure
+#Backpacking
+#Cruise
+#Resort
+#Hotel
+#Airbnb
+#Flight
+#Safari
+#Beach
+#Mountain
 #Fashion
-#Design
+#Style
+#Trend
+#Designer
+#Runway
+#Brand
 #Beauty
+#Cosmetics
+#Skincare
+#Clothing
+#Luxury
+#Streetwear
 #Gaming
-#Esports
-#Comedy
-#Satire
-#Drama
+#VideoGame
+#Console
+#PC
+#MobileGame
+#Streamer
+#Twitch
+#Steam
+#PlayStation
+#Xbox
+#Nintendo
+#IndieGame
+#RPG
+#FPS
+#MOBA
+#OpenWorld
+#MultiPlayer
+#Finance
+#Banking
+#Insurance
+#FinTech
+#PayTech
+#CreditCard
+#Loan
+#Savings
+#Budget
+#Wealth
+#Retirement
+#Crypto
+#Bitcoin
+#Ethereum
+#DeFi
+#NFT
+#Token
+#Mining
+#Wallet
+#Exchange
+#Stablecoin
+#Altcoin
 #Documentary
-#Podcast
-#Radio
+#TrueCrime
+#Investigative
+#Expose
+#Journalism
+#Reporter
+#Editor
+#Whistleblower
 #Opinion
 #Editorial
-#Investigation
+#Commentary
+#Analysis
+#Review
+#Critique
 #Data
 #Statistics
+#Survey
+#Poll
+#Census
 #Infrastructure
-#Construction
-#Development
+#Bridge
+#Tunnel
+#Dam
+#Highway
+#Railroad
+#Pipeline
+#Broadband
+#SmartCity
 #Water
 #Sanitation
+#Sewage
+#Reservoir
+#Desalination
 #PublicHealth
-#Pandemic
+#Epidemic
 #Vaccination
+#WHO
+#CDC
+#Quarantine
 #SocialMedia
-#Cryptocurrency
-#Blockchain
-#Sustainability
-#GreenEnergy
-#Recycling
-#Marine
-#Fishing
+#Influencer
+#Viral
+#Trending
+#Hashtag
+#ContentCreator
+#Meme
+#Cancel
+#Algorithm
+#Engagement
+#Marketing
+#Advertising
+#Branding
+#SEO
+#SEM
+#PR
+#ContentMarketing
+#SocialMarketing
+#InfluencerMarketing
+#EmailMarketing
+#Affiliate
 #Automotive
-#ElectricVehicles
-#RealEstate
-#Retail
-#Shopping
-#Telecoms
-#Internet
-#Philanthropy
+#Car
+#EV
+#Tesla
+#Toyota
+#Ford
+#BMW
+#Mercedes
+#SelfDriving
+#Autonomous
+#Taxi
+#Uber
+#Lyft
+#Scooter
+#Motorcycle
+#Truck
 
 [KEYWORDS]
-election|vote|voting|council|parliament|government|minister|MP|mayor|political|party|referendum|ballot|constituency = #Politics
-goal|match|football|cricket|rugby|tennis|sport|player|team|league|championship|trophy|tournament|athlete|stadium = #Sports
-rain|sun|forecast|temperature|storm|snow|cloud|wind|weather|flood|drought|heatwave|lightning|fog|ice = #Weather
-app|software|AI|technology|digital|cyber|data|computer|internet|algorithm|robot|machine.learning|startup|coding = #Technology
-shop|business|economy|job|employment|market|company|startup|trade|profit|revenue|investment|stock|shares|GDP = #Business
-hospital|doctor|NHS|health|medical|mental|wellbeing|treatment|patient|nurse|surgery|diagnosis|therapy|vaccine|pandemic = #Health
-school|college|university|student|teacher|education|exam|grade|curriculum|lecturer|scholarship|degree|diploma|tutor = #Education
-community|local|neighbourhood|charity|volunteer|event|festival|council|resident|village|town|parish|congregation = #Community
-film|music|art|theatre|celebrity|tv|show|entertainment|concert|album|gallery|performance|actor|director|streaming = #Entertainment
-crime|murder|robbery|theft|fraud|arrest|police|court|prison|sentence|trial|judge|jury|detective|investigation = #Crime
-church|mosque|temple|synagogue|faith|prayer|worship|religion|spiritual|clergy|sermon|scripture|holy|sacred = #Religion
-army|navy|air.force|military|soldier|defence|veteran|deployment|missile|weapon|war|conflict|peacekeeping = #Military
-train|bus|car|plane|road|railway|transport|traffic|motorway|highway|airport|station|commute|cycling|pedestrian = #Transport
-house|flat|apartment|property|rent|mortgage|housing|homeless|shelter|planning|development|estate|construction = #Housing
-food|recipe|cooking|restaurant|chef|ingredient|meal|diet|nutrition|organic|farming|agriculture|harvest|crop = #Food
-immigrant|refugee|asylum|border|visa|migration|deportation|citizenship|nationality|passport|settlement = #Immigration
-solar|wind|nuclear|oil|gas|energy|power|electricity|renewable|fossil|carbon|emission|green|sustainable = #Energy
-law|legal|legislation|regulation|rights|court|judge|attorney|lawyer|solicitor|barrister|tribunal|statute = #Legal
-climate|environment|pollution|conservation|wildlife|ecosystem|biodiversity|recycling|deforestation|carbon = #Environment
-research|scientist|discovery|laboratory|experiment|physics|chemistry|biology|astronomy|genetics|innovation = #Science
-child|children|family|parent|baby|toddler|youth|teenager|adolescent|school|safeguarding|childcare = #Children
-fire|ambulance|rescue|emergency|disaster|earthquake|tsunami|hurricane|evacuation|paramedic|firefighter = #Emergency
-history|heritage|archaeology|museum|ancient|medieval|monument|archive|artifact|historical|restoration = #History
-travel|tourism|holiday|vacation|adventure|destination|backpacking|cruise|resort|sightseeing|passport = #Travel
-fashion|design|beauty|cosmetics|clothing|style|trend|model|designer|runway|brand|accessories|textile = #Fashion
-gaming|esports|video.game|console|PC|mobile.game|streamer|twitch|tournament|multiplayer|VR|indie = #Gaming
-mental.health|anxiety|depression|therapy|counselling|stress|mindfulness|wellbeing|suicide|self.harm = #MentalHealth
-human.rights|equality|diversity|inclusion|discrimination|racism|sexism|disability|accessibility|justice = #HumanRights
-space|NASA|rocket|satellite|astronaut|orbit|Mars|Moon|telescope|cosmos|galaxy|asteroid|ISS = #Space
-ocean|sea|marine|fishing|coast|beach|reef|whale|dolphin|shark|submarine|naval|maritime|port = #Marine
-bitcoin|crypto|blockchain|ethereum|NFT|DeFi|token|mining|wallet|exchange|decentralized = #Cryptocurrency
-anxiety|depression|therapy|counselling|stress|mindfulness|meditation|psychiatric|psychologist = #MentalHealth
-podcast|radio|broadcast|listener|episode|host|guest|streaming|audio|recording = #Podcast
-documentary|investigation|expose|journalism|reporter|undercover|whistleblower = #Investigation
+election|vote|voting|council|parliament|government|minister|MP|mayor|political|party|referendum|ballot|constituency|legislation|senator|congress|president|governor|primary|caucus|swing.state|gerrymandering|filibuster|bipartisan|lobby = #Politics
+goal|match|football|cricket|rugby|tennis|sport|player|team|league|championship|trophy|tournament|athlete|stadium|score|referee|coach|training|fitness|medal|podium|draft|transfer|season|playoff = #Sports
+rain|sun|forecast|temperature|storm|snow|cloud|wind|weather|flood|drought|heatwave|lightning|fog|ice|blizzard|tornado|hurricane|cyclone|monsoon|barometer|humidity|precipitation|front|advisory = #Weather
+app|software|AI|technology|digital|cyber|data|computer|internet|algorithm|robot|machine.learning|startup|coding|blockchain|cloud|5G|IoT|automation|API|database|server|frontend|backend|devops|microservice|kubernetes|docker = #Technology
+shop|business|economy|job|employment|market|company|startup|trade|profit|revenue|investment|stock|shares|GDP|entrepreneur|CEO|merger|acquisition|IPO|valuation|quarterly|earnings|supply.chain|inflation|recession|tariff = #Business
+hospital|doctor|NHS|health|medical|mental|wellbeing|treatment|patient|nurse|surgery|diagnosis|therapy|vaccine|pandemic|prescription|pharmaceutical|clinical|rehabilitation|specialist|oncology|cardiology|neurology|dermatology = #Health
+school|college|university|student|teacher|education|exam|grade|curriculum|lecturer|scholarship|degree|diploma|tutor|semester|syllabus|enrollment|campus|professor|PhD|research.paper|thesis|dissertation|STEM|EdTech = #Education
+community|local|neighbourhood|charity|volunteer|event|festival|council|resident|village|town|parish|congregation|grassroots|outreach|civic|neighborhood|block.party|fundraiser|donation|food.bank|shelter = #Community
+film|music|art|theatre|celebrity|tv|show|entertainment|concert|album|gallery|performance|actor|director|streaming|Netflix|Spotify|YouTube|TikTok|premiere|series|episode|soundtrack|Grammy|Oscar|Emmy|award = #Entertainment
+crime|murder|robbery|theft|fraud|arrest|police|court|prison|sentence|trial|judge|jury|detective|investigation|suspect|indictment|bail|parole|conviction|felony|misdemeanor|DNA.evidence|cold.case|cybercrime = #Crime
+church|mosque|temple|synagogue|faith|prayer|worship|religion|spiritual|clergy|sermon|scripture|holy|sacred|bishop|pastor|imam|rabbi|congregation|pilgrimage|evangelical|catholic|protestant|orthodox|interfaith = #Religion
+army|navy|air.force|military|soldier|defence|veteran|deployment|missile|weapon|war|conflict|peacekeeping|NATO|battalion|brigade|infantry|intelligence|surveillance|drone|cyber.warfare|special.forces|medal.of.honor = #Military
+train|bus|car|plane|road|railway|transport|traffic|motorway|highway|airport|station|commute|cycling|pedestrian|subway|metro|uber|lyft|taxi|freight|logistics|shipping|cargo|port|harbor|autonomous|self.driving = #Transport
+house|flat|apartment|property|rent|mortgage|housing|homeless|shelter|planning|development|estate|construction|renovation|zoning|affordable|landlord|tenant|eviction|condo|townhouse|suburb|urbanisation = #Housing
+food|recipe|cooking|restaurant|chef|ingredient|meal|diet|nutrition|organic|farming|agriculture|harvest|crop|vegan|vegetarian|plant.based|gluten.free|culinary|gastronomy|food.truck|farm.to.table|sustainable = #Food
+immigrant|refugee|asylum|border|visa|migration|deportation|citizenship|nationality|passport|settlement|integration|green.card|work.permit|naturalization|diaspora|resettlement = #Immigration
+solar|wind|nuclear|oil|gas|energy|power|electricity|renewable|fossil|carbon|emission|green|sustainable|hydrogen|battery|grid|blackout|brownout|turbine|photovoltaic|geothermal|biomass|hydroelectric = #Energy
+law|legal|legislation|regulation|rights|court|judge|attorney|lawyer|solicitor|barrister|tribunal|statute|amendment|constitution|precedent|jurisdiction|compliance|patent|copyright|trademark|IP|GDPR|privacy = #Legal
+climate|environment|pollution|conservation|wildlife|ecosystem|biodiversity|recycling|deforestation|carbon|sustainability|coral|reef|endangered|extinction|habitat|reforestation|permafrost|glacier|sea.level = #Environment
+research|scientist|discovery|laboratory|experiment|physics|chemistry|biology|astronomy|genetics|innovation|peer.review|hypothesis|genome|CRISPR|stem.cell|particle|quantum|superconductor|fusion|telescope = #Science
+child|children|family|parent|baby|toddler|youth|teenager|adolescent|school|safeguarding|childcare|adoption|foster|custody|pediatric|playground|daycare|babysitting|nanny = #Children
+fire|ambulance|rescue|emergency|disaster|earthquake|tsunami|hurricane|evacuation|paramedic|firefighter|first.responder|FEMA|relief|aid|shelter|search.and.rescue|alert|warning|siren = #Emergency
+history|heritage|archaeology|museum|ancient|medieval|monument|archive|artifact|historical|restoration|civilization|dynasty|empire|colonial|revolution|independence|civil.war|timeline|excavation = #History
+travel|tourism|holiday|vacation|adventure|destination|backpacking|cruise|resort|sightseeing|passport|itinerary|excursion|safari|solo.travel|road.trip|hostel|airbnb|all.inclusive|ecotourism = #Travel
+fashion|design|beauty|cosmetics|clothing|style|trend|model|designer|runway|brand|accessories|textile|couture|haute|streetwear|sustainable.fashion|vintage|luxury|athleisure = #Fashion
+gaming|esports|video.game|console|PC|mobile.game|streamer|twitch|tournament|multiplayer|VR|indie|RPG|FPS|MOBA|sandbox|open.world|battle.royale|steam|PlayStation|Xbox|Nintendo = #Gaming
+mental.health|anxiety|depression|therapy|counselling|stress|mindfulness|wellbeing|suicide|self.harm|PTSD|bipolar|OCD|eating.disorder|burnout|resilience|psychologist|psychiatrist|support.group = #MentalHealth
+human.rights|equality|diversity|inclusion|discrimination|racism|sexism|disability|accessibility|justice|civil.rights|social.justice|equity|representation|systemic|privilege|allyship|advocacy = #HumanRights
+space|NASA|SpaceX|rocket|satellite|astronaut|orbit|Mars|Moon|telescope|cosmos|galaxy|asteroid|ISS|launch|mission|planetary|rover|nebula|black.hole|dark.matter|constellation|spacewalk = #Space
+ocean|sea|marine|fishing|coast|beach|reef|whale|dolphin|shark|submarine|naval|maritime|port|coral|deep.sea|tidal|mangrove|aquaculture|overfishing|ocean.current|seabed = #Marine
+bitcoin|crypto|blockchain|ethereum|NFT|DeFi|token|mining|wallet|exchange|decentralized|stablecoin|altcoin|smart.contract|DAO|yield|staking|Web3|gas.fee|airdrop|whitepaper = #Cryptocurrency
+podcast|radio|broadcast|listener|episode|host|guest|streaming|audio|recording|interview|series|season|RSS|download|subscribe|microphone|studio|sound|narration|voiceover = #Podcast
+documentary|investigation|expose|journalism|reporter|undercover|whistleblower|source|leak|cover.up|scandal|corruption|accountability|transparency|freedom.of.press|censorship = #Investigation
+bank|banking|loan|mortgage|credit|debit|savings|interest|rate|APR|fintech|payment|transaction|ATM|branch|deposit|withdrawal|overdraft|credit.score|debt|refinance = #Finance
+startup|founder|venture|seed|series.A|pivot|scale|unicorn|accelerator|incubator|pitch|MVP|product.market.fit|runway|burn.rate|bootstrapping|co-founder|exit|valuation = #Startup
+marketing|advertising|brand|campaign|SEO|SEM|social.media|content|influencer|engagement|conversion|funnel|lead|CRM|analytics|ROI|KPI|A/B.test|viral|reach|impression = #Marketing
+AI|artificial.intelligence|GPT|LLM|neural.network|deep.learning|NLP|computer.vision|generative|foundation.model|transformer|training|inference|fine.tuning|prompt|AGI|alignment|bias|ethics = #AI
+car|EV|electric.vehicle|Tesla|autonomous|self.driving|hybrid|SUV|sedan|truck|motorcycle|recall|engine|horsepower|torque|fuel|emission|dealership|lease|used.car = #Automotive
+real.estate|property|house|condo|apartment|commercial|residential|REITs|mortgage|appraisal|listing|broker|agent|open.house|closing|escrow|HOA|zoning|land.use = #RealEstate
