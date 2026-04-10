@@ -13,6 +13,8 @@ from app.services.callback import callback_service
 from app.services.mixer import mixer
 
 MAX_RETRIES = 3
+FETCH_RETRIES = 5
+FETCH_BASE_DELAY = 3
 
 
 class PipelineWorker:
@@ -27,6 +29,7 @@ class PipelineWorker:
     async def start(self):
         self._running = True
         self._recover_jobs()
+        asyncio.create_task(self._retry_undelivered_callbacks())
         asyncio.create_task(self._loop())
 
     async def stop(self):
@@ -52,8 +55,53 @@ class PipelineWorker:
             db.commit()
             for job in jobs:
                 self._queue.put_nowait(job.id)
+            if jobs:
+                print(f"[WORKER] Recovered {len(jobs)} interrupted jobs")
         finally:
             db.close()
+
+    async def _retry_undelivered_callbacks(self):
+        await asyncio.sleep(10)
+        db = SessionLocal()
+        try:
+            jobs = (
+                db.query(AiJob)
+                .filter(
+                    AiJob.status.in_(["completed", "failed"]),
+                    AiJob.callback_url.isnot(None),
+                    AiJob.callback_delivered == False,
+                )
+                .all()
+            )
+            if not jobs:
+                return
+            print(f"[WORKER] Retrying {len(jobs)} undelivered callbacks")
+            for job in jobs:
+                payload = self._build_result_payload(job)
+                delivered = await callback_service.send(job.callback_url, payload)
+                if delivered:
+                    job.callback_delivered = True
+                    db.commit()
+                    print(f"[WORKER] Delivered callback for job {job.id}")
+                else:
+                    print(f"[WORKER] Still unable to deliver callback for job {job.id}")
+        finally:
+            db.close()
+
+    def _build_result_payload(self, job: AiJob) -> dict:
+        if job.status == "completed":
+            return {
+                "job_id": job.id,
+                "job_type": job.job_type or "pipeline",
+                "status": "completed",
+                "result": job.result_json or {},
+            }
+        return {
+            "job_id": job.id,
+            "job_type": job.job_type or "pipeline",
+            "status": "failed",
+            "error": job.error or "unknown",
+        }
 
     async def _loop(self):
         while self._running:
@@ -64,6 +112,20 @@ class PipelineWorker:
                 continue
             except Exception:
                 await asyncio.sleep(1)
+
+    async def _fetch_recording_with_retry(self, recording_id: str):
+        for attempt in range(FETCH_RETRIES):
+            try:
+                return await fetch_recording(recording_id)
+            except Exception as e:
+                if attempt == FETCH_RETRIES - 1:
+                    raise
+                delay = FETCH_BASE_DELAY * (2 ** attempt)
+                print(
+                    f"[WORKER] Backend unreachable fetching recording {recording_id}, "
+                    f"retry {attempt + 1}/{FETCH_RETRIES} in {delay}s: {e}"
+                )
+                await asyncio.sleep(delay)
 
     async def _process(self, job_id: str):
         await gpu.acquire()
@@ -79,7 +141,7 @@ class PipelineWorker:
             job.started_at = datetime.utcnow()
             db.commit()
 
-            recording = await fetch_recording(job.recording_id)
+            recording = await self._fetch_recording_with_retry(job.recording_id)
             platform = await fetch_platform_settings()
             tracks = recording.tracks
             active_tracks = [t for t in tracks if not t.is_muted]
@@ -211,7 +273,9 @@ class PipelineWorker:
             db.commit()
 
             if job.callback_url:
-                await callback_service.send(job.callback_url, result_payload)
+                delivered = await callback_service.send(job.callback_url, result_payload)
+                job.callback_delivered = delivered
+                db.commit()
 
             db.close()
 
@@ -234,12 +298,15 @@ class PipelineWorker:
                         job.completed_at = datetime.utcnow()
                         db.commit()
                         if job.callback_url:
-                            await callback_service.send(job.callback_url, {
+                            error_payload = {
                                 "job_id": job.id,
                                 "job_type": "pipeline",
                                 "status": "failed",
                                 "error": str(e)[:500],
-                            })
+                            }
+                            delivered = await callback_service.send(job.callback_url, error_payload)
+                            job.callback_delivered = delivered
+                            db.commit()
                         db.close()
             except Exception:
                 pass

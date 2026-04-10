@@ -11,6 +11,7 @@ from app.models.database import SessionLocal, AiJob
 from app.core.downloader import download_audio, cleanup_temp
 from app.realtime.broadcaster import manager, make_sse_response
 from app.services.registry import worker, orchestrator, synthesizer
+from app.services.callback import callback_service
 
 router = APIRouter(tags=["Pipeline"])
 
@@ -135,9 +136,53 @@ async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
             "recording_id": job.recording_id,
             "result": job.result_json,
             "error": job.error,
+            "callback_delivered": job.callback_delivered,
             "created_at": str(job.created_at),
             "completed_at": str(job.completed_at) if job.completed_at else None,
         }
+    finally:
+        db.close()
+
+
+@router.post(
+    "/api/v1/jobs/{job_id}/retry-callback",
+    tags=["Jobs"],
+    summary="Retry callback delivery",
+    description="Re-sends the job result to the callback URL. Use when the backend missed the original delivery.",
+)
+async def retry_callback(job_id: str, _auth: bool = Depends(verify_service_key)):
+    db = SessionLocal()
+    try:
+        job = db.query(AiJob).filter(AiJob.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.status not in ("completed", "failed"):
+            raise HTTPException(status_code=409, detail="Job still processing")
+        if not job.callback_url:
+            raise HTTPException(status_code=400, detail="No callback URL configured")
+
+        if job.status == "completed":
+            payload = {
+                "job_id": job.id,
+                "job_type": job.job_type or "pipeline",
+                "status": "completed",
+                "result": job.result_json or {},
+            }
+        else:
+            payload = {
+                "job_id": job.id,
+                "job_type": job.job_type or "pipeline",
+                "status": "failed",
+                "error": job.error or "unknown",
+            }
+
+        delivered = await callback_service.send(job.callback_url, payload)
+        job.callback_delivered = delivered
+        db.commit()
+
+        if delivered:
+            return {"status": "delivered", "job_id": job.id}
+        raise HTTPException(status_code=502, detail="Callback delivery failed")
     finally:
         db.close()
 
@@ -150,3 +195,4 @@ async def websocket_stream(ws: WebSocket, job_id: str):
             await ws.receive_text()
     except WebSocketDisconnect:
         manager.disconnect_ws(job_id, ws)
+

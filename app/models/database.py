@@ -32,6 +32,7 @@ class AiJob(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    callback_delivered = Column(Boolean, default=False)
 
 
 engine = create_engine(f"sqlite:///{settings.SQLITE_DB_PATH}", echo=False)
