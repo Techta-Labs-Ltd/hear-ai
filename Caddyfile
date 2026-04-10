@@ -1,0 +1,13 @@
+# ─── Hear AI – Auto-SSL Reverse Proxy ─────────────────────────
+#
+# Replace "ai.hear.surf" with your actual domain.
+# Caddy will automatically:
+#   - Obtain a Let's Encrypt certificate on first start
+#   - Renew it ~30 days before expiry (no cron, no manual steps)
+#   - Redirect HTTP → HTTPS
+#   - Terminate TLS and proxy to the app container
+#
+
+ai.hear.surf {
+	reverse_proxy hear-ai:8000
+}

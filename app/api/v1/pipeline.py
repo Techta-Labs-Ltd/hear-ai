@@ -15,7 +15,13 @@ from app.services.registry import worker, orchestrator, synthesizer
 router = APIRouter(tags=["Pipeline"])
 
 
-@router.post("/api/v1/process", response_model=JobAccepted, status_code=202)
+@router.post(
+    "/api/v1/process",
+    response_model=JobAccepted,
+    status_code=202,
+    summary="Submit a full pipeline job",
+    description="Enqueues an audio file for the full pipeline: enhancement → transcription → categorization → moderation. Returns immediately with a job ID.",
+)
 async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_service_key)):
     db = SessionLocal()
     try:
@@ -41,7 +47,12 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_s
     return JobAccepted(job_id=body.job_id)
 
 
-@router.post("/api/v1/process-realtime", status_code=202)
+@router.post(
+    "/api/v1/process-realtime",
+    status_code=202,
+    summary="Process audio with real-time streaming",
+    description="Uploads an audio file and processes it in the background, streaming progress via SSE and WebSocket.",
+)
 async def process_realtime(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -72,7 +83,11 @@ async def process_realtime(
     }
 
 
-@router.post("/api/v1/reconstruct")
+@router.post(
+    "/api/v1/reconstruct",
+    summary="Reconstruct an audio segment",
+    description="Re-synthesises a segment of audio with new text using accent-aware Edge-TTS, returning the replacement audio URL.",
+)
 async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Depends(verify_service_key)):
     tmp_path = await download_audio(body.audio_url)
     try:
@@ -92,12 +107,22 @@ async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Depends(ve
         cleanup_temp(tmp_path)
 
 
-@router.get("/api/v1/events/{job_id}", tags=["Realtime"])
+@router.get(
+    "/api/v1/events/{job_id}",
+    tags=["Realtime"],
+    summary="Subscribe to job events (SSE)",
+    description="Opens a Server-Sent Events stream for real-time pipeline progress updates.",
+)
 async def sse_stream(job_id: str, _auth: bool = Depends(verify_service_key)):
     return make_sse_response(job_id)
 
 
-@router.get("/api/v1/jobs/{job_id}", tags=["Jobs"])
+@router.get(
+    "/api/v1/jobs/{job_id}",
+    tags=["Jobs"],
+    summary="Get job status",
+    description="Retrieves the current status and result of a processing job by its ID.",
+)
 async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
     db = SessionLocal()
     try:

@@ -7,7 +7,11 @@ from app.services.registry import categorizer
 router = APIRouter(prefix="/api/v1", tags=["Categorization"])
 
 
-@router.post("/categorize")
+@router.post(
+    "/categorize",
+    summary="Categorize text content",
+    description="Analyzes transcript text to assign relevant topic tags using the LLM categorizer. Supports custom tag dictionaries.",
+)
 async def categorize(body: CategorizeRequest, _auth: bool = Depends(verify_service_key)):
     result = await categorizer.categorize(
         transcript=body.text,

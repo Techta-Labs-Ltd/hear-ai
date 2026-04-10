@@ -8,7 +8,12 @@ from app.services.registry import transcriber, enhancer, categorizer, moderator
 router = APIRouter(tags=["System"])
 
 
-@router.get("/health", response_model=HealthResponse)
+@router.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Service health check",
+    description="Returns the current health status including GPU availability, loaded ML models, and job queue depth.",
+)
 async def health():
     models_loaded = []
     if transcriber.is_loaded:

@@ -1,0 +1,41 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - hear-ai
+    networks:
+      - hear-net
+
+  hear-ai:
+    build: .
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ml_models:/opt/ml/models
+    expose:
+      - "8000"   
+    networks:
+      - hear-net
+
+volumes:
+  caddy_data:
+  caddy_config:
+  ml_models:
+
+networks:
+  hear-net:
+    driver: bridge

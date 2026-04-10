@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 
+import uvicorn
 import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,10 +55,44 @@ async def lifespan(application: FastAPI):
     await worker.stop()
 
 
+OPENAPI_DESCRIPTION = """
+## Hear AI – Audio Intelligence Service
+
+Hear AI provides a complete audio processing pipeline including:
+
+- **Enhancement** – vocal isolation & noise removal via Demucs
+- **Transcription** – speech-to-text with Faster-Whisper (large-v3)
+- **Categorization** – LLM-powered topic tagging
+- **Moderation** – content safety analysis
+- **Reconstruction** – accent-aware speech synthesis (Edge-TTS)
+
+### Authentication
+All endpoints (except `/health`) require a service key via **either**:
+- `X-Service-Key` header
+- `Authorization: Bearer <key>` header
+"""
+
+TAGS_METADATA = [
+    {"name": "System", "description": "Health checks and system status"},
+    {"name": "Pipeline", "description": "Full audio processing pipeline (enhance → transcribe → categorize → moderate)"},
+    {"name": "Transcription", "description": "Standalone speech-to-text jobs"},
+    {"name": "Enhancement", "description": "Standalone audio enhancement / vocal isolation jobs"},
+    {"name": "Categorization", "description": "Text-based topic categorization"},
+    {"name": "Moderation", "description": "Content safety / moderation analysis"},
+    {"name": "Realtime", "description": "SSE and WebSocket streaming endpoints"},
+    {"name": "Jobs", "description": "Job status polling"},
+]
+
 app = FastAPI(
     title="Hear AI Service",
     version="2.0.0",
+    description=OPENAPI_DESCRIPTION,
     lifespan=lifespan,
+    openapi_tags=TAGS_METADATA,
+    docs_url="/docs" if settings.ENABLE_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
+    contact={"name": "Techta Labs", "url": "https://techta.co"},
 )
 
 app.add_middleware(
@@ -81,5 +116,4 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(api_router)
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, workers=1, reload=False)

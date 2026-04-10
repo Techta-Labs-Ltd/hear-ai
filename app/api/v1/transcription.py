@@ -10,7 +10,13 @@ from app.services.registry import worker
 router = APIRouter(prefix="/api/v1", tags=["Transcription"])
 
 
-@router.post("/transcribe", response_model=JobAccepted, status_code=202)
+@router.post(
+    "/transcribe",
+    response_model=JobAccepted,
+    status_code=202,
+    summary="Submit a transcription job",
+    description="Enqueues an audio file for standalone speech-to-text transcription using Faster-Whisper. Enhancement is skipped.",
+)
 async def transcribe(body: TranscribeRequest, _auth: bool = Depends(verify_service_key)):
     db = SessionLocal()
     try:

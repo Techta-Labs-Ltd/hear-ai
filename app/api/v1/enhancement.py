@@ -10,7 +10,13 @@ from app.services.registry import worker
 router = APIRouter(prefix="/api/v1", tags=["Enhancement"])
 
 
-@router.post("/enhance", response_model=JobAccepted, status_code=202)
+@router.post(
+    "/enhance",
+    response_model=JobAccepted,
+    status_code=202,
+    summary="Submit an enhancement job",
+    description="Enqueues an audio file for standalone vocal isolation and noise removal using Demucs. Transcription is skipped.",
+)
 async def enhance(body: EnhanceRequest, _auth: bool = Depends(verify_service_key)):
     db = SessionLocal()
     try:
