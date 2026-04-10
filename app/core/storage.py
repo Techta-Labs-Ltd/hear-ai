@@ -1,0 +1,39 @@
+import boto3
+
+from app.config import settings
+
+
+class B2Storage:
+    def __init__(self):
+        self._client = boto3.client(
+            "s3",
+            endpoint_url=settings.B2_ENDPOINT_URL,
+            aws_access_key_id=settings.B2_KEY_ID,
+            aws_secret_access_key=settings.B2_APPLICATION_KEY,
+        )
+
+    def upload_file(self, local_path: str, remote_key: str) -> str:
+        self._client.upload_file(local_path, settings.B2_BUCKET_NAME, remote_key)
+        return f"{settings.B2_ENDPOINT_URL}/{settings.B2_BUCKET_NAME}/{remote_key}"
+
+    def upload_bytes(self, data: bytes, remote_key: str, content_type: str = "audio/wav") -> str:
+        self._client.put_object(
+            Bucket=settings.B2_BUCKET_NAME,
+            Key=remote_key,
+            Body=data,
+            ContentType=content_type,
+        )
+        return f"{settings.B2_ENDPOINT_URL}/{settings.B2_BUCKET_NAME}/{remote_key}"
+
+    def download_file(self, remote_key: str, local_path: str):
+        self._client.download_file(settings.B2_BUCKET_NAME, remote_key, local_path)
+
+    def generate_url(self, key: str, expires_in: int = 3600) -> str:
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.B2_BUCKET_NAME, "Key": key},
+            ExpiresIn=expires_in,
+        )
+
+
+storage = B2Storage()

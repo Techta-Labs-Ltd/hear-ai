@@ -1,0 +1,264 @@
+[CATEGORIES]
+News
+Entertainment
+Sports
+Weather
+Community
+Technology
+Business
+Finance
+Health
+Education
+Culture
+Science
+Environment
+Politics
+Crime
+Religion
+Military
+Transport
+Housing
+Food
+Agriculture
+Media
+Charity
+Music
+Comedy
+Drama
+History
+Travel
+Fashion
+Gaming
+Energy
+Legal
+Immigration
+Lifestyle
+Parenting
+Accessibility
+Mental Health
+Human Rights
+Space
+Marine
+Wildlife
+Automotive
+Real Estate
+Retail
+Telecommunications
+Startups
+Cryptocurrency
+Artificial Intelligence
+Cybersecurity
+Sustainability
+Volunteering
+Youth
+Seniors
+Disability
+Emergency Services
+Infrastructure
+Water
+Waste Management
+Public Health
+Social Media
+Opinion
+Investigation
+Documentary
+Podcast
+
+[TAGS]
+#BreakingNews
+#LocalNews
+#WorldNews
+#Politics
+#Election
+#Government
+#Parliament
+#Council
+#Crime
+#Justice
+#Court
+#Police
+#Technology
+#AI
+#Cyber
+#Digital
+#Innovation
+#Community
+#Charity
+#Volunteer
+#Interview
+#Events
+#Festival
+#Sports
+#Football
+#Cricket
+#Rugby
+#Tennis
+#Athletics
+#Entertainment
+#Music
+#Film
+#Theatre
+#Television
+#Celebrity
+#Weather
+#Storm
+#Flooding
+#Heatwave
+#Business
+#Economy
+#Markets
+#StartUp
+#Employment
+#Health
+#NHS
+#MentalHealth
+#Wellbeing
+#Medical
+#Education
+#Schools
+#University
+#Students
+#Teachers
+#Culture
+#Arts
+#Heritage
+#Literature
+#Environment
+#Climate
+#Wildlife
+#Conservation
+#Pollution
+#Science
+#Research
+#Space
+#Discovery
+#Religion
+#Faith
+#Church
+#Mosque
+#Synagogue
+#Military
+#Defence
+#Veterans
+#Transport
+#Railways
+#Roads
+#Aviation
+#Shipping
+#Housing
+#Property
+#Homeless
+#Planning
+#Food
+#Farming
+#Agriculture
+#Cooking
+#Immigration
+#Asylum
+#Borders
+#Refugees
+#Energy
+#Renewable
+#Oil
+#Gas
+#Nuclear
+#Legal
+#Law
+#Legislation
+#Rights
+#HumanRights
+#Equality
+#Diversity
+#Disability
+#Accessibility
+#Children
+#Family
+#Parenting
+#Youth
+#Seniors
+#Elderly
+#Emergency
+#Fire
+#Ambulance
+#Rescue
+#History
+#Archaeology
+#Travel
+#Tourism
+#Adventure
+#Fashion
+#Design
+#Beauty
+#Gaming
+#Esports
+#Comedy
+#Satire
+#Drama
+#Documentary
+#Podcast
+#Radio
+#Opinion
+#Editorial
+#Investigation
+#Data
+#Statistics
+#Infrastructure
+#Construction
+#Development
+#Water
+#Sanitation
+#PublicHealth
+#Pandemic
+#Vaccination
+#SocialMedia
+#Cryptocurrency
+#Blockchain
+#Sustainability
+#GreenEnergy
+#Recycling
+#Marine
+#Fishing
+#Automotive
+#ElectricVehicles
+#RealEstate
+#Retail
+#Shopping
+#Telecoms
+#Internet
+#Philanthropy
+
+[KEYWORDS]
+election|vote|voting|council|parliament|government|minister|MP|mayor|political|party|referendum|ballot|constituency = #Politics
+goal|match|football|cricket|rugby|tennis|sport|player|team|league|championship|trophy|tournament|athlete|stadium = #Sports
+rain|sun|forecast|temperature|storm|snow|cloud|wind|weather|flood|drought|heatwave|lightning|fog|ice = #Weather
+app|software|AI|technology|digital|cyber|data|computer|internet|algorithm|robot|machine.learning|startup|coding = #Technology
+shop|business|economy|job|employment|market|company|startup|trade|profit|revenue|investment|stock|shares|GDP = #Business
+hospital|doctor|NHS|health|medical|mental|wellbeing|treatment|patient|nurse|surgery|diagnosis|therapy|vaccine|pandemic = #Health
+school|college|university|student|teacher|education|exam|grade|curriculum|lecturer|scholarship|degree|diploma|tutor = #Education
+community|local|neighbourhood|charity|volunteer|event|festival|council|resident|village|town|parish|congregation = #Community
+film|music|art|theatre|celebrity|tv|show|entertainment|concert|album|gallery|performance|actor|director|streaming = #Entertainment
+crime|murder|robbery|theft|fraud|arrest|police|court|prison|sentence|trial|judge|jury|detective|investigation = #Crime
+church|mosque|temple|synagogue|faith|prayer|worship|religion|spiritual|clergy|sermon|scripture|holy|sacred = #Religion
+army|navy|air.force|military|soldier|defence|veteran|deployment|missile|weapon|war|conflict|peacekeeping = #Military
+train|bus|car|plane|road|railway|transport|traffic|motorway|highway|airport|station|commute|cycling|pedestrian = #Transport
+house|flat|apartment|property|rent|mortgage|housing|homeless|shelter|planning|development|estate|construction = #Housing
+food|recipe|cooking|restaurant|chef|ingredient|meal|diet|nutrition|organic|farming|agriculture|harvest|crop = #Food
+immigrant|refugee|asylum|border|visa|migration|deportation|citizenship|nationality|passport|settlement = #Immigration
+solar|wind|nuclear|oil|gas|energy|power|electricity|renewable|fossil|carbon|emission|green|sustainable = #Energy
+law|legal|legislation|regulation|rights|court|judge|attorney|lawyer|solicitor|barrister|tribunal|statute = #Legal
+climate|environment|pollution|conservation|wildlife|ecosystem|biodiversity|recycling|deforestation|carbon = #Environment
+research|scientist|discovery|laboratory|experiment|physics|chemistry|biology|astronomy|genetics|innovation = #Science
+child|children|family|parent|baby|toddler|youth|teenager|adolescent|school|safeguarding|childcare = #Children
+fire|ambulance|rescue|emergency|disaster|earthquake|tsunami|hurricane|evacuation|paramedic|firefighter = #Emergency
+history|heritage|archaeology|museum|ancient|medieval|monument|archive|artifact|historical|restoration = #History
+travel|tourism|holiday|vacation|adventure|destination|backpacking|cruise|resort|sightseeing|passport = #Travel
+fashion|design|beauty|cosmetics|clothing|style|trend|model|designer|runway|brand|accessories|textile = #Fashion
+gaming|esports|video.game|console|PC|mobile.game|streamer|twitch|tournament|multiplayer|VR|indie = #Gaming
+mental.health|anxiety|depression|therapy|counselling|stress|mindfulness|wellbeing|suicide|self.harm = #MentalHealth
+human.rights|equality|diversity|inclusion|discrimination|racism|sexism|disability|accessibility|justice = #HumanRights
+space|NASA|rocket|satellite|astronaut|orbit|Mars|Moon|telescope|cosmos|galaxy|asteroid|ISS = #Space
+ocean|sea|marine|fishing|coast|beach|reef|whale|dolphin|shark|submarine|naval|maritime|port = #Marine
+bitcoin|crypto|blockchain|ethereum|NFT|DeFi|token|mining|wallet|exchange|decentralized = #Cryptocurrency
+anxiety|depression|therapy|counselling|stress|mindfulness|meditation|psychiatric|psychologist = #MentalHealth
+podcast|radio|broadcast|listener|episode|host|guest|streaming|audio|recording = #Podcast
+documentary|investigation|expose|journalism|reporter|undercover|whistleblower = #Investigation
