@@ -28,13 +28,14 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_s
     try:
         job = AiJob(
             id=body.job_id,
-            job_type="pipeline",
+            job_type=body.job_type,
             recording_id=body.recording_id,
             status="pending",
             callback_url=body.callback_url,
             skip_enhancement=body.skip_enhancement,
             skip_transcription=body.skip_transcription,
             existing_transcript=body.existing_transcript,
+            max_tags=body.max_tags,
             created_at=datetime.utcnow(),
         )
         db.add(job)
@@ -131,6 +132,7 @@ async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
             raise HTTPException(status_code=404, detail="Job not found")
         return {
             "job_id": job.id,
+            "job_type": job.job_type or "pipeline",
             "status": job.status,
             "recording_id": job.recording_id,
             "result": job.result_json,
@@ -139,6 +141,29 @@ async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
             "created_at": str(job.created_at),
             "completed_at": str(job.completed_at) if job.completed_at else None,
         }
+    finally:
+        db.close()
+
+
+@router.post(
+    "/api/v1/jobs/{job_id}/cancel",
+    tags=["Jobs"],
+    status_code=200,
+    summary="Cancel a job",
+    description="Marks a pending or in-progress job as cancelled. No-op if the job is already completed or failed.",
+)
+async def cancel_job(job_id: str, _auth: bool = Depends(verify_service_key)):
+    db = SessionLocal()
+    try:
+        job = db.query(AiJob).filter(AiJob.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.status in ("completed", "failed", "cancelled"):
+            return {"job_id": job_id, "status": job.status, "cancelled": False}
+        job.status = "cancelled"
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        return {"job_id": job_id, "status": "cancelled", "cancelled": True}
     finally:
         db.close()
 
@@ -166,12 +191,14 @@ async def retry_callback(job_id: str, _auth: bool = Depends(verify_service_key))
                 "job_type": job.job_type or "pipeline",
                 "status": "completed",
                 "result": job.result_json or {},
+                "error": None,
             }
         else:
             payload = {
                 "job_id": job.id,
                 "job_type": job.job_type or "pipeline",
                 "status": "failed",
+                "result": None,
                 "error": job.error or "unknown",
             }
 

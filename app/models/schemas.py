@@ -18,6 +18,7 @@ class PipelineRequest(BaseModel):
     recording_id: str
     job_id: str
     callback_url: str
+    job_type: str = "pipeline"
     skip_enhancement: bool = False
     skip_transcription: bool = False
     existing_transcript: Optional[str] = None

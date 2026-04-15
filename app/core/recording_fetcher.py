@@ -14,6 +14,9 @@ class TrackData:
     is_muted: bool
     sort_order: int
     duration: float
+    is_enhanced: bool = False
+    has_transcription: bool = False
+    status: str = "pending"
 
 
 @dataclass
@@ -22,10 +25,12 @@ class RecordingData:
     title: str
     audio_url: str
     tracks: list[TrackData]
+    flag: str | None = None
+    category: str | None = None
 
 
 async def fetch_recording(recording_id: str) -> RecordingData:
-    url = f"{settings.HEAR_BACKEND_URL}/api/internal/recordings/{recording_id}"
+    url = f"{settings.HEAR_BACKEND_URL}/api/v1/internal/recordings/{recording_id}"
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(
             url,
@@ -44,6 +49,9 @@ async def fetch_recording(recording_id: str) -> RecordingData:
             is_muted=t.get("is_muted", False),
             sort_order=t.get("sort_order", 0),
             duration=t.get("duration", 0),
+            is_enhanced=t.get("is_enhanced", False),
+            has_transcription=t.get("has_transcription", False),
+            status=t.get("status", "pending"),
         ))
 
     tracks.sort(key=lambda t: t.sort_order)
@@ -53,4 +61,6 @@ async def fetch_recording(recording_id: str) -> RecordingData:
         title=data.get("title", ""),
         audio_url=data.get("audio_url", ""),
         tracks=tracks,
+        flag=data.get("flag"),
+        category=data.get("category"),
     )

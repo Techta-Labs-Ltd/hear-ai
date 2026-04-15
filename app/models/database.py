@@ -28,6 +28,7 @@ class AiJob(Base):
     skip_enhancement = Column(Boolean, default=False)
     skip_transcription = Column(Boolean, default=False)
     existing_transcript = Column(String, nullable=True)
+    max_tags = Column(Integer, default=8)
     custom_tags = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
@@ -41,6 +42,7 @@ SessionLocal = sessionmaker(bind=engine)
 
 MIGRATIONS = [
     ("ai_jobs", "callback_delivered", "BOOLEAN DEFAULT 0"),
+    ("ai_jobs", "max_tags", "INTEGER DEFAULT 8"),
 ]
 
 

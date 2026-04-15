@@ -22,7 +22,7 @@ async def enhance(body: EnhanceRequest, _auth: bool = Depends(verify_service_key
     try:
         job = AiJob(
             id=body.job_id,
-            job_type="enhancement",
+            job_type="magic_clean",
             recording_id=body.recording_id,
             status="pending",
             input_url=body.audio_url,

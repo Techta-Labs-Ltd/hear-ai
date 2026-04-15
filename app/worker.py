@@ -95,11 +95,13 @@ class PipelineWorker:
                 "job_type": job.job_type or "pipeline",
                 "status": "completed",
                 "result": job.result_json or {},
+                "error": None,
             }
         return {
             "job_id": job.id,
             "job_type": job.job_type or "pipeline",
             "status": "failed",
+            "result": None,
             "error": job.error or "unknown",
         }
 
@@ -162,7 +164,13 @@ class PipelineWorker:
                 }
                 track_paths.append(track_entry)
 
-                if not job.skip_enhancement:
+                should_enhance = (
+                    not job.skip_enhancement
+                    and not track.is_enhanced
+                    and job.job_type in ("magic_clean", "pipeline")
+                )
+
+                if should_enhance:
                     job.status = "enhancing"
                     db.commit()
                     result = await self._enhancer.enhance(
@@ -200,23 +208,33 @@ class PipelineWorker:
             per_track_transcriptions = {}
             combined_transcription = None
 
-            if not job.skip_transcription and not job.existing_transcript:
-                job.status = "transcribing"
-                db.commit()
+            skip_transcription_for_type = job.job_type == "magic_clean"
 
-                for tp in (enhanced_track_paths or track_paths):
-                    with open(tp["path"], "rb") as f:
-                        audio_bytes = f.read()
-                    t_result = await self._transcriber.transcribe(audio_bytes)
-                    per_track_transcriptions[tp["track_id"]] = t_result
+            if not job.skip_transcription and not skip_transcription_for_type:
+                tracks_to_transcribe = (
+                    [tp for tp in (enhanced_track_paths or track_paths)
+                     if not next((t for t in active_tracks if t.track_id == tp["track_id"]), None).has_transcription]
+                    if job.job_type == "rebuild"
+                    else (enhanced_track_paths or track_paths)
+                )
 
-                if mixed_path and len(active_tracks) > 1:
-                    with open(mixed_path, "rb") as f:
-                        mixed_bytes = f.read()
-                    combined_transcription = await self._transcriber.transcribe(mixed_bytes)
-                elif per_track_transcriptions:
-                    first_key = list(per_track_transcriptions.keys())[0]
-                    combined_transcription = per_track_transcriptions[first_key]
+                if tracks_to_transcribe and not job.existing_transcript:
+                    job.status = "transcribing"
+                    db.commit()
+
+                    for tp in tracks_to_transcribe:
+                        with open(tp["path"], "rb") as f:
+                            audio_bytes = f.read()
+                        t_result = await self._transcriber.transcribe(audio_bytes)
+                        per_track_transcriptions[tp["track_id"]] = t_result
+
+                    if mixed_path and len(active_tracks) > 1:
+                        with open(mixed_path, "rb") as f:
+                            mixed_bytes = f.read()
+                        combined_transcription = await self._transcriber.transcribe(mixed_bytes)
+                    elif per_track_transcriptions:
+                        first_key = list(per_track_transcriptions.keys())[0]
+                        combined_transcription = per_track_transcriptions[first_key]
 
             elif job.existing_transcript:
                 combined_transcription = {
@@ -231,14 +249,16 @@ class PipelineWorker:
             transcript_text = combined_transcription.get("transcript", "") if combined_transcription else ""
             segments = combined_transcription.get("segments", []) if combined_transcription else []
 
+            max_tags = job.max_tags if job.max_tags else 8
             categorization_data = None
-            if transcript_text:
+            if transcript_text and job.job_type in ("tagging", "rebuild", "pipeline"):
                 job.status = "categorizing"
                 db.commit()
                 categorization_data = await self._categorizer.categorize(
                     transcript=transcript_text,
                     segments=segments,
                     custom_tags=platform.auto_tag_keywords,
+                    max_tags=max_tags,
                 )
 
             moderation_data = None
@@ -270,7 +290,7 @@ class PipelineWorker:
 
             result_payload = {
                 "job_id": job.id,
-                "job_type": "pipeline",
+                "job_type": job.job_type or "pipeline",
                 "status": "completed",
                 "result": {
                     "recording_id": job.recording_id,
@@ -278,6 +298,7 @@ class PipelineWorker:
                     "master": master_data,
                     "per_track_transcriptions": per_track_transcriptions,
                 },
+                "error": None,
             }
 
             if combined_transcription:
@@ -320,8 +341,9 @@ class PipelineWorker:
                         if job.callback_url:
                             error_payload = {
                                 "job_id": job.id,
-                                "job_type": "pipeline",
+                                "job_type": job.job_type or "pipeline",
                                 "status": "failed",
+                                "result": None,
                                 "error": str(e)[:500],
                             }
                             delivered = await callback_service.send(job.callback_url, error_payload)
