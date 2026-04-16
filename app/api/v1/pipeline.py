@@ -192,7 +192,7 @@ async def cancel_job(job_id: str, _auth: bool = Security(verify_service_key)):
     summary="Retry callback delivery",
     description="Re-sends the job result to the callback URL. Use when the backend missed the original delivery.",
 )
-async def retry_callback(job_id: str, _auth: bool = Depends(verify_service_key)):
+async def retry_callback(job_id: str, _auth: bool = Security(verify_service_key)):
     db = SessionLocal()
     try:
         job = db.query(AiJob).filter(AiJob.id == job_id).first()
