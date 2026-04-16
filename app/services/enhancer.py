@@ -38,7 +38,7 @@ class AudioEnhancer:
     DNS_SR    = 16_000
 
     # Loudness targets
-    TARGET_LUFS      = -14.0   # Spotify / YouTube standard (louder, more commercial)
+    TARGET_LUFS      = -12.0   # Loud, commercial-ready (Spotify -14, YouTube -14, broadcast -23)
     TRUE_PEAK_DBTP   = -1.0    # Broadcast ceiling
 
     # EQ
@@ -85,7 +85,9 @@ class AudioEnhancer:
         print("[ENHANCER] Demucs loaded")
 
         self._dfn_model, self._dfn_state, _ = init_df()
-        print("[ENHANCER] DeepFilterNet loaded")
+        self._dfn_model = self._dfn_model.to(self._device)
+        self._dfn_model.eval()
+        print(f"[ENHANCER] DeepFilterNet loaded on {self._device}")
 
         self._dns = dns_pretrained.dns64()
         self._dns.to(self._device)
@@ -165,15 +167,17 @@ class AudioEnhancer:
             return w
 
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
-        """DeepFilterNet SOTA speech enhancement @ 48 kHz."""
+        """DeepFilterNet SOTA speech enhancement @ 48 kHz on GPU."""
         try:
-            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR)
-            # df_enhance expects [channels, samples] — keep channel dim, don't squeeze to 1D
+            print("[ENHANCER] DeepFilterNet running...")
+            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR).to(self._device)
             clean = df_enhance(self._dfn_model, self._dfn_state, w_48k)
             if isinstance(clean, np.ndarray):
                 clean = torch.from_numpy(clean)
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
+            clean = clean.cpu()
+            print("[ENHANCER] DeepFilterNet done")
             return self._resample(clean, self.DFN_SR, self.TARGET_SR)
         except Exception as e:
             print(f"[ENHANCER] DeepFilterNet error: {e} — falling back to DNS")
@@ -339,23 +343,36 @@ class AudioEnhancer:
     def _normalise_lufs(self, w: torch.Tensor) -> torch.Tensor:
         """
         ITU-R BS.1770 integrated loudness normalisation via pyloudnorm.
-        More accurate than RMS — matches platform requirements exactly.
+        Falls back to peak-based normalisation if loudness measurement fails
+        (can happen when noise gate creates many silent frames that confuse
+        the ITU-R gating algorithm).
         """
         try:
             meter    = pyln.Meter(self.TARGET_SR)
             audio_np = w.squeeze(0).numpy().astype(np.float64)
             loudness = meter.integrated_loudness(audio_np)
+            print(f"[ENHANCER] Measured loudness: {loudness:.1f} LUFS → target {self.TARGET_LUFS} LUFS")
 
-            if not np.isfinite(loudness) or loudness < -70:
-                return self._rms_normalise(w)
+            if not np.isfinite(loudness) or loudness < -60:
+                print("[ENHANCER] Loudness too low for pyloudnorm — using peak normalisation")
+                return self._peak_normalise(w)
 
             normalised = pyln.normalize.loudness(audio_np, loudness, self.TARGET_LUFS)
             return torch.from_numpy(normalised.astype(np.float32)).unsqueeze(0)
-        except Exception:
-            return self._rms_normalise(w)
+        except Exception as e:
+            print(f"[ENHANCER] pyloudnorm error: {e} — using peak normalisation")
+            return self._peak_normalise(w)
+
+    def _peak_normalise(self, w: torch.Tensor) -> torch.Tensor:
+        """Peak-based normalisation: scale so peak sits at -1 dBFS."""
+        peak = w.abs().max().item()
+        if peak < 1e-8:
+            return w
+        target_peak = 10 ** (-1.0 / 20)   # -1 dBFS
+        return w * (target_peak / peak)
 
     def _rms_normalise(self, w: torch.Tensor) -> torch.Tensor:
-        """RMS fallback normalisation when pyloudnorm fails."""
+        """RMS normalisation fallback."""
         rms = w.pow(2).mean().sqrt().item()
         if rms < 1e-8:
             return w
@@ -442,7 +459,11 @@ class AudioEnhancer:
         # Stage 1 — De-reverberation (room echo / reverb removal)
         enhanced = await loop.run_in_executor(None, self._dereverberate, mono, self.TARGET_SR)
 
-        # Stage 2 — DeepFilterNet (all background noise: barking, traffic, HVAC…)
+        # Stage 2 — DeepFilterNet pass 1 (primary noise removal)
+        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+
+        # Stage 2b — DeepFilterNet pass 2 (second pass catches what pass 1 missed;
+        # after pass 1 lowers the noise floor, the model can suppress more on pass 2)
         enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
 
         # Stage 3 — Demucs vocals extraction (background music / instruments)
