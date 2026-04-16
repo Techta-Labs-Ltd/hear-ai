@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     AI_SERVICE_SECRET: str = "change-me"
     HEAR_BACKEND_URL: str = "http://localhost:3000"
+    HEAR_CALLBACK_URL: str = ""
     WHISPER_MODEL_SIZE: str = "large-v3"
     MAX_CONCURRENT_GPU_JOBS: int = 2
     SQLITE_DB_PATH: str = "./data/jobs.db"

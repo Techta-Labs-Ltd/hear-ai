@@ -75,8 +75,21 @@ class PipelineWorker:
             )
             if not jobs:
                 return
-            print(f"[WORKER] Retrying {len(jobs)} undelivered callbacks")
+
+            valid_jobs = []
             for job in jobs:
+                if job.callback_url and job.callback_url.startswith(("http://", "https://")):
+                    valid_jobs.append(job)
+                else:
+                    print(f"[WORKER] Job {job.id} has invalid callback URL {job.callback_url!r}, marking as delivered")
+                    job.callback_delivered = True
+            db.commit()
+
+            if not valid_jobs:
+                return
+
+            print(f"[WORKER] Retrying {len(valid_jobs)} undelivered callbacks")
+            for job in valid_jobs:
                 payload = self._build_result_payload(job)
                 delivered = await callback_service.send(job.callback_url, payload)
                 if delivered:
@@ -148,6 +161,18 @@ class PipelineWorker:
             tracks = recording.tracks
             active_tracks = [t for t in tracks if not t.is_muted]
 
+            print(
+                f"[JOB:{job_id[:8]}] START "
+                f"type={job.job_type} recording={job.recording_id} "
+                f"tracks={len(active_tracks)} attempt={job.attempts}"
+            )
+            for t in active_tracks:
+                print(
+                    f"[JOB:{job_id[:8]}]   track={t.track_id[:8]} "
+                    f"name={t.name!r} duration={t.duration}s "
+                    f"is_enhanced={t.is_enhanced} has_transcription={t.has_transcription}"
+                )
+
             track_results = {}
             track_paths = []
             enhanced_track_paths = []
@@ -171,6 +196,7 @@ class PipelineWorker:
                 )
 
                 if should_enhance:
+                    print(f"[JOB:{job_id[:8]}] ENHANCE → track={track.track_id[:8]}")
                     job.status = "enhancing"
                     db.commit()
                     result = await self._enhancer.enhance(
@@ -184,6 +210,11 @@ class PipelineWorker:
                         "quality_score": result.quality_score,
                         "snr_db": result.snr_db,
                     }
+                    print(
+                        f"[JOB:{job_id[:8]}] ENHANCE ✓ track={track.track_id[:8]} "
+                        f"quality={result.quality_score} snr={result.snr_db}dB "
+                        f"url={result.enhanced_url}"
+                    )
                     enhanced_path = await download_audio(result.enhanced_url)
                     tmp_paths.append(enhanced_path)
                     enhanced_track_paths.append({
@@ -192,6 +223,8 @@ class PipelineWorker:
                         "volume": track.volume,
                         "is_muted": False,
                     })
+                else:
+                    print(f"[JOB:{job_id[:8]}] ENHANCE skip track={track.track_id[:8]} (is_enhanced={track.is_enhanced})")
 
             mix_source = enhanced_track_paths if enhanced_track_paths else track_paths
             master_data = {}
@@ -219,6 +252,7 @@ class PipelineWorker:
                 )
 
                 if tracks_to_transcribe and not job.existing_transcript:
+                    print(f"[JOB:{job_id[:8]}] TRANSCRIBE → {len(tracks_to_transcribe)} track(s)")
                     job.status = "transcribing"
                     db.commit()
 
@@ -227,11 +261,22 @@ class PipelineWorker:
                             audio_bytes = f.read()
                         t_result = await self._transcriber.transcribe(audio_bytes)
                         per_track_transcriptions[tp["track_id"]] = t_result
+                        print(
+                            f"[JOB:{job_id[:8]}] TRANSCRIBE ✓ track={tp['track_id'][:8]} "
+                            f"lang={t_result.get('language')} "
+                            f"words={len(t_result.get('transcript','').split())} "
+                            f"confidence={t_result.get('confidence')}"
+                        )
 
                     if mixed_path and len(active_tracks) > 1:
                         with open(mixed_path, "rb") as f:
                             mixed_bytes = f.read()
                         combined_transcription = await self._transcriber.transcribe(mixed_bytes)
+                        print(
+                            f"[JOB:{job_id[:8]}] TRANSCRIBE ✓ master-mix "
+                            f"lang={combined_transcription.get('language')} "
+                            f"words={len(combined_transcription.get('transcript','').split())}"
+                        )
                     elif per_track_transcriptions:
                         first_key = list(per_track_transcriptions.keys())[0]
                         combined_transcription = per_track_transcriptions[first_key]
@@ -252,6 +297,7 @@ class PipelineWorker:
             max_tags = job.max_tags if job.max_tags else 8
             categorization_data = None
             if transcript_text and job.job_type in ("tagging", "rebuild", "pipeline"):
+                print(f"[JOB:{job_id[:8]}] CATEGORIZE → max_tags={max_tags}")
                 job.status = "categorizing"
                 db.commit()
                 categorization_data = await self._categorizer.categorize(
@@ -260,9 +306,15 @@ class PipelineWorker:
                     custom_tags=platform.auto_tag_keywords,
                     max_tags=max_tags,
                 )
+                print(
+                    f"[JOB:{job_id[:8]}] CATEGORIZE ✓ "
+                    f"tags={categorization_data.get('tags')} "
+                    f"sentiment={categorization_data.get('sentiment')}"
+                )
 
             moderation_data = None
             if transcript_text:
+                print(f"[JOB:{job_id[:8]}] MODERATE →")
                 job.status = "moderating"
                 db.commit()
 
@@ -287,6 +339,12 @@ class PipelineWorker:
                     tid: {"flagged": m["flagged"], "severity": m["severity"], "reason": m["reason"]}
                     for tid, m in track_moderations.items()
                 }
+                print(
+                    f"[JOB:{job_id[:8]}] MODERATE ✓ "
+                    f"flagged={moderation_data.get('flagged')} "
+                    f"severity={moderation_data.get('severity')} "
+                    f"reason={moderation_data.get('reason')!r}"
+                )
 
             result_payload = {
                 "job_id": job.id,
@@ -312,6 +370,16 @@ class PipelineWorker:
             job.completed_at = datetime.utcnow()
             job.result_json = result_payload["result"]
             db.commit()
+
+            duration = (job.completed_at - job.started_at).total_seconds() if job.started_at else 0
+            print(
+                f"[JOB:{job_id[:8]}] DONE "
+                f"type={job.job_type} duration={duration:.1f}s "
+                f"tracks_enhanced={len(track_results)} "
+                f"transcribed={len(per_track_transcriptions)} "
+                f"tags={categorization_data.get('tags') if categorization_data else []} "
+                f"callback={job.callback_url}"
+            )
 
             if job.callback_url:
                 delivered = await callback_service.send(job.callback_url, result_payload)
