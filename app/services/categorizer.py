@@ -87,7 +87,6 @@ class CategorizationService:
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
 
-        # Step 2: zero-shot on categories + a curated tag pool built from keyword hits + transcript words
         tag_pool = self._build_tag_pool(transcript, data.tags, layer1["scores"])
 
         layer2_cat, layer2_tag, layer3, sentiment = await asyncio.gather(
@@ -154,13 +153,11 @@ class CategorizationService:
         priority: list[str] = []
         seen: set[str] = set()
 
-        # Priority 1: keyword layer hits
         for tag in all_tags:
             if tag in keyword_scores and tag not in seen:
                 priority.append(tag)
                 seen.add(tag)
 
-        # Priority 2: tags whose own text overlaps with transcript words
         for tag in all_tags:
             if tag in seen:
                 continue
@@ -211,14 +208,31 @@ class CategorizationService:
             return {"scores": {}, "suggested_tags": [], "suggested_categories": []}
 
         prompt = (
-            f"Analyze this audio transcript and return a JSON object with three keys:\n"
-            f"1. \"categories\": pick the most relevant from [{', '.join(categories[:30])}] with confidence 0-1\n"
-            f"2. \"tags\": pick the most relevant from [{', '.join(tags[:50])}] with confidence 0-1, "
-            f"plus suggest up to 3 new tags if none fit well (prefix with #)\n"
-            f"3. \"new_categories\": list up to 2 new category names (plain strings, no #) "
-            f"if the content clearly belongs to a category not in the list\n\n"
-            f"Transcript:\n{transcript[:2000]}\n\n"
-            f"Return ONLY valid JSON, no explanation."
+            "You are an intelligent content categorization system.\n\n"
+            "Your task is to analyze a transcript and generate:\n"
+            "1. Up to 5 highly relevant tags (with # prefix)\n"
+            "2. Up to 5 accurate categories (no # prefix)\n\n"
+            "Rules:\n"
+            "- Base your output ONLY on the core subject of the transcript.\n"
+            "- Focus on the main themes, not incidental mentions.\n"
+            "- Do NOT include unrelated or weakly related categories.\n"
+            "- Avoid generic categories like \"Energy\", \"Technology\", or \"Business\" unless they are clearly central.\n"
+            "- Prioritize specificity and relevance over broadness.\n\n"
+            "Tag Guidelines:\n"
+            "- Tags must be concise and descriptive (e.g., #Wildlife, #Photography, #Awards)\n"
+            "- Prefer commonly used, human-readable tags\n"
+            "- Avoid duplicates or near-duplicates\n\n"
+            "Category Guidelines:\n"
+            "- Categories should represent high-level domains (e.g., Wildlife, Photography, Film, Nature, Awards)\n"
+            "- Only include categories that are strongly supported by the transcript\n"
+            "- Do NOT infer categories that are not clearly present\n\n"
+            "Output format (STRICT JSON):\n"
+            "{\n"
+            "  \"tags\": [\"#Tag1\", \"#Tag2\", \"#Tag3\", \"#Tag4\", \"#Tag5\"],\n"
+            "  \"categories\": [\"Category1\", \"Category2\", \"Category3\", \"Category4\", \"Category5\"],\n"
+            "  \"confidence\": \"low | medium | high\"\n"
+            "}\n\n"
+            f"Transcript:\n{transcript[:3000]}"
         )
 
         try:
@@ -233,7 +247,7 @@ class CategorizationService:
                         "model": settings.OPENAI_MODEL,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.1,
-                        "max_tokens": 500,
+                        "max_tokens": 300,
                     },
                 )
                 response.raise_for_status()
@@ -243,22 +257,34 @@ class CategorizationService:
             content = content.replace("```json", "").replace("```", "").strip()
             parsed = json.loads(content)
 
-            scores = {}
-            for cat, conf in parsed.get("categories", {}).items():
-                scores[cat] = round(float(conf), 4)
-            for tag, conf in parsed.get("tags", {}).items():
-                scores[tag] = round(float(conf), 4)
+            confidence_map = {"low": 0.5, "medium": 0.75, "high": 0.95}
+            confidence = confidence_map.get(str(parsed.get("confidence", "medium")).lower(), 0.75)
+
+            scores: dict[str, float] = {}
+
+            for tag in parsed.get("tags", []):
+                tag = tag.strip()
+                if tag.startswith("#") and len(tag) > 1:
+                    scores[tag] = confidence
+
+            suggested_categories: list[str] = []
+            for cat in parsed.get("categories", []):
+                cat = cat.strip()
+                if not cat:
+                    continue
+                scores[cat] = confidence
+                if cat not in categories:
+                    suggested_categories.append(cat)
 
             return {
                 "scores": scores,
-                "suggested_tags": [t for t in parsed.get("tags", {}).keys() if t.startswith("#")],
-                "suggested_categories": [
-                    c.strip() for c in parsed.get("new_categories", [])
-                    if isinstance(c, str) and c.strip()
-                ],
+                "suggested_tags": [t for t in parsed.get("tags", []) if str(t).startswith("#")],
+                "suggested_categories": suggested_categories,
             }
         except Exception:
             return {"scores": {}, "suggested_tags": [], "suggested_categories": []}
+
+
 
     def _get_sentiment(self, transcript: str) -> str:
         try:
