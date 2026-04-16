@@ -264,12 +264,14 @@ class PipelineWorker:
                             audio_bytes = f.read()
                         t_result = await self._transcriber.transcribe(audio_bytes)
                         per_track_transcriptions[tp["track_id"]] = t_result
+                        transcript_preview = t_result.get('transcript', '')
                         print(
                             f"[JOB:{job_id[:8]}] TRANSCRIBE ✓ track={tp['track_id'][:8]} "
                             f"lang={t_result.get('language')} "
-                            f"words={len(t_result.get('transcript','').split())} "
+                            f"words={len(transcript_preview.split())} "
                             f"confidence={t_result.get('confidence')}"
                         )
+                        print(f"[JOB:{job_id[:8]}] TRANSCRIPT:\n{transcript_preview}\n")
 
                     if mixed_path and len(active_tracks) > 1:
                         with open(mixed_path, "rb") as f:

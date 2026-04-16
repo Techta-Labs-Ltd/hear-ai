@@ -176,7 +176,7 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
                             words = len(transcript.split())
                             lang = t.get("language", "?")
                             log("pass", f"Transcription — {words} words, lang={lang}")
-                            log("pass", f"  Preview: {transcript[:120]}...")
+                            print(f"\n  --- TRANSCRIPT ---\n{transcript}\n  ------------------\n")
                             break
 
                     if not transcript:
