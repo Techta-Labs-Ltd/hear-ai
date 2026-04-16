@@ -10,10 +10,7 @@ import torchaudio
 import torchaudio.functional as F
 from demucs.apply import apply_model
 from demucs.pretrained import get_model
-from denoiser import pretrained as dns_pretrained
 from df.enhance import enhance as df_enhance, init_df
-from nara_wpe.wpe import wpe_v8
-from nara_wpe.utils import stft as wpe_stft, istft as wpe_istft
 
 from app.config import settings
 from app.core.storage import storage
@@ -62,7 +59,6 @@ class AudioEnhancer:
 
     def __init__(self):
         self._demucs    = None
-        self._dns       = None
         self._dfn_model = None
         self._device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -74,10 +70,6 @@ class AudioEnhancer:
         self._dfn_model, _, _ = init_df()
         self._dfn_model = self._dfn_model.to(self._device)
         self._dfn_model.eval()
-
-        self._dns = dns_pretrained.dns64()
-        self._dns.to(self._device)
-        self._dns.eval()
 
     @property
     def is_loaded(self) -> bool:
@@ -127,19 +119,11 @@ class AudioEnhancer:
         clip_pen   = 0.3 if clipping else 0.0
         return round(max(0.0, snr_score * 0.6 + lufs_score * 0.4 - clip_pen), 3)
 
-    def _dereverberate(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        try:
-            audio_np = w.cpu().squeeze(0).numpy().astype(np.float64)
-            Y = wpe_stft(audio_np, size=512, shift=128).T[None]
-            Z = wpe_v8(Y, taps=10, delay=3, iterations=3)
-            out = wpe_istft(Z[0].T, size=512, shift=128)[: audio_np.shape[0]]
-            return torch.from_numpy(out.astype(np.float32)).unsqueeze(0).to(self._device)
-        except Exception:
-            return w
 
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            w_48k = self._resample(w.cpu(), self.TARGET_SR, self.DFN_SR)
+            # Resample strictly on GPU first! Then move to CPU as df_enhance requires it.
+            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR).cpu()
             _, dfn_state, _ = init_df()
             with torch.no_grad():
                 clean = df_enhance(self._dfn_model, dfn_state, w_48k)
@@ -147,18 +131,8 @@ class AudioEnhancer:
                 clean = torch.from_numpy(clean)
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
+            # Move back to GPU immediately, then resample mathematically via CUDA
             return self._resample(clean.to(self._device), self.DFN_SR, self.TARGET_SR)
-        except Exception:
-            return w
-
-    def _dns_denoise(self, w: torch.Tensor) -> torch.Tensor:
-        try:
-            w_16k = self._resample(w, self.TARGET_SR, self.DNS_SR)
-            with torch.no_grad():
-                clean = self._dns(w_16k[None])[0]
-            if clean.dim() == 2:
-                clean = clean.mean(dim=0, keepdim=True)
-            return self._resample(clean, self.DNS_SR, self.TARGET_SR)
         except Exception:
             return w
 
@@ -317,9 +291,7 @@ class AudioEnhancer:
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        enhanced = await loop.run_in_executor(None, self._dereverberate, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-        enhanced = await loop.run_in_executor(None, self._dns_denoise, enhanced)
         enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
