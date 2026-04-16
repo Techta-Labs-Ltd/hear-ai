@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import os
@@ -15,6 +16,7 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Defaults — override at runtime via --recording-id / --track-id
 TEST_RECORDING_ID = "1a62143c-2fb3-4d8f-af4b-22f3e80306e1"
 TEST_TRACK_ID     = "bb2ef282-2e22-4406-bfb8-31a9921ed7ef"
 
@@ -307,20 +309,48 @@ async def test_edge_cases(client: httpx.AsyncClient):
 
 
 async def main():
-    global BASE_URL, SERVICE_KEY, BACKEND_URL, HEADERS
-    if len(sys.argv) > 1:
-        BASE_URL = sys.argv[1].rstrip("/")
-    if len(sys.argv) > 2:
-        SERVICE_KEY = sys.argv[2]
-        HEADERS["X-Service-Key"] = SERVICE_KEY
-    if len(sys.argv) > 3:
-        BACKEND_URL = sys.argv[3].rstrip("/")
+    global BASE_URL, SERVICE_KEY, BACKEND_URL, HEADERS, TEST_RECORDING_ID, TEST_TRACK_ID
+
+    parser = argparse.ArgumentParser(
+        prog="python -m tests.test_api",
+        description="Hear AI Service — Integration Tests",
+    )
+    parser.add_argument(
+        "--url", default=BASE_URL,
+        help=f"AI service base URL (default: {BASE_URL})",
+    )
+    parser.add_argument(
+        "--key", default=SERVICE_KEY,
+        help="X-Service-Key secret (default: $AI_SERVICE_SECRET)",
+    )
+    parser.add_argument(
+        "--backend", default=BACKEND_URL,
+        help=f"Backend base URL (default: {BACKEND_URL})",
+    )
+    parser.add_argument(
+        "--recording-id", default=TEST_RECORDING_ID,
+        help=f"Recording UUID to test against (default: {TEST_RECORDING_ID})",
+    )
+    parser.add_argument(
+        "--track-id", default=TEST_TRACK_ID,
+        help=f"Track UUID to test against (default: {TEST_TRACK_ID})",
+    )
+
+    args = parser.parse_args()
+
+    BASE_URL          = args.url.rstrip("/")
+    SERVICE_KEY       = args.key
+    BACKEND_URL       = args.backend.rstrip("/")
+    TEST_RECORDING_ID = args.recording_id
+    TEST_TRACK_ID     = args.track_id
+    HEADERS["X-Service-Key"] = SERVICE_KEY
 
     print("=" * 60)
     print("  Hear AI Service — Integration Tests")
-    print(f"  AI Service: {BASE_URL}")
-    print(f"  Backend:    {BACKEND_URL}")
-    print(f"  Recording:  {TEST_RECORDING_ID}")
+    print(f"  AI Service:   {BASE_URL}")
+    print(f"  Backend:      {BACKEND_URL}")
+    print(f"  Recording ID: {TEST_RECORDING_ID}")
+    print(f"  Track ID:     {TEST_TRACK_ID}")
     print("=" * 60)
 
     async with httpx.AsyncClient(timeout=200) as client:

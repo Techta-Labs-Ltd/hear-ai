@@ -79,7 +79,7 @@ class CategorizationService:
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
         layer2_task = loop.run_in_executor(
-            None, self._zero_shot_layer, transcript, data.categories
+            None, self._zero_shot_layer, transcript, data.categories, data.tags
         )
         layer3_task = self._openai_layer(transcript, data.categories, data.tags)
         sentiment_task = loop.run_in_executor(None, self._get_sentiment, transcript)
@@ -144,13 +144,28 @@ class CategorizationService:
                 scores[tag] = round(scores.get(tag, 0) * 0.6 + density * 0.4, 4)
         return {"scores": scores}
 
-    def _zero_shot_layer(self, transcript: str, labels: list[str]) -> dict:
-        if not labels:
+    # ------------------------------------------------------------------
+    # Zero-shot — run against a capped shortlist so probability
+    # isn't diluted across 400+ labels.
+    # ------------------------------------------------------------------
+    _ZS_MAX_CATEGORIES = 50
+    _ZS_MAX_TAGS       = 40
+    _ZS_TEMPLATE       = "This audio recording is about {}."
+
+    def _zero_shot_layer(self, transcript: str, categories: list[str], tags: list[str]) -> dict:
+        """Classify the transcript against a shortlist of categories AND tags."""
+        if not (categories or tags):
             return {"scores": {}}
+
+        # Cap each bucket so total labels stay manageable for the NLI model
+        label_pool = categories[: self._ZS_MAX_CATEGORIES] + tags[: self._ZS_MAX_TAGS]
+        if not label_pool:
+            return {"scores": {}}
+
         output = self._zero_shot(
             transcript[:1024],
-            labels,
-            hypothesis_template="This audio recording is about {}.",
+            label_pool,
+            hypothesis_template=self._ZS_TEMPLATE,
         )
         scores = dict(zip(output["labels"], output["scores"]))
         return {"scores": scores}
@@ -223,6 +238,12 @@ class CategorizationService:
         except Exception:
             return "neutral"
 
+    # ------------------------------------------------------------------
+    # Merge — combine all three layer scores, always return something
+    # ------------------------------------------------------------------
+    _TAG_THRESHOLD = 0.20   # lowered: zero-shot dilutes scores across many labels
+    _CAT_THRESHOLD = 0.30
+
     def _merge(
         self,
         layer1: dict,
@@ -236,39 +257,52 @@ class CategorizationService:
         l2 = layer2.get("scores", {})
         l3 = layer3.get("scores", {})
 
+        # Merge any LLM-suggested new tags into the pool
         known_tags = set(all_tags)
         for tag in l3:
             if tag.startswith("#") and tag not in known_tags:
                 known_tags.add(tag)
 
-        merged_tag_scores = {}
+        # Score every known tag from all three layers
+        merged_tag_scores: dict[str, float] = {}
         for tag in known_tags:
             s1 = l1.get(tag, 0)
-            s2 = l2.get(tag, 0)
+            s2 = l2.get(tag, 0)   # now populated because zero-shot includes tags
             s3 = l3.get(tag, 0)
             if s3 > 0:
                 merged_tag_scores[tag] = round(s1 * 0.25 + s2 * 0.35 + s3 * 0.40, 4)
             else:
                 merged_tag_scores[tag] = round(s1 * 0.45 + s2 * 0.55, 4)
 
-        tags = sorted(
-            [t for t, s in merged_tag_scores.items() if s >= 0.35],
-            key=lambda t: merged_tag_scores[t],
-            reverse=True,
-        )[:max_tags]
+        # Sort by score descending
+        ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
-        cat_scores = {}
+        # Primary: tags that meet the threshold
+        tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
+
+        # Fallback: always return at least min(max_tags, 3) top tags
+        if not tags and ranked_tags:
+            tags = [t for t, _ in ranked_tags[:min(max_tags, 3)]]
+
+        # Score categories (zero-shot now includes categories too)
+        cat_scores: dict[str, float] = {}
         for c in all_categories:
             s2 = l2.get(c, 0)
             s3 = l3.get(c, 0)
-            if s3 > 0:
-                cat_scores[c] = round(s2 * 0.4 + s3 * 0.6, 4)
-            else:
-                cat_scores[c] = round(s2, 4)
+            cat_scores[c] = round(s2 * 0.4 + s3 * 0.6, 4) if s3 > 0 else round(s2, 4)
 
-        categories = [c for c, s in cat_scores.items() if s >= 0.45]
+        # Primary: categories that meet the threshold
+        categories = [c for c, s in cat_scores.items() if s >= self._CAT_THRESHOLD]
+
+        # Fallback: always return the top-scoring category
         if not categories and all_categories:
             categories = [max(all_categories, key=lambda c: cat_scores.get(c, 0))]
+
+        # Debug: log top scores so we can see what the model found
+        top_tags_dbg = [(t, s) for t, s in ranked_tags[:8]]
+        top_cats_dbg = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+        print(f"[CATEGORIZER] top_tag_scores={top_tags_dbg}")
+        print(f"[CATEGORIZER] top_cat_scores={top_cats_dbg}")
 
         return {
             "tags": tags,
