@@ -7,7 +7,7 @@ AUDIO_CONTENT_TYPES = {
     "audio/wav", "audio/wave", "audio/x-wav",
     "audio/mpeg", "audio/mp3", "audio/mp4",
     "audio/ogg", "audio/flac", "audio/aac",
-    "audio/webm", "application/octet-stream",
+    "audio/webm", "application/octet-stream", "binary/octet-stream",
 }
 
 

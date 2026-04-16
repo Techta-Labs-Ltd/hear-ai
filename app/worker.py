@@ -215,11 +215,10 @@ class PipelineWorker:
                         f"quality={result.quality_score} snr={result.snr_db}dB "
                         f"url={result.enhanced_url}"
                     )
-                    enhanced_path = await download_audio(result.enhanced_url)
-                    tmp_paths.append(enhanced_path)
+                    tmp_paths.append(result.local_path)
                     enhanced_track_paths.append({
                         "track_id": track.track_id,
-                        "path": enhanced_path,
+                        "path": result.local_path,
                         "volume": track.volume,
                         "is_muted": False,
                     })

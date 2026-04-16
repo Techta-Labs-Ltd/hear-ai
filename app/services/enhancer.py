@@ -18,6 +18,7 @@ from app.core.storage import storage
 class EnhancementResult:
     b2_key: str
     enhanced_url: str
+    local_path: str
     quality_score: float
     snr_db: float
     peak_db: float
@@ -218,11 +219,10 @@ class AudioEnhancer:
         b2_key = f"{settings.B2_ENHANCED_PREFIX}{recording_id}/{job_id}.wav"
         enhanced_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
 
-        os.unlink(out_path)
-
         return EnhancementResult(
             b2_key=b2_key,
             enhanced_url=enhanced_url,
+            local_path=out_path,
             quality_score=quality_score,
             snr_db=round(snr, 2),
             peak_db=round(peak_db, 2),
