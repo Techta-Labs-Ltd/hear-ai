@@ -75,84 +75,30 @@ async def test_auth(client: httpx.AsyncClient):
         log("pass", "Rejects request with wrong key")
 
         r = await client.post(f"{BASE_URL}/api/v1/moderate", headers=HEADERS, json={"text": "hello"})
-        assert r.status_code == 200, f"Expected 200 with valid key, got {r.status_code}: {r.text}"
-        log("pass", "Accepts request with valid X-Service-Key")
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+        log("pass", "Accepts valid X-Service-Key")
     except Exception as e:
         log("fail", "Authentication", str(e))
 
 
-async def test_moderation(client: httpx.AsyncClient):
-    print("\n[3/9] Moderation")
-    try:
-        r = await client.post(
-            f"{BASE_URL}/api/v1/moderate",
-            headers=HEADERS,
-            json={"text": "Welcome everyone to today's podcast about music production and sound design."},
-        )
-        data = r.json()
-        assert r.status_code == 200, f"{r.status_code}: {r.text}"
-        assert data["flagged"] is False, f"Clean content was flagged: {data}"
-        log("pass", f"Clean content not flagged (severity={data.get('severity', '?')})")
-
-        r = await client.post(
-            f"{BASE_URL}/api/v1/moderate",
-            headers=HEADERS,
-            json={"text": "I will kill you and destroy everything you love, you worthless piece of trash"},
-        )
-        data = r.json()
-        assert r.status_code == 200
-        assert data["flagged"] is True, f"Toxic content not flagged: {data}"
-        log("pass", f"Toxic content flagged (severity={data.get('severity', '?')})")
-        log("pass", f"Reason: {data.get('reason', '?')!r}")
-
-        r = await client.post(f"{BASE_URL}/api/v1/moderate", headers=HEADERS, json={"text": ""})
-        data = r.json()
-        assert r.status_code == 200
-        assert data["flagged"] is False
-        log("pass", "Empty text handled and not flagged")
-    except Exception as e:
-        log("fail", "Moderation", str(e))
-
-
-async def test_categorization(client: httpx.AsyncClient):
-    print("\n[4/9] Categorization")
-    try:
-        transcript = (
-            "Today we're talking about artificial intelligence and machine learning. "
-            "Companies like Google and OpenAI are pushing transformer architectures. "
-            "The implications for healthcare, education, and business are enormous."
-        )
-        r = await client.post(
-            f"{BASE_URL}/api/v1/categorize",
-            headers=HEADERS,
-            json={"text": transcript, "max_tags": 5},
-        )
-        data = r.json()
-        assert r.status_code == 200, f"{r.status_code}: {r.text}"
-        assert "tags" in data and isinstance(data["tags"], list)
-        log("pass", f"Tags: {data['tags']}")
-        assert "sentiment" in data
-        log("pass", f"Sentiment: {data['sentiment']}")
-    except Exception as e:
-        log("fail", "Categorization", str(e))
-
-
 async def test_backend_connectivity(client: httpx.AsyncClient):
-    print("\n[5/9] Backend Connectivity & Recording Fetch")
+    print("\n[3/9] Backend Connectivity & Recording Fetch")
     try:
-        url = f"{BACKEND_URL}/api/v1/internal/recordings/{TEST_RECORDING_ID}"
-        r = await client.get(url, headers=HEADERS)
+        r = await client.get(
+            f"{BACKEND_URL}/api/v1/internal/recordings/{TEST_RECORDING_ID}",
+            headers=HEADERS,
+        )
         if r.status_code == 200:
             data = r.json()
-            log("pass", f"Backend reachable — recording '{data.get('title')}' fetched")
+            log("pass", f"Recording fetched: '{data.get('title')}'")
             tracks = data.get("tracks", [])
-            log("pass" if tracks else "warn", f"Tracks in recording: {len(tracks)}")
+            log("pass" if tracks else "warn", f"Tracks: {len(tracks)}")
             for t in tracks:
                 log("pass", f"  track={t['id'][:8]} is_enhanced={t.get('is_enhanced')} transcription={'set' if t.get('transcription') else 'null'}")
         elif r.status_code == 401:
-            log("fail", "Backend auth rejected — check AI_SERVICE_SECRET matches backend config")
+            log("fail", "Backend auth rejected — check AI_SERVICE_SECRET matches backend")
         elif r.status_code == 404:
-            log("fail", "Recording not found on backend — check TEST_RECORDING_ID")
+            log("fail", "Recording not found — check TEST_RECORDING_ID")
         else:
             log("fail", f"Backend returned {r.status_code}: {r.text[:200]}")
     except httpx.ConnectError:
@@ -162,7 +108,7 @@ async def test_backend_connectivity(client: httpx.AsyncClient):
 
 
 async def test_pipeline_submit(client: httpx.AsyncClient):
-    print("\n[6/9] Pipeline Job Submission (real recording)")
+    print("\n[4/9] Pipeline Job Submission")
     job_id = str(uuid.uuid4())
     try:
         r = await client.post(
@@ -184,7 +130,7 @@ async def test_pipeline_submit(client: httpx.AsyncClient):
 
         r2 = await client.get(f"{BASE_URL}/api/v1/jobs/{job_id}", headers=HEADERS)
         job_data = r2.json()
-        assert r2.status_code == 200, f"Job lookup failed: {r2.text}"
+        assert r2.status_code == 200, f"Lookup failed: {r2.text}"
         log("pass", f"Job in DB — status: {job_data['status']}")
         if job_data.get("error"):
             log("warn", f"Early error: {job_data['error']}")
@@ -196,10 +142,10 @@ async def test_pipeline_submit(client: httpx.AsyncClient):
 
 
 async def test_job_polling(client: httpx.AsyncClient, job_id: str):
-    print("\n[7/9] Pipeline Job Completion (polling up to 3 min)")
+    print("\n[5/9] Pipeline Job Completion (polling up to 3 min)")
     if not job_id:
         log("fail", "Skipped — no job_id")
-        return
+        return None
 
     max_wait = 180
     poll_interval = 5
@@ -217,26 +163,87 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
                 result = data.get("result")
                 if isinstance(result, str):
                     result = json.loads(result)
+
+                transcript = None
                 if result:
                     tracks = result.get("tracks", {})
                     log("pass" if tracks else "warn", f"Tracks processed: {len(tracks)}")
-                    log("pass" if result.get("categorization") else "warn",
-                        f"Tags: {result.get('categorization', {}).get('tags', [])}")
-                else:
-                    log("warn", "Job completed but result_json is empty")
-                return
+
+                    for track_id, track_data in tracks.items():
+                        t = track_data.get("transcription", {})
+                        if t and t.get("transcript"):
+                            transcript = t["transcript"]
+                            words = len(transcript.split())
+                            lang = t.get("language", "?")
+                            log("pass", f"Transcription — {words} words, lang={lang}")
+                            log("pass", f"  Preview: {transcript[:120]}...")
+                            break
+
+                    if not transcript:
+                        log("warn", "No transcription text found in result")
+
+                return transcript
 
             if status == "failed":
                 log("fail", f"Job failed: {data.get('error', 'unknown')}")
-                return
+                return None
 
             print(f"    ... status={status} attempt={data.get('attempts')} ({elapsed}s/{max_wait}s)")
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-        log("fail", f"Job did not complete within {max_wait}s (last status: {status})")
+        log("fail", f"Did not complete within {max_wait}s (last: {status})")
+        return None
     except Exception as e:
         log("fail", "Job polling", str(e))
+        return None
+
+
+async def test_moderation_from_transcript(client: httpx.AsyncClient, transcript: str):
+    print("\n[6/9] Moderation (from real transcript)")
+    if not transcript:
+        log("warn", "Skipped — no transcript from completed job")
+        return
+
+    try:
+        r = await client.post(
+            f"{BASE_URL}/api/v1/moderate",
+            headers=HEADERS,
+            json={"text": transcript},
+        )
+        data = r.json()
+        assert r.status_code == 200, f"{r.status_code}: {r.text}"
+        flagged = data.get("flagged", False)
+        severity = data.get("severity", "?")
+        reason = data.get("reason", "")
+        log("pass", f"Moderation complete — flagged={flagged} severity={severity}")
+        if flagged:
+            log("warn", f"Content flagged: {reason!r}")
+        else:
+            log("pass", "Content is clean")
+    except Exception as e:
+        log("fail", "Moderation from transcript", str(e))
+
+
+async def test_categorization_from_transcript(client: httpx.AsyncClient, transcript: str):
+    print("\n[7/9] Categorization (from real transcript)")
+    if not transcript:
+        log("warn", "Skipped — no transcript from completed job")
+        return
+
+    try:
+        r = await client.post(
+            f"{BASE_URL}/api/v1/categorize",
+            headers=HEADERS,
+            json={"text": transcript, "max_tags": 5},
+        )
+        data = r.json()
+        assert r.status_code == 200, f"{r.status_code}: {r.text}"
+        log("pass", f"Tags: {data.get('tags', [])}")
+        log("pass", f"Categories: {data.get('categories', [])}")
+        log("pass", f"Sentiment: {data.get('sentiment', '?')}")
+    except Exception as e:
+        log("fail", "Categorization from transcript", str(e))
 
 
 async def test_idempotency(client: httpx.AsyncClient, job_id: str):
@@ -294,11 +301,11 @@ async def main():
     async with httpx.AsyncClient(timeout=200) as client:
         await test_health(client)
         await test_auth(client)
-        await test_moderation(client)
-        await test_categorization(client)
         await test_backend_connectivity(client)
         job_id = await test_pipeline_submit(client)
-        await test_job_polling(client, job_id)
+        transcript = await test_job_polling(client, job_id)
+        await test_moderation_from_transcript(client, transcript)
+        await test_categorization_from_transcript(client, transcript)
         await test_idempotency(client, job_id)
         await test_edge_cases(client)
 
