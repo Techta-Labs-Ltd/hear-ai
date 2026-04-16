@@ -208,8 +208,17 @@ class AudioEnhancer:
         makeup_lin = 10 ** (self._COMP_MAKEUP_DB / 20)
         
         above = torch.clamp(env - threshold_lin, min=0.0)
-        gain_reduce = threshold_lin + above / self._COMP_RATIO
-        raw_gain = torch.where(env > 1e-8, gain_reduce / env, torch.ones_like(env))
+        
+        # CORRECT DOWNWARD COMPRESSION
+        # target = env if below threshold, or compressed target if above threshold
+        output_env = torch.where(
+            env > threshold_lin,
+            threshold_lin + (env - threshold_lin) / self._COMP_RATIO,
+            env
+        )
+        
+        # Calculate raw gain securely avoiding divide-by-zero
+        raw_gain = torch.where(env > 1e-8, output_env / env, torch.ones_like(env))
         
         smooth_kernel = int(self.TARGET_SR * 0.05)
         if smooth_kernel % 2 == 0: smooth_kernel += 1
