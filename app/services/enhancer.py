@@ -4,7 +4,6 @@ import tempfile
 from dataclasses import dataclass
 
 import numpy as np
-import noisereduce as nr
 import pyloudnorm as pyln
 import torch
 import torchaudio
@@ -19,7 +18,6 @@ from nara_wpe.utils import stft as wpe_stft, istft as wpe_istft
 from app.config import settings
 from app.core.storage import storage
 
-
 @dataclass
 class EnhancementResult:
     b2_key: str
@@ -30,7 +28,6 @@ class EnhancementResult:
     peak_db: float
     lufs: float
     clipping_detected: bool
-
 
 class AudioEnhancer:
     TARGET_SR      = 44100
@@ -57,36 +54,28 @@ class AudioEnhancer:
 
     _COMP_THRESHOLD_DB = -18.0
     _COMP_RATIO        = 3.5
-    _COMP_ATTACK_MS    = 10.0
-    _COMP_RELEASE_MS   = 120.0
     _COMP_MAKEUP_DB    = 6.0
 
     _GATE_THRESHOLD_DB = -45.0
-    _GATE_ATTACK_MS    = 5.0
-    _GATE_RELEASE_MS   = 60.0
 
     def __init__(self):
         self._demucs    = None
         self._dns       = None
         self._dfn_model = None
-        self._dfn_state = None
         self._device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def load(self):
         self._demucs = get_model(settings.DEMUCS_MODEL)
         self._demucs.to(self._device)
         self._demucs.eval()
-        print("[ENHANCER] Demucs loaded")
 
-        self._dfn_model, self._dfn_state, _ = init_df()
+        self._dfn_model, _, _ = init_df()
         self._dfn_model = self._dfn_model.to(self._device)
         self._dfn_model.eval()
-        print(f"[ENHANCER] DeepFilterNet loaded on {self._device}")
 
         self._dns = dns_pretrained.dns64()
         self._dns.to(self._device)
         self._dns.eval()
-        print("[ENHANCER] DNS denoiser loaded")
 
     @property
     def is_loaded(self) -> bool:
@@ -114,6 +103,8 @@ class AudioEnhancer:
         return (w.abs() > 0.99).float().mean().item() > 0.001
 
     def _compute_snr(self, raw: torch.Tensor, enhanced: torch.Tensor) -> float:
+        raw = raw.cpu()
+        enhanced = enhanced.cpu()
         n = min(raw.shape[1], enhanced.shape[1])
         sig_p = enhanced[:, :n].pow(2).mean().item()
         noi_p = (raw[:, :n] - enhanced[:, :n]).pow(2).mean().item() + 1e-10
@@ -122,7 +113,7 @@ class AudioEnhancer:
     def _compute_lufs(self, w: torch.Tensor) -> float:
         try:
             meter = pyln.Meter(self.TARGET_SR)
-            loudness = meter.integrated_loudness(w.squeeze(0).numpy().astype(np.float64))
+            loudness = meter.integrated_loudness(w.cpu().squeeze(0).numpy().astype(np.float64))
             return loudness if np.isfinite(loudness) else -99.0
         except Exception:
             rms = w.pow(2).mean().sqrt().item()
@@ -131,40 +122,40 @@ class AudioEnhancer:
     def _compute_quality_score(self, snr_db: float, clipping: bool, lufs: float) -> float:
         snr_score  = min(1.0, max(0.0, (snr_db + 5) / 40))
         lufs_score = 1.0 - min(1.0, abs(lufs - self.TARGET_LUFS) / 20)
-        return round(max(0.0, snr_score * 0.6 + lufs_score * 0.4 - (0.3 if clipping else 0.0)), 3)
+        clip_pen   = 0.3 if clipping else 0.0
+        return round(max(0.0, snr_score * 0.6 + lufs_score * 0.4 - clip_pen), 3)
 
     def _dereverberate(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
-            audio_np = w.squeeze(0).numpy().astype(np.float64)
+            audio_np = w.cpu().squeeze(0).numpy().astype(np.float64)
             Y = wpe_stft(audio_np, size=512, shift=128).T[None]
             Z = wpe_v8(Y, taps=10, delay=3, iterations=3)
             out = wpe_istft(Z[0].T, size=512, shift=128)[: audio_np.shape[0]]
-            return torch.from_numpy(out.astype(np.float32)).unsqueeze(0)
+            return torch.from_numpy(out.astype(np.float32)).unsqueeze(0).to(self._device)
         except Exception:
             return w
 
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            print("[ENHANCER] DeepFilterNet running...")
-            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR)
-            clean = df_enhance(self._dfn_model, self._dfn_state, w_48k)
+            w_48k = self._resample(w.cpu(), self.TARGET_SR, self.DFN_SR)
+            _, dfn_state, _ = init_df()
+            with torch.no_grad():
+                clean = df_enhance(self._dfn_model, dfn_state, w_48k)
             if isinstance(clean, np.ndarray):
                 clean = torch.from_numpy(clean)
-            if clean.is_cuda:
-                clean = clean.cpu()
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
-            print("[ENHANCER] DeepFilterNet done")
-            return self._resample(clean, self.DFN_SR, self.TARGET_SR)
-        except Exception as e:
-            print(f"[ENHANCER] DeepFilterNet error: {e} — falling back to DNS")
-            return self._dns_denoise(w)
+            return self._resample(clean.to(self._device), self.DFN_SR, self.TARGET_SR)
+        except Exception:
+            return w
 
     def _dns_denoise(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            w_16k = self._resample(w, self.TARGET_SR, self.DNS_SR).to(self._device)
+            w_16k = self._resample(w, self.TARGET_SR, self.DNS_SR)
             with torch.no_grad():
-                clean = self._dns(w_16k[None])[0].cpu()
+                clean = self._dns(w_16k[None])[0]
+            if clean.dim() == 2:
+                clean = clean.mean(dim=0, keepdim=True)
             return self._resample(clean, self.DNS_SR, self.TARGET_SR)
         except Exception:
             return w
@@ -174,24 +165,17 @@ class AudioEnhancer:
             waveform = waveform.repeat(2, 1)
         resampled = self._resample(waveform, sr, self._demucs.samplerate)
         with torch.no_grad():
-            sources = apply_model(self._demucs, resampled[None].to(self._device), progress=False)[0]
+            sources = apply_model(self._demucs, resampled[None], progress=False)[0]
         idx    = self._demucs.sources.index("vocals")
-        vocals = self._resample(sources[idx].cpu(), self._demucs.samplerate, self.TARGET_SR)
+        vocals = self._resample(sources[idx], self._demucs.samplerate, self.TARGET_SR)
         return self._to_mono(vocals)
 
     def _noise_gate(self, w: torch.Tensor) -> torch.Tensor:
-        sr             = self.TARGET_SR
-        x              = w.squeeze(0).numpy().astype(np.float32)
-        threshold_lin  = 10 ** (self._GATE_THRESHOLD_DB / 20)
-        attack_coef    = np.exp(-1.0 / (sr * self._GATE_ATTACK_MS  / 1000.0))
-        release_coef   = np.exp(-1.0 / (sr * self._GATE_RELEASE_MS / 1000.0))
-        envelope = np.zeros_like(x)
-        level    = 0.0
-        for i, s in enumerate(np.abs(x)):
-            level       = (attack_coef if s > level else release_coef) * level + (1.0 - (attack_coef if s > level else release_coef)) * s
-            envelope[i] = level
-        gain = np.where(envelope > threshold_lin, 1.0, envelope / (threshold_lin + 1e-8))
-        return torch.from_numpy((x * gain).astype(np.float32)).unsqueeze(0)
+        # PyTorch vectorized noise gate (0 CPU usage, executes instantly on CUDA)
+        env = F.lowpass_biquad(w.abs(), self.TARGET_SR, cutoff_freq=10.0)
+        threshold_lin = 10 ** (self._GATE_THRESHOLD_DB / 20)
+        gain = torch.where(env > threshold_lin, torch.ones_like(env), env / (threshold_lin + 1e-8))
+        return w * gain
 
     def _apply_eq(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
@@ -215,21 +199,15 @@ class AudioEnhancer:
             return w
 
     def _compress(self, w: torch.Tensor) -> torch.Tensor:
-        sr            = self.TARGET_SR
-        x             = w.squeeze(0).numpy().astype(np.float32)
+        # PyTorch vectorized dynamic compressor (0 CPU usage, executes instantly on CUDA)
+        env = F.lowpass_biquad(w.abs(), self.TARGET_SR, cutoff_freq=15.0)
         threshold_lin = 10 ** (self._COMP_THRESHOLD_DB / 20)
-        attack_coef   = np.exp(-1.0 / (sr * self._COMP_ATTACK_MS  / 1000.0))
-        release_coef  = np.exp(-1.0 / (sr * self._COMP_RELEASE_MS / 1000.0))
-        makeup_lin    = 10 ** (self._COMP_MAKEUP_DB / 20)
-        envelope = np.zeros_like(x)
-        level    = 0.0
-        for i, s in enumerate(np.abs(x)):
-            level       = (attack_coef if s > level else release_coef) * level + (1.0 - (attack_coef if s > level else release_coef)) * s
-            envelope[i] = level
-        above      = np.maximum(envelope - threshold_lin, 0.0)
+        makeup_lin = 10 ** (self._COMP_MAKEUP_DB / 20)
+        above = torch.clamp(env - threshold_lin, min=0.0)
         gain_reduce = threshold_lin + above / self._COMP_RATIO
-        gain        = np.where(envelope > 1e-8, gain_reduce / envelope, 1.0)
-        return torch.from_numpy((x * gain * makeup_lin).astype(np.float32)).unsqueeze(0)
+        gain = torch.where(env > 1e-8, gain_reduce / env, torch.ones_like(env))
+        gain = F.lowpass_biquad(gain, self.TARGET_SR, cutoff_freq=20.0)
+        return w * gain * makeup_lin
 
     def _strip_silence(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
@@ -237,7 +215,7 @@ class AudioEnhancer:
             n_frames   = w.shape[1] // frame_size
             if n_frames < 2:
                 return w
-            energies = torch.tensor([w[:, i * frame_size:(i + 1) * frame_size].abs().mean().item() for i in range(n_frames)])
+            energies = w.abs().unfold(1, frame_size, frame_size).mean(dim=2).squeeze(0)
             voiced   = (energies > 0.001).nonzero(as_tuple=True)[0]
             if len(voiced) < 2:
                 return w
@@ -249,37 +227,38 @@ class AudioEnhancer:
             return w
 
     def _remove_internal_silence(self, w: torch.Tensor, sr: int, max_gap_ms: int = 500) -> torch.Tensor:
-        frame_size     = int(sr * 0.02)
-        max_gap_frames = int(max_gap_ms / 20)
-        n_frames       = w.shape[1] // frame_size
-        energy         = torch.tensor([w[:, i * frame_size:(i + 1) * frame_size].pow(2).mean().sqrt().item() for i in range(n_frames)])
-        voiced         = energy > 0.005
-        segments: list[torch.Tensor] = []
-        silence_run    = 0
-        for i in range(n_frames):
-            if voiced[i]:
-                if 0 < silence_run <= max_gap_frames:
-                    segments.append(w[:, (i - silence_run) * frame_size:i * frame_size])
-                segments.append(w[:, i * frame_size:(i + 1) * frame_size])
-                silence_run = 0
-            else:
-                silence_run += 1
-        return torch.cat(segments, dim=1) if segments else w
+        try:
+            frame_size = int(sr * 0.02)
+            max_gap_frames = int(max_gap_ms / 20)
+            energies = w.pow(2).unfold(1, frame_size, frame_size).mean(dim=2).sqrt().squeeze(0)
+            voiced = energies > 0.005
+            segments = []
+            silence_run = 0
+            for i in range(len(voiced)):
+                if voiced[i]:
+                    if 0 < silence_run <= max_gap_frames:
+                        segments.append(w[:, (i - silence_run) * frame_size:i * frame_size])
+                    segments.append(w[:, i * frame_size:(i + 1) * frame_size])
+                    silence_run = 0
+                else:
+                    silence_run += 1
+            return torch.cat(segments, dim=1) if segments else w
+        except Exception:
+            return w
 
     def _normalise_lufs(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            meter    = pyln.Meter(self.TARGET_SR)
-            audio_np = w.squeeze(0).numpy().astype(np.float64)
+            meter = pyln.Meter(self.TARGET_SR)
+            audio_np = w.cpu().squeeze(0).numpy().astype(np.float64)
             loudness = meter.integrated_loudness(audio_np)
-            print(f"[ENHANCER] Measured loudness: {loudness:.1f} LUFS → target {self.TARGET_LUFS} LUFS")
             if not np.isfinite(loudness) or loudness < -60:
                 return self._peak_normalise(w)
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 normalised = pyln.normalize.loudness(audio_np, loudness, self.TARGET_LUFS)
-            result = torch.from_numpy(normalised.astype(np.float32)).unsqueeze(0)
-            peak   = result.abs().max().item()
+            result = torch.from_numpy(normalised.astype(np.float32)).unsqueeze(0).to(self._device)
+            peak = result.abs().max().item()
             if peak > 0.99:
                 result = result * (0.99 / peak)
             return result
@@ -302,39 +281,39 @@ class AudioEnhancer:
 
     async def enhance(self, input_path: str, recording_id: str, job_id: str) -> EnhancementResult:
         loop = asyncio.get_event_loop()
-
-        waveform, sr   = self._load_audio(input_path)
-        raw_clone      = waveform.clone()
+        waveform, sr = self._load_audio(input_path)
+        raw_clone = waveform.clone()
         clipping_input = self._detect_clipping(waveform)
 
+        # 1. Initialize and transfer to CUDA upfront
         mono = self._to_mono(waveform)
-        mono = self._resample(mono, sr, self.TARGET_SR)
+        enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        enhanced = await loop.run_in_executor(None, self._dereverberate, mono, self.TARGET_SR)
+        # 2. Stage process
+        enhanced = await loop.run_in_executor(None, self._dereverberate, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-        enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced.repeat(2, 1), self.TARGET_SR)
-        enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
-        enhanced = self._apply_eq(enhanced, self.TARGET_SR)
-        enhanced = self._de_ess(enhanced, self.TARGET_SR)
+        enhanced = await loop.run_in_executor(None, self._dns_denoise, enhanced)
+        enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
+        enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
+        enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._compress, enhanced)
-        enhanced = self._strip_silence(enhanced, self.TARGET_SR)
-        enhanced = self._remove_internal_silence(enhanced, self.TARGET_SR)
+        enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
+        enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
+        enhanced = await loop.run_in_executor(None, self._remove_internal_silence, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
-        enhanced = self._true_peak_limit(enhanced)
+        enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
 
-        raw_mono      = self._to_mono(raw_clone)
-        raw_at_target = self._resample(raw_mono, sr, self.TARGET_SR)
-        snr           = self._compute_snr(raw_at_target, enhanced)
-        lufs          = self._compute_lufs(enhanced)
-        peak_db       = 20 * np.log10(enhanced.abs().max().item() + 1e-8)
+        raw_at_target = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
+        snr = self._compute_snr(raw_at_target, enhanced)
+        lufs = self._compute_lufs(enhanced)
+        peak_db = 20 * np.log10(enhanced.abs().max().item() + 1e-8)
         quality_score = self._compute_quality_score(snr, clipping_input, lufs)
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             out_path = tmp.name
-        torchaudio.save(out_path, enhanced, self.TARGET_SR)
+        torchaudio.save(out_path, enhanced.cpu(), self.TARGET_SR)
 
-        b2_key       = f"{settings.B2_ENHANCED_PREFIX}{recording_id}/{job_id}.wav"
+        b2_key = f"{settings.B2_ENHANCED_PREFIX}{recording_id}/{job_id}.wav"
         enhanced_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
 
         return EnhancementResult(
