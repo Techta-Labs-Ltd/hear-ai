@@ -177,12 +177,9 @@ async def test_pipeline_submit(client: httpx.AsyncClient):
             f"{BASE_URL}/api/v1/process",
             headers=HEADERS,
             json={
-                "audio_url": "https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3",
                 "job_id": job_id,
                 "recording_id": f"test-rec-{uuid.uuid4().hex[:8]}",
-                "callback_url": "https://httpbin.org/post",
-                "skip_enhancement": False,
-                "skip_transcription": False,
+                "job_type": "pipeline",
                 "max_tags": 5,
             },
         )
