@@ -8,6 +8,8 @@ sentry-sdk[fastapi]==2.14.0
 torch==2.4.1
 torchaudio==2.4.1
 demucs==4.0.1
+omegaconf>=2.1.0,<2.3.0
+
 faster-whisper==1.0.3
 transformers==4.45.0
 sentencepiece==0.2.0
