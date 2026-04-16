@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import re
 from collections import Counter
 from typing import Optional
@@ -78,16 +79,22 @@ class CategorizationService:
         layer1_task = loop.run_in_executor(
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
-        layer2_task = loop.run_in_executor(
-            None, self._zero_shot_layer, transcript, data.categories, data.tags
+        # Two separate zero-shot passes so each bucket gets its own probability budget:
+        # - categories pass: evaluates topic categories
+        # - tags pass: evaluates a random sample of hashtag labels
+        layer2_cat_task = loop.run_in_executor(
+            None, self._zero_shot_categories, transcript, data.categories
+        )
+        layer2_tag_task = loop.run_in_executor(
+            None, self._zero_shot_tags, transcript, data.tags
         )
         layer3_task = self._openai_layer(transcript, data.categories, data.tags)
         sentiment_task = loop.run_in_executor(None, self._get_sentiment, transcript)
 
-        layer1, layer2, layer3, sentiment = await asyncio.gather(
-            layer1_task, layer2_task, layer3_task, sentiment_task
+        layer1, layer2_cat, layer2_tag, layer3, sentiment = await asyncio.gather(
+            layer1_task, layer2_cat_task, layer2_tag_task, layer3_task, sentiment_task
         )
-        merged = self._merge(layer1, layer2, layer3, data.tags, data.categories, max_tags)
+        merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
 
         # --- 2. Persist new tags found from this transcript ---
         new_tags_added: list[str] = []
@@ -145,30 +152,36 @@ class CategorizationService:
         return {"scores": scores}
 
     # ------------------------------------------------------------------
-    # Zero-shot — run against a capped shortlist so probability
-    # isn't diluted across 400+ labels.
+    # Zero-shot — two dedicated passes so scores aren't diluted
     # ------------------------------------------------------------------
-    _ZS_MAX_CATEGORIES = 50
-    _ZS_MAX_TAGS       = 40
+    _ZS_MAX_CATEGORIES = 60   # evaluate all if under this count
+    _ZS_MAX_TAGS       = 80   # random sample from full tag library
     _ZS_TEMPLATE       = "This audio recording is about {}."
 
-    def _zero_shot_layer(self, transcript: str, categories: list[str], tags: list[str]) -> dict:
-        """Classify the transcript against a shortlist of categories AND tags."""
-        if not (categories or tags):
+    def _zero_shot_categories(self, transcript: str, categories: list[str]) -> dict:
+        """Zero-shot pass dedicated to topic categories."""
+        if not categories:
             return {"scores": {}}
-
-        # Cap each bucket so total labels stay manageable for the NLI model
-        label_pool = categories[: self._ZS_MAX_CATEGORIES] + tags[: self._ZS_MAX_TAGS]
-        if not label_pool:
-            return {"scores": {}}
-
+        labels = categories[: self._ZS_MAX_CATEGORIES]
         output = self._zero_shot(
-            transcript[:1024],
-            label_pool,
-            hypothesis_template=self._ZS_TEMPLATE,
+            transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE
         )
-        scores = dict(zip(output["labels"], output["scores"]))
-        return {"scores": scores}
+        return {"scores": dict(zip(output["labels"], output["scores"]))}
+
+    def _zero_shot_tags(self, transcript: str, tags: list[str]) -> dict:
+        """Zero-shot pass over a random sample of hashtag labels.
+
+        Random sampling ensures tags deep in the file (e.g. #Wildlife, #Photography)
+        get evaluated even when the library has 600+ entries.
+        """
+        if not tags:
+            return {"scores": {}}
+        sample_size = min(self._ZS_MAX_TAGS, len(tags))
+        sample = random.sample(tags, sample_size)
+        output = self._zero_shot(
+            transcript[:1024], sample, hypothesis_template=self._ZS_TEMPLATE
+        )
+        return {"scores": dict(zip(output["labels"], output["scores"]))}
 
     async def _openai_layer(self, transcript: str, categories: list[str], tags: list[str]) -> dict:
         if not settings.OPENAI_API_KEY:
@@ -239,23 +252,25 @@ class CategorizationService:
             return "neutral"
 
     # ------------------------------------------------------------------
-    # Merge — combine all three layer scores, always return something
+    # Merge — combine all layer scores, always return something
     # ------------------------------------------------------------------
-    _TAG_THRESHOLD = 0.20   # lowered: zero-shot dilutes scores across many labels
+    _TAG_THRESHOLD = 0.20
     _CAT_THRESHOLD = 0.30
 
     def _merge(
         self,
-        layer1: dict,
-        layer2: dict,
-        layer3: dict,
+        layer1: dict,       # keyword scores
+        layer2_cat: dict,   # zero-shot category scores
+        layer2_tag: dict,   # zero-shot tag scores
+        layer3: dict,       # openai scores
         all_tags: list[str],
         all_categories: list[str],
         max_tags: int,
     ) -> dict:
-        l1 = layer1.get("scores", {})
-        l2 = layer2.get("scores", {})
-        l3 = layer3.get("scores", {})
+        l1  = layer1.get("scores", {})
+        l2c = layer2_cat.get("scores", {})
+        l2t = layer2_tag.get("scores", {})
+        l3  = layer3.get("scores", {})
 
         # Merge any LLM-suggested new tags into the pool
         known_tags = set(all_tags)
@@ -263,42 +278,37 @@ class CategorizationService:
             if tag.startswith("#") and tag not in known_tags:
                 known_tags.add(tag)
 
-        # Score every known tag from all three layers
+        # Score every known tag: keyword (l1) + dedicated tag zero-shot (l2t) + openai (l3)
         merged_tag_scores: dict[str, float] = {}
         for tag in known_tags:
             s1 = l1.get(tag, 0)
-            s2 = l2.get(tag, 0)   # now populated because zero-shot includes tags
+            s2 = l2t.get(tag, 0)  # from the tags-only zero-shot pass
             s3 = l3.get(tag, 0)
             if s3 > 0:
                 merged_tag_scores[tag] = round(s1 * 0.25 + s2 * 0.35 + s3 * 0.40, 4)
             else:
                 merged_tag_scores[tag] = round(s1 * 0.45 + s2 * 0.55, 4)
 
-        # Sort by score descending
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
-        # Primary: tags that meet the threshold
+        # Primary: tags above threshold
         tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
-
-        # Fallback: always return at least min(max_tags, 3) top tags
+        # Fallback: always return at least top-3
         if not tags and ranked_tags:
             tags = [t for t, _ in ranked_tags[:min(max_tags, 3)]]
 
-        # Score categories (zero-shot now includes categories too)
+        # Score categories from the dedicated category zero-shot pass (l2c) + openai (l3)
         cat_scores: dict[str, float] = {}
         for c in all_categories:
-            s2 = l2.get(c, 0)
+            s2 = l2c.get(c, 0)
             s3 = l3.get(c, 0)
             cat_scores[c] = round(s2 * 0.4 + s3 * 0.6, 4) if s3 > 0 else round(s2, 4)
 
-        # Primary: categories that meet the threshold
         categories = [c for c, s in cat_scores.items() if s >= self._CAT_THRESHOLD]
-
-        # Fallback: always return the top-scoring category
         if not categories and all_categories:
             categories = [max(all_categories, key=lambda c: cat_scores.get(c, 0))]
 
-        # Debug: log top scores so we can see what the model found
+        # Debug logging
         top_tags_dbg = [(t, s) for t, s in ranked_tags[:8]]
         top_cats_dbg = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)[:5]
         print(f"[CATEGORIZER] top_tag_scores={top_tags_dbg}")
