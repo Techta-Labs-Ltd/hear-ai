@@ -127,16 +127,6 @@ def custom_openapi():
         tags=app.openapi_tags,
         routes=app.routes,
     )
-    schema.setdefault("components", {})
-    schema["components"]["securitySchemes"] = {
-        "ApiKeyHeader": {
-            "type": "apiKey",
-            "in": "header",
-            "name": "X-Service-Key",
-            "description": "Service API key — enter once to authenticate all requests",
-        },
-    }
-    schema["security"] = [{"ApiKeyHeader": []}]
     app.openapi_schema = schema
     return app.openapi_schema
 
