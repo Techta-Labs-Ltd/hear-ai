@@ -43,8 +43,22 @@ class AudioEnhancer:
         return self._model is not None
 
     def _load_audio(self, path: str) -> tuple[torch.Tensor, int]:
-        waveform, sr = torchaudio.load(path)
-        return waveform, sr
+        file_size = os.path.getsize(path)
+        if file_size == 0:
+            raise ValueError(f"Audio file is empty: {path}")
+
+        for backend in ("soundfile", "ffmpeg", None):
+            try:
+                kwargs = {"backend": backend} if backend else {}
+                waveform, sr = torchaudio.load(path, **kwargs)
+                return waveform, sr
+            except Exception:
+                continue
+
+        raise RuntimeError(
+            f"Could not load audio from {path} ({file_size} bytes) — "
+            "no compatible torchaudio backend. Install soundfile or ffmpeg."
+        )
 
     def _to_mono(self, w: torch.Tensor) -> torch.Tensor:
         return w.mean(dim=0, keepdim=True) if w.shape[0] > 1 else w
