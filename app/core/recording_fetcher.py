@@ -17,6 +17,8 @@ class TrackData:
     is_enhanced: bool = False
     has_transcription: bool = False
     status: str = "pending"
+    quality_score: float | None = None
+    snr_db: float | None = None
 
 
 @dataclass
@@ -27,6 +29,12 @@ class RecordingData:
     tracks: list[TrackData]
     flag: str | None = None
     category: str | None = None
+    status: str = "draft"
+    tags: list = None
+
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
 
 
 async def fetch_recording(recording_id: str) -> RecordingData:
@@ -50,8 +58,10 @@ async def fetch_recording(recording_id: str) -> RecordingData:
             sort_order=t.get("sort_order", 0),
             duration=t.get("duration", 0),
             is_enhanced=t.get("is_enhanced", False),
-            has_transcription=t.get("has_transcription", False),
+            has_transcription=t.get("transcription") is not None,
             status=t.get("status", "pending"),
+            quality_score=t.get("quality_score"),
+            snr_db=t.get("snr_db"),
         ))
 
     tracks.sort(key=lambda t: t.sort_order)
@@ -63,4 +73,6 @@ async def fetch_recording(recording_id: str) -> RecordingData:
         tracks=tracks,
         flag=data.get("flag"),
         category=data.get("category"),
+        status=data.get("status", "draft"),
+        tags=data.get("tags", []),
     )
