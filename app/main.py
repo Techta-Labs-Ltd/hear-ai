@@ -4,6 +4,7 @@ import uvicorn
 import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
@@ -114,6 +115,38 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(api_router)
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        tags=app.openapi_tags,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})
+    schema["components"]["securitySchemes"] = {
+        "ApiKeyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Service-Key",
+            "description": "Service API key — enter once to authenticate all requests",
+        },
+        "BearerToken": {
+            "type": "http",
+            "scheme": "bearer",
+            "description": "Alternative: pass the same key as a Bearer token",
+        },
+    }
+    schema["security"] = [{"ApiKeyHeader": []}, {"BearerToken": []}]
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, workers=1, reload=False)

@@ -244,12 +244,16 @@ class PipelineWorker:
             skip_transcription_for_type = job.job_type == "magic_clean"
 
             if not job.skip_transcription and not skip_transcription_for_type:
-                tracks_to_transcribe = (
-                    [tp for tp in (enhanced_track_paths or track_paths)
-                     if not next((t for t in active_tracks if t.track_id == tp["track_id"]), None).has_transcription]
-                    if job.job_type == "rebuild"
-                    else (enhanced_track_paths or track_paths)
-                )
+                track_id_map = {t.track_id: t for t in active_tracks}
+                all_source = enhanced_track_paths or track_paths
+                tracks_to_transcribe = [
+                    tp for tp in all_source
+                    if not track_id_map.get(tp["track_id"], object()).has_transcription
+                ]
+                for tp in all_source:
+                    t = track_id_map.get(tp["track_id"])
+                    if t and t.has_transcription:
+                        print(f"[JOB:{job_id[:8]}] TRANSCRIBE skip track={tp['track_id'][:8]} (has_transcription=True)")
 
                 if tracks_to_transcribe and not job.existing_transcript:
                     print(f"[JOB:{job_id[:8]}] TRANSCRIBE → {len(tracks_to_transcribe)} track(s)")

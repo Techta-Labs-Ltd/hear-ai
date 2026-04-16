@@ -17,27 +17,18 @@ class JobStatus(str, Enum):
 class PipelineRequest(BaseModel):
     recording_id: str
     job_id: str
-    callback_url: str
     job_type: str = "pipeline"
-    skip_enhancement: bool = False
-    skip_transcription: bool = False
-    existing_transcript: Optional[str] = None
     max_tags: int = 8
 
 
 class TranscribeRequest(BaseModel):
-    audio_url: str
-    language: Optional[str] = None
     job_id: str
     recording_id: str
-    callback_url: str
 
 
 class EnhanceRequest(BaseModel):
-    audio_url: str
     job_id: str
     recording_id: str
-    callback_url: str
 
 
 class CategorizeRequest(BaseModel):

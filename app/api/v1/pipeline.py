@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from sqlalchemy.exc import IntegrityError
 
 from app.api.auth import verify_service_key
+from app.config import settings
 from app.models.schemas import PipelineRequest, ReconstructRequest, JobAccepted
 from app.models.database import SessionLocal, AiJob
 from app.core.downloader import download_audio, cleanup_temp
@@ -21,30 +23,47 @@ router = APIRouter(tags=["Pipeline"])
     response_model=JobAccepted,
     status_code=202,
     summary="Submit a full pipeline job",
-    description="Enqueues an audio file for the full pipeline: enhancement → transcription → categorization → moderation. Returns immediately with a job ID.",
+    description="Enqueues a recording for processing. Returns immediately with a job ID.",
 )
 async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_service_key)):
     db = SessionLocal()
     try:
+        existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
+        if existing:
+            if existing.status in ("pending", "enhancing", "transcribing", "categorizing", "moderating"):
+                return JobAccepted(job_id=body.job_id)
+            existing.status = "pending"
+            existing.attempts = 0
+            existing.started_at = None
+            existing.completed_at = None
+            existing.error = None
+            existing.result_json = None
+            existing.callback_delivered = False
+            existing.job_type = body.job_type
+            existing.max_tags = body.max_tags
+            db.commit()
+            worker.enqueue(body.job_id)
+            return JobAccepted(job_id=body.job_id)
+
         job = AiJob(
             id=body.job_id,
             job_type=body.job_type,
             recording_id=body.recording_id,
             status="pending",
-            callback_url=body.callback_url,
-            skip_enhancement=body.skip_enhancement,
-            skip_transcription=body.skip_transcription,
-            existing_transcript=body.existing_transcript,
+            callback_url=settings.HEAR_CALLBACK_URL or None,
             max_tags=body.max_tags,
             created_at=datetime.utcnow(),
         )
         db.add(job)
         db.commit()
+    except IntegrityError:
+        db.rollback()
+        worker.enqueue(body.job_id)
+        return JobAccepted(job_id=body.job_id)
     finally:
         db.close()
 
     worker.enqueue(body.job_id)
-
     return JobAccepted(job_id=body.job_id)
 
 
@@ -87,7 +106,7 @@ async def process_realtime(
 @router.post(
     "/api/v1/reconstruct",
     summary="Reconstruct an audio segment",
-    description="Re-synthesises a segment of audio with new text using accent-aware Edge-TTS, returning the replacement audio URL.",
+    description="Re-synthesises a segment of audio with new text using accent-aware Edge-TTS.",
 )
 async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Depends(verify_service_key)):
     tmp_path = await download_audio(body.audio_url)
@@ -129,16 +148,25 @@ async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
     try:
         job = db.query(AiJob).filter(AiJob.id == job_id).first()
         if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "job_not_found",
+                    "job_id": job_id,
+                    "message": "No job with this ID exists. It may not have been submitted yet or the ID is incorrect.",
+                },
+            )
         return {
             "job_id": job.id,
             "job_type": job.job_type or "pipeline",
             "status": job.status,
             "recording_id": job.recording_id,
+            "attempts": job.attempts,
             "result": job.result_json,
             "error": job.error,
             "callback_delivered": job.callback_delivered,
             "created_at": str(job.created_at),
+            "started_at": str(job.started_at) if job.started_at else None,
             "completed_at": str(job.completed_at) if job.completed_at else None,
         }
     finally:
@@ -182,7 +210,9 @@ async def retry_callback(job_id: str, _auth: bool = Depends(verify_service_key))
             raise HTTPException(status_code=404, detail="Job not found")
         if job.status not in ("completed", "failed"):
             raise HTTPException(status_code=409, detail="Job still processing")
-        if not job.callback_url:
+
+        effective_url = job.callback_url or settings.HEAR_CALLBACK_URL
+        if not effective_url:
             raise HTTPException(status_code=400, detail="No callback URL configured")
 
         if job.status == "completed":
@@ -202,7 +232,7 @@ async def retry_callback(job_id: str, _auth: bool = Depends(verify_service_key))
                 "error": job.error or "unknown",
             }
 
-        delivered = await callback_service.send(job.callback_url, payload)
+        delivered = await callback_service.send(effective_url, payload)
         job.callback_delivered = delivered
         db.commit()
 
@@ -221,4 +251,3 @@ async def websocket_stream(ws: WebSocket, job_id: str):
             await ws.receive_text()
     except WebSocketDisconnect:
         manager.disconnect_ws(job_id, ws)
-
