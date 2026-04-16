@@ -10,6 +10,7 @@ from transformers import pipeline as hf_pipeline
 
 from app.config import settings
 from app.core.category_loader import category_loader
+from app.core.platform_settings import fetch_platform_settings
 
 PRETRAINED_BASE = "cross-encoder/nli-distilroberta-base"
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
@@ -51,10 +52,24 @@ class CategorizationService:
                 "categories": [],
                 "confidence_scores": {},
                 "sentiment": "neutral",
+                "new_tags_added": [],
+                "new_categories_added": [],
+                "settings_applied": False,
             }
 
-        if custom_tags:
-            for tag in custom_tags:
+        # --- 1. Fetch platform settings (auto_tag_keywords / blocked_keywords) ---
+        platform = await fetch_platform_settings()
+        settings_applied = bool(platform.auto_tag_keywords or platform.blocked_keywords)
+
+        # Seed custom_tags from both the caller and platform auto-tag list
+        combined_custom = list(custom_tags or [])
+        for kw in platform.auto_tag_keywords:
+            if kw and kw not in combined_custom:
+                combined_custom.append(kw)
+
+        # Register any custom/auto tags into the loader
+        if combined_custom:
+            for tag in combined_custom:
                 category_loader.add_tag(tag)
 
         data = category_loader.data
@@ -64,7 +79,7 @@ class CategorizationService:
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
         layer2_task = loop.run_in_executor(
-            None, self._zero_shot_layer, transcript, data.all_labels
+            None, self._zero_shot_layer, transcript, data.categories
         )
         layer3_task = self._openai_layer(transcript, data.categories, data.tags)
         sentiment_task = loop.run_in_executor(None, self._get_sentiment, transcript)
@@ -74,14 +89,40 @@ class CategorizationService:
         )
         merged = self._merge(layer1, layer2, layer3, data.tags, data.categories, max_tags)
 
+        # --- 2. Persist new tags found from this transcript ---
+        new_tags_added: list[str] = []
         for tag in merged["tags"]:
-            category_loader.add_tag(tag)
+            normalised = tag if tag.startswith("#") else f"#{tag}"
+            if normalised not in data.tags:
+                category_loader.add_tag(normalised)
+                new_tags_added.append(normalised)
+            elif tag not in data.tags:
+                category_loader.add_tag(tag)
+                new_tags_added.append(tag)
+
+        # --- 3. Persist new categories suggested by the LLM (layer3) ---
+        new_categories_added: list[str] = []
+        for suggested_cat in layer3.get("suggested_categories", []):
+            clean = suggested_cat.lstrip("#").strip().title()
+            if clean and clean not in data.categories:
+                category_loader.add_category(clean)
+                new_categories_added.append(clean)
+
+        # --- 4. Filter blocked keywords from tags ---
+        if platform.blocked_keywords:
+            merged["tags"] = [
+                t for t in merged["tags"]
+                if not any(bk in t.lower() for bk in platform.blocked_keywords)
+            ]
 
         return {
             "tags": merged["tags"],
             "categories": merged["categories"],
             "confidence_scores": merged["confidence_scores"],
             "sentiment": sentiment,
+            "new_tags_added": new_tags_added,
+            "new_categories_added": new_categories_added,
+            "settings_applied": settings_applied,
         }
 
     def _keyword_layer(self, transcript: str, segments: list[dict], keyword_rules: dict) -> dict:
@@ -116,16 +157,18 @@ class CategorizationService:
 
     async def _openai_layer(self, transcript: str, categories: list[str], tags: list[str]) -> dict:
         if not settings.OPENAI_API_KEY:
-            return {"scores": {}, "suggested_tags": []}
+            return {"scores": {}, "suggested_tags": [], "suggested_categories": []}
 
         cat_list = ", ".join(categories[:30])
         tag_list = ", ".join(tags[:50])
 
         prompt = (
-            f"Analyze this audio transcript and return a JSON object with two keys:\n"
+            f"Analyze this audio transcript and return a JSON object with three keys:\n"
             f"1. \"categories\": pick the most relevant from [{cat_list}] with confidence 0-1\n"
             f"2. \"tags\": pick the most relevant from [{tag_list}] with confidence 0-1, "
-            f"plus suggest up to 3 new tags if none fit well (prefix with #)\n\n"
+            f"plus suggest up to 3 new tags if none fit well (prefix with #)\n"
+            f"3. \"new_categories\": list up to 2 new category names (plain strings, no #) "
+            f"if the content clearly belongs to a category not in the list\n\n"
             f"Transcript:\n{transcript[:2000]}\n\n"
             f"Return ONLY valid JSON, no explanation."
         )
@@ -159,10 +202,14 @@ class CategorizationService:
                 scores[tag] = round(float(conf), 4)
 
             suggested = [t for t in parsed.get("tags", {}).keys() if t.startswith("#")]
+            suggested_categories = [
+                c.strip() for c in parsed.get("new_categories", [])
+                if isinstance(c, str) and c.strip()
+            ]
 
-            return {"scores": scores, "suggested_tags": suggested}
+            return {"scores": scores, "suggested_tags": suggested, "suggested_categories": suggested_categories}
         except Exception:
-            return {"scores": {}, "suggested_tags": []}
+            return {"scores": {}, "suggested_tags": [], "suggested_categories": []}
 
     def _get_sentiment(self, transcript: str) -> str:
         try:

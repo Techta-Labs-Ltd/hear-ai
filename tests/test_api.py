@@ -239,9 +239,34 @@ async def test_categorization_from_transcript(client: httpx.AsyncClient, transcr
         )
         data = r.json()
         assert r.status_code == 200, f"{r.status_code}: {r.text}"
-        log("pass", f"Tags: {data.get('tags', [])}")
-        log("pass", f"Categories: {data.get('categories', [])}")
-        log("pass", f"Sentiment: {data.get('sentiment', '?')}")
+
+        tags = data.get("tags", [])
+        categories = data.get("categories", [])
+        sentiment = data.get("sentiment", "?")
+        new_tags = data.get("new_tags_added", [])
+        new_cats = data.get("new_categories_added", [])
+        settings_applied = data.get("settings_applied", False)
+
+        log("pass", f"Tags: {tags}")
+        log("pass", f"Categories: {categories}")
+        log("pass", f"Sentiment: {sentiment}")
+        log("pass" if isinstance(settings_applied, bool) else "warn",
+            f"Platform settings applied: {settings_applied}")
+
+        if new_tags:
+            log("pass", f"New tags persisted to categories.txt: {new_tags}")
+        else:
+            log("warn", "No new tags discovered in this transcript")
+
+        if new_cats:
+            log("pass", f"New categories persisted to categories.txt: {new_cats}")
+
+        # Validate all required fields are present
+        for field in ("tags", "categories", "confidence_scores", "sentiment",
+                      "new_tags_added", "new_categories_added", "settings_applied"):
+            assert field in data, f"Missing field: {field}"
+        log("pass", "All required response fields present")
+
     except Exception as e:
         log("fail", "Categorization from transcript", str(e))
 

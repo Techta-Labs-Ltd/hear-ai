@@ -41,6 +41,8 @@ Human Rights
 Space
 Marine
 Wildlife
+Nature
+Animals
 Automotive
 Real Estate
 Retail
@@ -679,6 +681,14 @@ Mythology
 #Environment
 #Climate
 #Wildlife
+#Nature
+#Animals
+#Birding
+#Safari
+#NationalPark
+#Endangered
+#Extinction
+#Poaching
 #Conservation
 #Pollution
 #Recycling
@@ -1047,3 +1057,6 @@ marketing|advertising|brand|campaign|SEO|SEM|social.media|content|influencer|eng
 AI|artificial.intelligence|GPT|LLM|neural.network|deep.learning|NLP|computer.vision|generative|foundation.model|transformer|training|inference|fine.tuning|prompt|AGI|alignment|bias|ethics = #AI
 car|EV|electric.vehicle|Tesla|autonomous|self.driving|hybrid|SUV|sedan|truck|motorcycle|recall|engine|horsepower|torque|fuel|emission|dealership|lease|used.car = #Automotive
 real.estate|property|house|condo|apartment|commercial|residential|REITs|mortgage|appraisal|listing|broker|agent|open.house|closing|escrow|HOA|zoning|land.use = #RealEstate
+lion|tiger|elephant|rhino|rhinoceros|giraffe|zebra|cheetah|leopard|gorilla|chimpanzee|orangutan|monkey|wolf|bear|grizzly|polar.bear|deer|fox|rabbit|hawk|eagle|owl|parrot|falcon|vulture|flamingo|pelican|crocodile|alligator|snake|python|lizard|chameleon|turtle|tortoise|frog|salamander|dolphin|whale|orca|shark|penguin|seal|walrus|koala|kangaroo|wallaby|wombat|panda|jaguar|cougar|lynx|bison|buffalo|moose|elk|antelope|gazelle|wildebeest|hyena|meerkat|mongoose|otter|beaver|badger|squirrel|chipmunk|hedgehog|bat|hummingbird|woodpecker|safari|savanna|jungle|rainforest|habitat|migration|predator|prey|endangered|extinction|poaching|sanctuary|reserve|national.park|wildlife = #Wildlife
+nature|wilderness|forest|woodland|meadow|wetland|marsh|swamp|tundra|prairie|grassland|countryside|flora|fauna|ecosystem|landscape|scenery|birdsong|natural.world|wild|outdoor|expedition = #Nature
+animal|pet|dog|cat|puppy|kitten|horse|sheep|cow|pig|chicken|goat|duck|rabbit|hamster|guinea.pig|parrot|goldfish|aquarium|zoo|farm.animal|livestock|breed|species|creature|mammal|reptile|bird|amphibian|insect|bug|butterfly|moth|bee|ant|spider = #Animals
