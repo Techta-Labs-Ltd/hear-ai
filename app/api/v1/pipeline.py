@@ -1,5 +1,4 @@
 import asyncio
-import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
@@ -7,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.auth import verify_service_key
 from app.config import settings
-from app.models.schemas import PipelineRequest, ReconstructRequest, JobAccepted
+from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, JobAccepted
 from app.models.database import SessionLocal, AiJob
 from app.core.downloader import download_audio, cleanup_temp
 from app.realtime.broadcaster import manager, make_sse_response
@@ -70,26 +69,58 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
     "/api/v1/process-realtime",
     status_code=202,
     summary="Process a recording with real-time streaming",
-    description="Fetches the recording and all its tracks from the backend, then processes each track with live progress streamed via SSE and WebSocket.",
+    description="Fetches the recording and all its tracks from the backend, streams progress via SSE/WebSocket, and POSTs the final result to the callback URL.",
 )
 async def process_realtime(
-    recording_id: str,
+    body: RealtimeRequest,
     _auth: bool = Security(verify_service_key),
 ):
-    job_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
+        if existing:
+            if existing.status not in ("completed", "failed", "cancelled"):
+                return {
+                    "job_id": body.job_id,
+                    "recording_id": body.recording_id,
+                    "sse_url": f"/api/v1/events/{body.job_id}",
+                    "ws_url": f"/ws/{body.job_id}",
+                }
+            existing.status = "pending"
+            existing.attempts = 0
+            existing.error = None
+            existing.result_json = None
+            existing.callback_delivered = False
+            existing.job_type = body.job_type
+            existing.max_tags = body.max_tags
+            db.commit()
+        else:
+            job = AiJob(
+                id=body.job_id,
+                job_type=body.job_type,
+                recording_id=body.recording_id,
+                status="pending",
+                callback_url=settings.HEAR_CALLBACK_URL or None,
+                max_tags=body.max_tags,
+                created_at=datetime.utcnow(),
+            )
+            db.add(job)
+            db.commit()
+    finally:
+        db.close()
 
     asyncio.create_task(
         orchestrator.process_and_stream(
-            job_id=job_id,
-            recording_id=recording_id,
+            job_id=body.job_id,
+            recording_id=body.recording_id,
         )
     )
 
     return {
-        "job_id": job_id,
-        "recording_id": recording_id,
-        "sse_url": f"/api/v1/events/{job_id}",
-        "ws_url": f"/ws/{job_id}",
+        "job_id": body.job_id,
+        "recording_id": body.recording_id,
+        "sse_url": f"/api/v1/events/{body.job_id}",
+        "ws_url": f"/ws/{body.job_id}",
     }
 
 

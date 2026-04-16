@@ -1,9 +1,12 @@
 import time
 import traceback
+from datetime import datetime
 
 from app.core.downloader import download_audio, cleanup_temp
 from app.core.recording_fetcher import fetch_recording
+from app.models.database import SessionLocal, AiJob
 from app.realtime.broadcaster import manager
+from app.services.callback import callback_service
 
 
 class PipelineOrchestrator:
@@ -12,10 +15,30 @@ class PipelineOrchestrator:
         self.enhancer = enhancer
         self.categorizer = categorizer
 
+    def _get_job(self, job_id: str) -> AiJob | None:
+        db = SessionLocal()
+        try:
+            return db.query(AiJob).filter(AiJob.id == job_id).first()
+        finally:
+            db.close()
+
+    def _update_job(self, job_id: str, **kwargs):
+        db = SessionLocal()
+        try:
+            job = db.query(AiJob).filter(AiJob.id == job_id).first()
+            if job:
+                for k, v in kwargs.items():
+                    setattr(job, k, v)
+                db.commit()
+        finally:
+            db.close()
+
     async def process_and_stream(self, job_id: str, recording_id: str):
         tmp_paths = []
 
         try:
+            self._update_job(job_id, status="pending", started_at=datetime.utcnow())
+
             await manager.broadcast(job_id, {
                 "event": "pipeline_started",
                 "job_id": job_id,
@@ -36,6 +59,7 @@ class PipelineOrchestrator:
             })
 
             all_segments = []
+            track_results = {}
 
             for track in active_tracks:
                 tmp_path = await download_audio(track.audio_url)
@@ -50,6 +74,7 @@ class PipelineOrchestrator:
                 })
 
                 if not track.is_enhanced:
+                    self._update_job(job_id, status="enhancing")
                     await manager.broadcast(job_id, {
                         "event": "enhancement_started",
                         "job_id": job_id,
@@ -62,6 +87,11 @@ class PipelineOrchestrator:
                             input_path=tmp_path,
                             recording_id=recording_id,
                         )
+                        track_results[track.track_id] = {
+                            "enhanced_url": result.enhanced_url,
+                            "quality_score": result.quality_score,
+                            "snr_db": result.snr_db,
+                        }
                         await manager.broadcast(job_id, {
                             "event": "enhancement_complete",
                             "job_id": job_id,
@@ -91,7 +121,7 @@ class PipelineOrchestrator:
                     })
 
                 if not track.has_transcription:
-                    track_segments = []
+                    self._update_job(job_id, status="transcribing")
                     with open(tmp_path, "rb") as f:
                         audio_bytes = f.read()
 
@@ -104,7 +134,6 @@ class PipelineOrchestrator:
                                 "segment": chunk,
                                 "timestamp": time.time(),
                             })
-                            track_segments.append(chunk)
                             all_segments.append(chunk)
                         elif chunk["type"] == "done":
                             await manager.broadcast(job_id, {
@@ -130,20 +159,35 @@ class PipelineOrchestrator:
                         "timestamp": time.time(),
                     })
 
+            categorization_data = None
             if all_segments:
+                self._update_job(job_id, status="categorizing")
                 full_transcript = " ".join(s.get("text", "") for s in all_segments)
-                cat_result = await self.categorizer.categorize(
+                categorization_data = await self.categorizer.categorize(
                     transcript=full_transcript,
                     segments=all_segments,
                 )
                 await manager.broadcast(job_id, {
                     "event": "categorization_complete",
                     "job_id": job_id,
-                    "tags": cat_result["tags"],
-                    "categories": cat_result["categories"],
-                    "sentiment": cat_result["sentiment"],
+                    "tags": categorization_data["tags"],
+                    "categories": categorization_data["categories"],
+                    "sentiment": categorization_data["sentiment"],
                     "timestamp": time.time(),
                 })
+
+            result = {
+                "recording_id": recording_id,
+                "tracks": track_results,
+                "categorization": categorization_data,
+            }
+
+            self._update_job(
+                job_id,
+                status="completed",
+                result_json=result,
+                completed_at=datetime.utcnow(),
+            )
 
             await manager.broadcast(job_id, {
                 "event": "pipeline_complete",
@@ -152,7 +196,25 @@ class PipelineOrchestrator:
                 "timestamp": time.time(),
             })
 
+            job = self._get_job(job_id)
+            if job and job.callback_url:
+                payload = {
+                    "job_id": job_id,
+                    "job_type": job.job_type or "pipeline",
+                    "status": "completed",
+                    "result": result,
+                    "error": None,
+                }
+                delivered = await callback_service.send(job.callback_url, payload)
+                self._update_job(job_id, callback_delivered=delivered)
+
         except Exception as e:
+            self._update_job(
+                job_id,
+                status="failed",
+                error=str(e)[:500],
+                completed_at=datetime.utcnow(),
+            )
             await manager.broadcast(job_id, {
                 "event": "pipeline_error",
                 "job_id": job_id,
@@ -160,6 +222,17 @@ class PipelineOrchestrator:
                 "detail": traceback.format_exc(),
                 "timestamp": time.time(),
             })
+            job = self._get_job(job_id)
+            if job and job.callback_url:
+                payload = {
+                    "job_id": job_id,
+                    "job_type": job.job_type or "pipeline",
+                    "status": "failed",
+                    "result": None,
+                    "error": str(e)[:500],
+                }
+                delivered = await callback_service.send(job.callback_url, payload)
+                self._update_job(job_id, callback_delivered=delivered)
         finally:
             for p in tmp_paths:
                 cleanup_temp(p)

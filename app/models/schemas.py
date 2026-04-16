@@ -21,6 +21,13 @@ class PipelineRequest(BaseModel):
     max_tags: int = 8
 
 
+class RealtimeRequest(BaseModel):
+    recording_id: str
+    job_id: str
+    job_type: str = "pipeline"
+    max_tags: int = 8
+
+
 class TranscribeRequest(BaseModel):
     job_id: str
     recording_id: str
