@@ -135,13 +135,8 @@ def custom_openapi():
             "name": "X-Service-Key",
             "description": "Service API key — enter once to authenticate all requests",
         },
-        "BearerToken": {
-            "type": "http",
-            "scheme": "bearer",
-            "description": "Alternative: pass the same key as a Bearer token",
-        },
     }
-    schema["security"] = [{"ApiKeyHeader": []}, {"BearerToken": []}]
+    schema["security"] = [{"ApiKeyHeader": []}]
     app.openapi_schema = schema
     return app.openapi_schema
 
