@@ -118,6 +118,12 @@ class PipelineWorker:
             "error": job.error or "unknown",
         }
 
+    def _complete_job(self, db, job: AiJob, result: dict) -> None:
+        job.status = "completed"
+        job.completed_at = datetime.utcnow()
+        job.result_json = result
+        db.commit()
+
     async def _loop(self):
         while self._running:
             try:
@@ -173,6 +179,29 @@ class PipelineWorker:
                     f"is_enhanced={t.is_enhanced} has_transcription={t.has_transcription}"
                 )
 
+            if not active_tracks:
+                reason = "no_active_tracks"
+                print(f"[JOB:{job_id[:8]}] SKIP — {reason}")
+                self._complete_job(
+                    db, job,
+                    result={
+                        "recording_id": job.recording_id,
+                        "tracks": {},
+                        "master": {},
+                        "per_track_transcriptions": {},
+                        "skipped": True,
+                        "reason": reason,
+                        "processing_summary": {
+                            "enhanced": 0, "transcribed": 0,
+                            "categorized": False, "moderated": False,
+                        },
+                    },
+                )
+                if job.callback_url:
+                    await callback_service.send(job.callback_url, self._build_result_payload(job))
+                db.close()
+                return
+
             track_results = {}
             track_paths = []
             enhanced_track_paths = []
@@ -180,14 +209,13 @@ class PipelineWorker:
             for track in active_tracks:
                 tmp_path = await download_audio(track.audio_url)
                 tmp_paths.append(tmp_path)
-                track_entry = {
+                track_paths.append({
                     "track_id": track.track_id,
                     "path": tmp_path,
                     "volume": track.volume,
                     "is_muted": track.is_muted,
                     "name": track.name,
-                }
-                track_paths.append(track_entry)
+                })
 
                 should_enhance = (
                     not job.skip_enhancement
@@ -239,7 +267,6 @@ class PipelineWorker:
 
             per_track_transcriptions = {}
             combined_transcription = None
-
             skip_transcription_for_type = job.job_type == "magic_clean"
 
             if not job.skip_transcription and not skip_transcription_for_type:
@@ -272,7 +299,7 @@ class PipelineWorker:
                             continue
 
                         per_track_transcriptions[tp["track_id"]] = t_result
-                        transcript_preview = t_result.get('transcript', '')
+                        transcript_preview = t_result.get("transcript", "")
                         print(
                             f"[JOB:{job_id[:8]}] TRANSCRIBE ✓ track={tp['track_id'][:8]} "
                             f"lang={t_result.get('language')} "
@@ -285,11 +312,14 @@ class PipelineWorker:
                         with open(mixed_path, "rb") as f:
                             mixed_bytes = f.read()
                         combined_transcription = await self._transcriber.transcribe(mixed_bytes)
-                        print(
-                            f"[JOB:{job_id[:8]}] TRANSCRIBE ✓ master-mix "
-                            f"lang={combined_transcription.get('language')} "
-                            f"words={len(combined_transcription.get('transcript','').split())}"
-                        )
+                        if combined_transcription.get("silent"):
+                            combined_transcription = None
+                        else:
+                            print(
+                                f"[JOB:{job_id[:8]}] TRANSCRIBE ✓ master-mix "
+                                f"lang={combined_transcription.get('language')} "
+                                f"words={len(combined_transcription.get('transcript','').split())}"
+                            )
                     elif per_track_transcriptions:
                         first_key = list(per_track_transcriptions.keys())[0]
                         combined_transcription = per_track_transcriptions[first_key]
@@ -302,10 +332,44 @@ class PipelineWorker:
                     "language_probability": 1.0,
                     "duration": 0,
                     "confidence": 1.0,
+                    "silent": False,
                 }
 
-            transcript_text = combined_transcription.get("transcript", "") if combined_transcription else ""
+            transcript_text = combined_transcription.get("transcript", "").strip() if combined_transcription else ""
             segments = combined_transcription.get("segments", []) if combined_transcription else []
+
+            no_speech = (
+                not job.skip_transcription
+                and not skip_transcription_for_type
+                and not job.existing_transcript
+                and not transcript_text
+                and not per_track_transcriptions
+            )
+
+            if no_speech:
+                reason = "no_speech_detected"
+                print(f"[JOB:{job_id[:8]}] SKIP categorize+moderate — {reason}")
+                self._complete_job(
+                    db, job,
+                    result={
+                        "recording_id": job.recording_id,
+                        "tracks": track_results,
+                        "master": master_data,
+                        "per_track_transcriptions": {},
+                        "skipped": True,
+                        "reason": reason,
+                        "processing_summary": {
+                            "enhanced": len(track_results),
+                            "transcribed": 0,
+                            "categorized": False,
+                            "moderated": False,
+                        },
+                    },
+                )
+                if job.callback_url:
+                    await callback_service.send(job.callback_url, self._build_result_payload(job))
+                db.close()
+                return
 
             max_tags = job.max_tags if job.max_tags else 8
             categorization_data = None
@@ -332,7 +396,6 @@ class PipelineWorker:
                 db.commit()
 
                 combined_mod = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
-
                 track_moderations = {}
                 worst = combined_mod
                 severity_order = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -359,30 +422,29 @@ class PipelineWorker:
                     f"reason={moderation_data.get('reason')!r}"
                 )
 
-            result_payload = {
-                "job_id": job.id,
-                "job_type": job.job_type or "pipeline",
-                "status": "completed",
-                "result": {
-                    "recording_id": job.recording_id,
-                    "tracks": track_results,
-                    "master": master_data,
-                    "per_track_transcriptions": per_track_transcriptions,
+            result = {
+                "recording_id": job.recording_id,
+                "tracks": track_results,
+                "master": master_data,
+                "per_track_transcriptions": per_track_transcriptions,
+                "skipped": False,
+                "reason": None,
+                "processing_summary": {
+                    "enhanced": len(track_results),
+                    "transcribed": len(per_track_transcriptions),
+                    "categorized": categorization_data is not None,
+                    "moderated": moderation_data is not None,
                 },
-                "error": None,
             }
 
             if combined_transcription:
-                result_payload["result"]["transcription"] = combined_transcription
+                result["transcription"] = combined_transcription
             if categorization_data:
-                result_payload["result"]["categorization"] = categorization_data
+                result["categorization"] = categorization_data
             if moderation_data:
-                result_payload["result"]["moderation"] = moderation_data
+                result["moderation"] = moderation_data
 
-            job.status = "completed"
-            job.completed_at = datetime.utcnow()
-            job.result_json = result_payload["result"]
-            db.commit()
+            self._complete_job(db, job, result=result)
 
             duration = (job.completed_at - job.started_at).total_seconds() if job.started_at else 0
             print(
@@ -395,7 +457,7 @@ class PipelineWorker:
             )
 
             if job.callback_url:
-                delivered = await callback_service.send(job.callback_url, result_payload)
+                delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                 job.callback_delivered = delivered
                 db.commit()
 

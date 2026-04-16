@@ -1,6 +1,5 @@
 import asyncio
 import json
-import random
 import re
 from collections import Counter
 from typing import Optional
@@ -15,6 +14,16 @@ from app.core.platform_settings import fetch_platform_settings
 
 PRETRAINED_BASE = "cross-encoder/nli-distilroberta-base"
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+
+_STOPWORDS = {
+    "the", "and", "for", "with", "has", "was", "are", "his", "her", "they",
+    "that", "this", "from", "have", "been", "said", "also", "only", "when",
+    "into", "after", "their", "there", "were", "what", "which", "about",
+    "will", "would", "could", "should", "over", "some", "all", "more",
+    "than", "then", "just", "each", "even", "him", "had", "not", "but",
+    "out", "who", "two", "time", "very", "our", "here", "where", "both",
+    "other", "than", "those", "these", "him", "its", "year", "years",
+}
 
 
 class CategorizationService:
@@ -73,13 +82,21 @@ class CategorizationService:
         data = category_loader.data
         loop = asyncio.get_event_loop()
 
-        layer1, layer2_cat, layer2_tag, layer3, sentiment = await asyncio.gather(
-            loop.run_in_executor(None, self._keyword_layer, transcript, segments or [], data.keyword_rules),
-            loop.run_in_executor(None, self._zero_shot_categories, transcript, data.categories),
-            loop.run_in_executor(None, self._zero_shot_tags, transcript, data.tags),
+        # Step 1: keyword layer first — its results guide the zero-shot tag pool
+        layer1 = await loop.run_in_executor(
+            None, self._keyword_layer, transcript, segments or [], data.keyword_rules
+        )
+
+        # Step 2: zero-shot on categories + a curated tag pool built from keyword hits + transcript words
+        tag_pool = self._build_tag_pool(transcript, data.tags, layer1["scores"])
+
+        layer2_cat, layer2_tag, layer3, sentiment = await asyncio.gather(
+            loop.run_in_executor(None, self._zero_shot_labels, transcript, data.categories),
+            loop.run_in_executor(None, self._zero_shot_labels, transcript, tag_pool),
             self._openai_layer(transcript, data.categories, data.tags),
             loop.run_in_executor(None, self._get_sentiment, transcript),
         )
+
         merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
 
         new_tags_added: list[str] = []
@@ -115,6 +132,53 @@ class CategorizationService:
             "settings_applied": settings_applied,
         }
 
+    # ------------------------------------------------------------------
+
+    def _extract_transcript_words(self, transcript: str) -> set[str]:
+        """Return significant lowercase words from the transcript (length > 4, not stopwords)."""
+        words = set()
+        for w in re.split(r"[\s\.,;:!?\-\"\'()]+", transcript):
+            w = w.lower().strip()
+            if len(w) > 3 and w not in _STOPWORDS:
+                words.add(w)
+        return words
+
+    def _build_tag_pool(self, transcript: str, all_tags: list[str], keyword_scores: dict) -> list[str]:
+        """
+        Build an intelligent tag candidate pool:
+        1. Tags already matched by the keyword layer (guaranteed relevant)
+        2. Tags whose label words appear in the transcript
+        3. Fill remaining slots with a spread across all tag sections
+        """
+        tx_words = self._extract_transcript_words(transcript)
+        priority: list[str] = []
+        seen: set[str] = set()
+
+        # Priority 1: keyword layer hits
+        for tag in all_tags:
+            if tag in keyword_scores and tag not in seen:
+                priority.append(tag)
+                seen.add(tag)
+
+        # Priority 2: tags whose own text overlaps with transcript words
+        for tag in all_tags:
+            if tag in seen:
+                continue
+            tag_words = set(re.findall(r"[a-z]+", tag.lower()))
+            if tag_words & tx_words:
+                priority.append(tag)
+                seen.add(tag)
+
+        # Fill remaining slots: spread evenly across the full tag list
+        remaining = [t for t in all_tags if t not in seen]
+        fill_slots = max(0, 120 - len(priority))
+        if fill_slots and remaining:
+            step = max(1, len(remaining) // fill_slots)
+            filler = [remaining[i] for i in range(0, len(remaining), step)][:fill_slots]
+            priority.extend(filler)
+
+        return priority
+
     def _keyword_layer(self, transcript: str, segments: list[dict], keyword_rules: dict) -> dict:
         text_lower = transcript.lower()
         scores = {}
@@ -134,22 +198,12 @@ class CategorizationService:
                 scores[tag] = round(scores.get(tag, 0) * 0.6 + density * 0.4, 4)
         return {"scores": scores}
 
-    _ZS_MAX_CATEGORIES = 60
-    _ZS_MAX_TAGS = 80
     _ZS_TEMPLATE = "This audio recording is about {}."
 
-    def _zero_shot_categories(self, transcript: str, categories: list[str]) -> dict:
-        if not categories:
+    def _zero_shot_labels(self, transcript: str, labels: list[str]) -> dict:
+        if not labels:
             return {"scores": {}}
-        labels = categories[: self._ZS_MAX_CATEGORIES]
         output = self._zero_shot(transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE)
-        return {"scores": dict(zip(output["labels"], output["scores"]))}
-
-    def _zero_shot_tags(self, transcript: str, tags: list[str]) -> dict:
-        if not tags:
-            return {"scores": {}}
-        sample = random.sample(tags, min(self._ZS_MAX_TAGS, len(tags)))
-        output = self._zero_shot(transcript[:1024], sample, hypothesis_template=self._ZS_TEMPLATE)
         return {"scores": dict(zip(output["labels"], output["scores"]))}
 
     async def _openai_layer(self, transcript: str, categories: list[str], tags: list[str]) -> dict:
@@ -218,8 +272,8 @@ class CategorizationService:
         except Exception:
             return "neutral"
 
-    _TAG_THRESHOLD = 0.20
-    _CAT_THRESHOLD = 0.30
+    _TAG_THRESHOLD = 0.35
+    _CAT_THRESHOLD = 0.40
 
     def _merge(
         self,
@@ -248,14 +302,18 @@ class CategorizationService:
             s3 = l3.get(tag, 0)
             if s3 > 0:
                 merged_tag_scores[tag] = round(s1 * 0.25 + s2 * 0.35 + s3 * 0.40, 4)
-            else:
+            elif s1 > 0 and s2 > 0:
                 merged_tag_scores[tag] = round(s1 * 0.45 + s2 * 0.55, 4)
+            elif s1 > 0:
+                merged_tag_scores[tag] = round(s1 * 0.80, 4)
+            else:
+                merged_tag_scores[tag] = round(s2, 4)
 
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
         tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
         if not tags and ranked_tags:
-            tags = [t for t, _ in ranked_tags[:min(max_tags, 3)]]
+            tags = [t for t, _ in ranked_tags[:min(max_tags, 2)]]
 
         cat_scores: dict[str, float] = {}
         for c in all_categories:
