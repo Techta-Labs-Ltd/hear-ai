@@ -4,20 +4,19 @@ import tempfile
 from dataclasses import dataclass
 
 import numpy as np
+import noisereduce as nr
 import torch
 import torchaudio
 import torchaudio.functional as F
 from demucs.apply import apply_model
 from demucs.pretrained import get_model
+from denoiser import pretrained as dns_pretrained
+from df.enhance import enhance as df_enhance, init_df
+from nara_wpe.wpe import wpe_v8
+from nara_wpe.utils import stft as wpe_stft, istft as wpe_istft
 
 from app.config import settings
 from app.core.storage import storage
-
-try:
-    import noisereduce as nr
-    _NR_AVAILABLE = True
-except ImportError:
-    _NR_AVAILABLE = False
 
 
 @dataclass
@@ -34,6 +33,9 @@ class EnhancementResult:
 
 class AudioEnhancer:
     TARGET_SR = 44100
+    DFN_SR = 48_000
+    DNS_SR = 16_000
+
     TARGET_LUFS = -16.0
 
     _HP_FREQ = 80.0
@@ -53,17 +55,30 @@ class AudioEnhancer:
     _DESS_Q2 = 2.0
 
     def __init__(self):
-        self._model = None
+        self._demucs = None
+        self._dns = None
+        self._dfn_model = None
+        self._dfn_state = None
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def load(self):
-        self._model = get_model(settings.DEMUCS_MODEL)
-        self._model.to(self._device)
-        self._model.eval()
+        self._demucs = get_model(settings.DEMUCS_MODEL)
+        self._demucs.to(self._device)
+        self._demucs.eval()
+
+        self._dfn_model, self._dfn_state, _ = init_df()
+        print("[ENHANCER] DeepFilterNet loaded")
+
+        self._dns = dns_pretrained.dns64()
+        self._dns.to(self._device)
+        self._dns.eval()
+        print("[ENHANCER] Facebook DNS denoiser loaded (dns64)")
+
+        print("[ENHANCER] nara_wpe de-reverberation ready")
 
     @property
     def is_loaded(self) -> bool:
-        return self._model is not None
+        return self._demucs is not None
 
     # ------------------------------------------------------------------ #
     #  I/O helpers
@@ -121,76 +136,65 @@ class AudioEnhancer:
     #  Processing pipeline
     # ------------------------------------------------------------------ #
 
-    def _noise_reduce(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        """
-        Non-stationary spectral noise reduction.
-
-        Uses noisereduce when available (handles dog barking, traffic, background
-        noise by profiling the noise floor in short windows and suppressing it).
-        Falls back to a pure-PyTorch Wiener-filter spectral gate that removes
-        stationary noise (hum, AC, room noise) when the library is absent.
-        """
+    def _dereverberate(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
-            if _NR_AVAILABLE:
-                audio_np = w.squeeze(0).numpy()
-                reduced = nr.reduce_noise(
-                    y=audio_np,
-                    sr=sr,
-                    stationary=False,      # handles transient noise (barking, traffic)
-                    prop_decrease=0.85,    # aggressiveness: 0-1 (higher = more suppression)
-                    n_fft=1024,
-                    n_jobs=-1,
-                )
-                return torch.from_numpy(reduced).unsqueeze(0)
-
-            # --- Pure-PyTorch Wiener spectral gate (stationary noise only) ---
-            win_len = 1024
-            hop = 256
-            window = torch.hann_window(win_len, device=w.device)
-            spec = torch.stft(
-                w.squeeze(0), n_fft=win_len, hop_length=hop,
-                window=window, return_complex=True,
-            )
-            magnitude = spec.abs()
-            phase = spec / (magnitude + 1e-8)
-
-            frame_energy = magnitude.mean(dim=0)
-            n_noise = max(1, int(frame_energy.shape[0] * 0.15))
-            _, noise_idx = torch.topk(frame_energy, n_noise, largest=False)
-            noise_floor = magnitude[:, noise_idx].mean(dim=1, keepdim=True) * 2.0
-
-            gain = ((magnitude - noise_floor).clamp(min=0) / (magnitude + 1e-8)).pow(1.5)
-            denoised = torch.istft(
-                magnitude * gain * phase, n_fft=win_len, hop_length=hop,
-                window=window, length=w.shape[1],
-            )
-            return denoised.unsqueeze(0)
+            audio_np = w.squeeze(0).numpy().astype(np.float64)
+            Y = wpe_stft(audio_np, size=512, shift=128).T[None]
+            Z = wpe_v8(Y, taps=10, delay=3, iterations=3)
+            dereverbed = wpe_istft(Z[0].T, size=512, shift=128)
+            dereverbed = dereverbed[: audio_np.shape[0]]
+            return torch.from_numpy(dereverbed.astype(np.float32)).unsqueeze(0)
         except Exception:
             return w
 
-    def _denoise_demucs(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
-        """
-        Source separation via Demucs — extracts the vocals stem.
+    def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
+        try:
+            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR)
+            audio_np = w_48k.squeeze(0).numpy()
+            clean_np = df_enhance(self._dfn_model, self._dfn_state, audio_np)
+            clean = torch.from_numpy(clean_np).unsqueeze(0)
+            return self._resample(clean, self.DFN_SR, self.TARGET_SR)
+        except Exception as e:
+            print(f"[ENHANCER] DeepFilterNet error: {e} — falling back to DNS")
+            return self._dns_denoise(w)
 
-        This removes background music and structured instrument noise.
-        It works best when combined with _noise_reduce() which handles
-        environmental noise that Demucs does not remove (dog barking, etc.).
-        """
+    def _dns_denoise(self, w: torch.Tensor) -> torch.Tensor:
+        try:
+            w_16k = self._resample(w, self.TARGET_SR, self.DNS_SR).to(self._device)
+            with torch.no_grad():
+                clean = self._dns(w_16k[None])[0].cpu()
+            return self._resample(clean, self.DNS_SR, self.TARGET_SR)
+        except Exception as e:
+            print(f"[ENHANCER] DNS error: {e} — falling back to noisereduce")
+            return self._nr_denoise(w)
+
+    def _nr_denoise(self, w: torch.Tensor) -> torch.Tensor:
+        try:
+            audio_np = w.squeeze(0).numpy()
+            reduced = nr.reduce_noise(
+                y=audio_np, sr=self.TARGET_SR,
+                stationary=False, prop_decrease=0.85,
+            )
+            return torch.from_numpy(reduced).unsqueeze(0)
+        except Exception:
+            return w
+
+    def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
         if waveform.dim() == 2 and waveform.shape[0] == 1:
             waveform = waveform.repeat(2, 1)
 
-        resampled = self._resample(waveform, sr, self._model.samplerate)
+        resampled = self._resample(waveform, sr, self._demucs.samplerate)
 
         with torch.no_grad():
             sources = apply_model(
-                self._model,
+                self._demucs,
                 resampled[None].to(self._device),
                 progress=False,
             )[0]
 
-        vocals_idx = self._model.sources.index("vocals")
+        vocals_idx = self._demucs.sources.index("vocals")
         vocals = sources[vocals_idx].cpu()
-        vocals = self._resample(vocals, self._model.samplerate, self.TARGET_SR)
+        vocals = self._resample(vocals, self._demucs.samplerate, self.TARGET_SR)
         return self._to_mono(vocals)
 
     def _apply_eq(self, w: torch.Tensor, sr: int) -> torch.Tensor:
@@ -229,7 +233,6 @@ class AudioEnhancer:
                 w[:, i * frame_size:(i + 1) * frame_size].abs().mean().item()
                 for i in range(n_frames)
             ])
-
             voiced = (energies > 0.001).nonzero(as_tuple=True)[0]
             if len(voiced) < 2:
                 return w
@@ -237,7 +240,6 @@ class AudioEnhancer:
             start = int(voiced[0].item()) * frame_size
             end = min(w.shape[1], (int(voiced[-1].item()) + 1) * frame_size)
             trimmed = w[:, start:end]
-
             return trimmed if trimmed.shape[1] >= sr * 0.1 else w
         except Exception:
             return w
@@ -291,22 +293,21 @@ class AudioEnhancer:
         raw_clone = waveform.clone()
         clipping_input = self._detect_clipping(waveform)
 
-        # Step 1: spectral noise reduction on raw audio
-        # Profiles the noise floor and suppresses background sounds
-        # (dog barking, traffic, AC hum) BEFORE Demucs runs.
-        mono_raw = self._to_mono(waveform)
-        mono_raw = self._resample(mono_raw, sr, self.TARGET_SR)
-        mono_raw = self._noise_reduce(mono_raw, self.TARGET_SR)
+        mono = self._to_mono(waveform)
+        mono = self._resample(mono, sr, self.TARGET_SR)
 
-        # Step 2: Demucs source separation
-        # Removes background music / instrument bleed from the denoised signal.
-        enhanced = await loop.run_in_executor(None, self._denoise_demucs, mono_raw.repeat(2, 1), self.TARGET_SR)
+        # Stage 1: De-reverberation — remove room echo/reverb
+        enhanced = await loop.run_in_executor(None, self._dereverberate, mono, self.TARGET_SR)
 
-        # Step 3: second-pass noise reduction on the extracted vocals
-        # Catches any residual noise that Demucs let through.
-        enhanced = self._noise_reduce(enhanced, self.TARGET_SR)
+        # Stage 2: DeepFilterNet — SOTA speech enhancement, removes all noise types
+        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
 
-        # Step 4: tonal shaping + dynamics
+        # Stage 3: Demucs — isolate vocals stem, strip background music
+        enhanced = await loop.run_in_executor(
+            None, self._demucs_extract_vocals, enhanced.repeat(2, 1), self.TARGET_SR
+        )
+
+        # Stage 4: EQ, de-essing, silence cleanup, loudness normalisation
         enhanced = self._apply_eq(enhanced, self.TARGET_SR)
         enhanced = self._de_ess(enhanced, self.TARGET_SR)
         enhanced = self._strip_silence(enhanced, self.TARGET_SR)
