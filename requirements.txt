@@ -19,6 +19,9 @@ openai>=1.0.0
 noisereduce>=3.0.0
 denoiser>=0.1.5
 deepfilternet>=0.5.6
-nara_wpe>=0.9.1
+nara_wpe>=0.0.9
+
+pyloudnorm>=0.1.1
+
 
 
