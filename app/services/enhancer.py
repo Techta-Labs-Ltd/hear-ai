@@ -199,6 +199,37 @@ class AudioEnhancer:
         except Exception:
             return w
 
+    def _residual_cleanup(self, w: torch.Tensor) -> torch.Tensor:
+        """
+        Aggressive noisereduce pass applied AFTER Demucs.
+
+        Demucs is a music source separator — when the bark isn't fully
+        removed by DeepFilterNet it can still bleed into the vocals stem.
+        This pass profiles the noise floor of the post-Demucs signal and
+        performs targeted spectral subtraction to eliminate residual sounds.
+        """
+        try:
+            audio_np = w.squeeze(0).numpy()
+            # First pass: non-stationary (catches transient sounds like barking)
+            stage1 = nr.reduce_noise(
+                y=audio_np,
+                sr=self.TARGET_SR,
+                stationary=False,
+                prop_decrease=0.92,
+                n_std_thresh_stationary=1.5,
+            )
+            # Second pass: stationary (catches constant residual hum/hiss)
+            stage2 = nr.reduce_noise(
+                y=stage1,
+                sr=self.TARGET_SR,
+                stationary=True,
+                prop_decrease=0.80,
+            )
+            return torch.from_numpy(stage2.astype(np.float32)).unsqueeze(0)
+        except Exception:
+            return w
+
+
     def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
         """Demucs vocals stem extraction — strips background music."""
         if waveform.shape[0] == 1:
@@ -419,6 +450,10 @@ class AudioEnhancer:
         enhanced = await loop.run_in_executor(
             None, self._demucs_extract_vocals, enhanced.repeat(2, 1), self.TARGET_SR
         )
+
+        # Stage 3b — Residual cleanup: double-pass noisereduce on post-Demucs signal
+        # Bark and other sounds that bled through Demucs' vocals stem are eliminated here
+        enhanced = await loop.run_in_executor(None, self._residual_cleanup, enhanced)
 
         # Stage 4 — Noise gate (silence non-speech frames between sentences)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
