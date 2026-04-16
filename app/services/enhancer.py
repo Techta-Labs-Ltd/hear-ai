@@ -38,7 +38,7 @@ class AudioEnhancer:
     DNS_SR    = 16_000
 
     # Loudness targets
-    TARGET_LUFS      = -16.0   # Apple Podcasts / general standard
+    TARGET_LUFS      = -14.0   # Spotify / YouTube standard (louder, more commercial)
     TRUE_PEAK_DBTP   = -1.0    # Broadcast ceiling
 
     # EQ
@@ -168,13 +168,17 @@ class AudioEnhancer:
         """DeepFilterNet SOTA speech enhancement @ 48 kHz."""
         try:
             w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR)
-            clean = df_enhance(self._dfn_model, self._dfn_state, w_48k.squeeze(0))
+            # df_enhance expects [channels, samples] — keep channel dim, don't squeeze to 1D
+            clean = df_enhance(self._dfn_model, self._dfn_state, w_48k)
             if isinstance(clean, np.ndarray):
                 clean = torch.from_numpy(clean)
-            return self._resample(clean.unsqueeze(0), self.DFN_SR, self.TARGET_SR)
+            if clean.dim() == 1:
+                clean = clean.unsqueeze(0)
+            return self._resample(clean, self.DFN_SR, self.TARGET_SR)
         except Exception as e:
             print(f"[ENHANCER] DeepFilterNet error: {e} — falling back to DNS")
             return self._dns_denoise(w)
+
 
 
     def _dns_denoise(self, w: torch.Tensor) -> torch.Tensor:
@@ -201,34 +205,29 @@ class AudioEnhancer:
 
     def _residual_cleanup(self, w: torch.Tensor) -> torch.Tensor:
         """
-        Aggressive noisereduce pass applied AFTER Demucs.
-
-        Demucs is a music source separator — when the bark isn't fully
-        removed by DeepFilterNet it can still bleed into the vocals stem.
-        This pass profiles the noise floor of the post-Demucs signal and
-        performs targeted spectral subtraction to eliminate residual sounds.
+        Moderate noisereduce pass applied AFTER Demucs.
+        Removes residual noise that bled through Demucs' vocals stem
+        without eating the speech signal.
         """
         try:
             audio_np = w.squeeze(0).numpy()
-            # First pass: non-stationary (catches transient sounds like barking)
+            # Non-stationary pass: targets transient sounds (barking, clicks)
             stage1 = nr.reduce_noise(
                 y=audio_np,
                 sr=self.TARGET_SR,
                 stationary=False,
-                prop_decrease=0.92,
-                n_std_thresh_stationary=1.5,
+                prop_decrease=0.70,
             )
-            # Second pass: stationary (catches constant residual hum/hiss)
+            # Stationary pass: removes constant residual hum/hiss
             stage2 = nr.reduce_noise(
                 y=stage1,
                 sr=self.TARGET_SR,
                 stationary=True,
-                prop_decrease=0.80,
+                prop_decrease=0.60,
             )
             return torch.from_numpy(stage2.astype(np.float32)).unsqueeze(0)
         except Exception:
             return w
-
 
     def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
         """Demucs vocals stem extraction — strips background music."""
