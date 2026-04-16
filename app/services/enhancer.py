@@ -167,13 +167,15 @@ class AudioEnhancer:
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
         """DeepFilterNet SOTA speech enhancement @ 48 kHz."""
         try:
-            w_48k    = self._resample(w, self.TARGET_SR, self.DFN_SR)
-            clean_np = df_enhance(self._dfn_model, self._dfn_state, w_48k.squeeze(0).numpy())
-            clean    = torch.from_numpy(clean_np).unsqueeze(0)
-            return self._resample(clean, self.DFN_SR, self.TARGET_SR)
+            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR)
+            clean = df_enhance(self._dfn_model, self._dfn_state, w_48k.squeeze(0))
+            if isinstance(clean, np.ndarray):
+                clean = torch.from_numpy(clean)
+            return self._resample(clean.unsqueeze(0), self.DFN_SR, self.TARGET_SR)
         except Exception as e:
             print(f"[ENHANCER] DeepFilterNet error: {e} — falling back to DNS")
             return self._dns_denoise(w)
+
 
     def _dns_denoise(self, w: torch.Tensor) -> torch.Tensor:
         """Facebook dns64 fallback denoiser @ 16 kHz."""
