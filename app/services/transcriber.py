@@ -38,15 +38,26 @@ class TranscriptionService:
                 os.unlink(tmp_path)
 
     def _run(self, path: str) -> dict:
-        segments_gen, info = self._model.transcribe(
-            path,
-            beam_size=5,
-            language=None,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=400, speech_pad_ms=200),
-            word_timestamps=True,
-            condition_on_previous_text=True,
-        )
+        try:
+            segments_gen, info = self._model.transcribe(
+                path,
+                beam_size=5,
+                language=None,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=400, speech_pad_ms=200),
+                word_timestamps=True,
+                condition_on_previous_text=True,
+            )
+        except ValueError:
+            return {
+                "transcript": "",
+                "segments": [],
+                "language": None,
+                "language_probability": 0.0,
+                "duration": 0.0,
+                "confidence": 0.0,
+                "silent": True,
+            }
 
         segments = []
         full_text_parts = []
@@ -83,6 +94,7 @@ class TranscriptionService:
             "language_probability": round(info.language_probability, 4),
             "duration": info.duration,
             "confidence": round(total_conf / max(word_count, 1), 4),
+            "silent": False,
         }
 
     async def stream(self, audio_bytes: bytes) -> AsyncGenerator[dict, None]:
@@ -123,6 +135,8 @@ class TranscriptionService:
                         "language": info.language,
                     })
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "done", "language": info.language})
+            except ValueError:
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "done", "language": None, "silent": True})
             except Exception as e:
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
             finally:

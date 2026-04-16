@@ -263,6 +263,14 @@ class PipelineWorker:
                         with open(tp["path"], "rb") as f:
                             audio_bytes = f.read()
                         t_result = await self._transcriber.transcribe(audio_bytes)
+
+                        if t_result.get("silent"):
+                            print(
+                                f"[JOB:{job_id[:8]}] TRANSCRIBE silent track={tp['track_id'][:8]} "
+                                f"— no speech detected, skipping"
+                            )
+                            continue
+
                         per_track_transcriptions[tp["track_id"]] = t_result
                         transcript_preview = t_result.get('transcript', '')
                         print(
@@ -400,7 +408,8 @@ class PipelineWorker:
                 db = SessionLocal()
                 job = db.query(AiJob).filter(AiJob.id == job_id).first()
                 if job:
-                    if job.attempts < MAX_RETRIES:
+                    non_retryable = isinstance(e, (ValueError, TypeError, AttributeError))
+                    if not non_retryable and job.attempts < MAX_RETRIES:
                         job.status = "pending"
                         job.attempts += 1
                         db.commit()

@@ -58,17 +58,14 @@ class CategorizationService:
                 "settings_applied": False,
             }
 
-        # --- 1. Fetch platform settings (auto_tag_keywords / blocked_keywords) ---
         platform = await fetch_platform_settings()
         settings_applied = bool(platform.auto_tag_keywords or platform.blocked_keywords)
 
-        # Seed custom_tags from both the caller and platform auto-tag list
         combined_custom = list(custom_tags or [])
         for kw in platform.auto_tag_keywords:
             if kw and kw not in combined_custom:
                 combined_custom.append(kw)
 
-        # Register any custom/auto tags into the loader
         if combined_custom:
             for tag in combined_custom:
                 category_loader.add_tag(tag)
@@ -76,27 +73,15 @@ class CategorizationService:
         data = category_loader.data
         loop = asyncio.get_event_loop()
 
-        layer1_task = loop.run_in_executor(
-            None, self._keyword_layer, transcript, segments or [], data.keyword_rules
-        )
-        # Two separate zero-shot passes so each bucket gets its own probability budget:
-        # - categories pass: evaluates topic categories
-        # - tags pass: evaluates a random sample of hashtag labels
-        layer2_cat_task = loop.run_in_executor(
-            None, self._zero_shot_categories, transcript, data.categories
-        )
-        layer2_tag_task = loop.run_in_executor(
-            None, self._zero_shot_tags, transcript, data.tags
-        )
-        layer3_task = self._openai_layer(transcript, data.categories, data.tags)
-        sentiment_task = loop.run_in_executor(None, self._get_sentiment, transcript)
-
         layer1, layer2_cat, layer2_tag, layer3, sentiment = await asyncio.gather(
-            layer1_task, layer2_cat_task, layer2_tag_task, layer3_task, sentiment_task
+            loop.run_in_executor(None, self._keyword_layer, transcript, segments or [], data.keyword_rules),
+            loop.run_in_executor(None, self._zero_shot_categories, transcript, data.categories),
+            loop.run_in_executor(None, self._zero_shot_tags, transcript, data.tags),
+            self._openai_layer(transcript, data.categories, data.tags),
+            loop.run_in_executor(None, self._get_sentiment, transcript),
         )
         merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
 
-        # --- 2. Persist new tags found from this transcript ---
         new_tags_added: list[str] = []
         for tag in merged["tags"]:
             normalised = tag if tag.startswith("#") else f"#{tag}"
@@ -107,7 +92,6 @@ class CategorizationService:
                 category_loader.add_tag(tag)
                 new_tags_added.append(tag)
 
-        # --- 3. Persist new categories suggested by the LLM (layer3) ---
         new_categories_added: list[str] = []
         for suggested_cat in layer3.get("suggested_categories", []):
             clean = suggested_cat.lstrip("#").strip().title()
@@ -115,7 +99,6 @@ class CategorizationService:
                 category_loader.add_category(clean)
                 new_categories_added.append(clean)
 
-        # --- 4. Filter blocked keywords from tags ---
         if platform.blocked_keywords:
             merged["tags"] = [
                 t for t in merged["tags"]
@@ -151,49 +134,32 @@ class CategorizationService:
                 scores[tag] = round(scores.get(tag, 0) * 0.6 + density * 0.4, 4)
         return {"scores": scores}
 
-    # ------------------------------------------------------------------
-    # Zero-shot — two dedicated passes so scores aren't diluted
-    # ------------------------------------------------------------------
-    _ZS_MAX_CATEGORIES = 60   # evaluate all if under this count
-    _ZS_MAX_TAGS       = 80   # random sample from full tag library
-    _ZS_TEMPLATE       = "This audio recording is about {}."
+    _ZS_MAX_CATEGORIES = 60
+    _ZS_MAX_TAGS = 80
+    _ZS_TEMPLATE = "This audio recording is about {}."
 
     def _zero_shot_categories(self, transcript: str, categories: list[str]) -> dict:
-        """Zero-shot pass dedicated to topic categories."""
         if not categories:
             return {"scores": {}}
         labels = categories[: self._ZS_MAX_CATEGORIES]
-        output = self._zero_shot(
-            transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE
-        )
+        output = self._zero_shot(transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE)
         return {"scores": dict(zip(output["labels"], output["scores"]))}
 
     def _zero_shot_tags(self, transcript: str, tags: list[str]) -> dict:
-        """Zero-shot pass over a random sample of hashtag labels.
-
-        Random sampling ensures tags deep in the file (e.g. #Wildlife, #Photography)
-        get evaluated even when the library has 600+ entries.
-        """
         if not tags:
             return {"scores": {}}
-        sample_size = min(self._ZS_MAX_TAGS, len(tags))
-        sample = random.sample(tags, sample_size)
-        output = self._zero_shot(
-            transcript[:1024], sample, hypothesis_template=self._ZS_TEMPLATE
-        )
+        sample = random.sample(tags, min(self._ZS_MAX_TAGS, len(tags)))
+        output = self._zero_shot(transcript[:1024], sample, hypothesis_template=self._ZS_TEMPLATE)
         return {"scores": dict(zip(output["labels"], output["scores"]))}
 
     async def _openai_layer(self, transcript: str, categories: list[str], tags: list[str]) -> dict:
         if not settings.OPENAI_API_KEY:
             return {"scores": {}, "suggested_tags": [], "suggested_categories": []}
 
-        cat_list = ", ".join(categories[:30])
-        tag_list = ", ".join(tags[:50])
-
         prompt = (
             f"Analyze this audio transcript and return a JSON object with three keys:\n"
-            f"1. \"categories\": pick the most relevant from [{cat_list}] with confidence 0-1\n"
-            f"2. \"tags\": pick the most relevant from [{tag_list}] with confidence 0-1, "
+            f"1. \"categories\": pick the most relevant from [{', '.join(categories[:30])}] with confidence 0-1\n"
+            f"2. \"tags\": pick the most relevant from [{', '.join(tags[:50])}] with confidence 0-1, "
             f"plus suggest up to 3 new tags if none fit well (prefix with #)\n"
             f"3. \"new_categories\": list up to 2 new category names (plain strings, no #) "
             f"if the content clearly belongs to a category not in the list\n\n"
@@ -229,13 +195,14 @@ class CategorizationService:
             for tag, conf in parsed.get("tags", {}).items():
                 scores[tag] = round(float(conf), 4)
 
-            suggested = [t for t in parsed.get("tags", {}).keys() if t.startswith("#")]
-            suggested_categories = [
-                c.strip() for c in parsed.get("new_categories", [])
-                if isinstance(c, str) and c.strip()
-            ]
-
-            return {"scores": scores, "suggested_tags": suggested, "suggested_categories": suggested_categories}
+            return {
+                "scores": scores,
+                "suggested_tags": [t for t in parsed.get("tags", {}).keys() if t.startswith("#")],
+                "suggested_categories": [
+                    c.strip() for c in parsed.get("new_categories", [])
+                    if isinstance(c, str) and c.strip()
+                ],
+            }
         except Exception:
             return {"scores": {}, "suggested_tags": [], "suggested_categories": []}
 
@@ -251,18 +218,15 @@ class CategorizationService:
         except Exception:
             return "neutral"
 
-    # ------------------------------------------------------------------
-    # Merge — combine all layer scores, always return something
-    # ------------------------------------------------------------------
     _TAG_THRESHOLD = 0.20
     _CAT_THRESHOLD = 0.30
 
     def _merge(
         self,
-        layer1: dict,       # keyword scores
-        layer2_cat: dict,   # zero-shot category scores
-        layer2_tag: dict,   # zero-shot tag scores
-        layer3: dict,       # openai scores
+        layer1: dict,
+        layer2_cat: dict,
+        layer2_tag: dict,
+        layer3: dict,
         all_tags: list[str],
         all_categories: list[str],
         max_tags: int,
@@ -272,17 +236,15 @@ class CategorizationService:
         l2t = layer2_tag.get("scores", {})
         l3  = layer3.get("scores", {})
 
-        # Merge any LLM-suggested new tags into the pool
         known_tags = set(all_tags)
         for tag in l3:
             if tag.startswith("#") and tag not in known_tags:
                 known_tags.add(tag)
 
-        # Score every known tag: keyword (l1) + dedicated tag zero-shot (l2t) + openai (l3)
         merged_tag_scores: dict[str, float] = {}
         for tag in known_tags:
             s1 = l1.get(tag, 0)
-            s2 = l2t.get(tag, 0)  # from the tags-only zero-shot pass
+            s2 = l2t.get(tag, 0)
             s3 = l3.get(tag, 0)
             if s3 > 0:
                 merged_tag_scores[tag] = round(s1 * 0.25 + s2 * 0.35 + s3 * 0.40, 4)
@@ -291,13 +253,10 @@ class CategorizationService:
 
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
-        # Primary: tags above threshold
         tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
-        # Fallback: always return at least top-3
         if not tags and ranked_tags:
             tags = [t for t, _ in ranked_tags[:min(max_tags, 3)]]
 
-        # Score categories from the dedicated category zero-shot pass (l2c) + openai (l3)
         cat_scores: dict[str, float] = {}
         for c in all_categories:
             s2 = l2c.get(c, 0)
@@ -308,11 +267,8 @@ class CategorizationService:
         if not categories and all_categories:
             categories = [max(all_categories, key=lambda c: cat_scores.get(c, 0))]
 
-        # Debug logging
-        top_tags_dbg = [(t, s) for t, s in ranked_tags[:8]]
-        top_cats_dbg = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)[:5]
-        print(f"[CATEGORIZER] top_tag_scores={top_tags_dbg}")
-        print(f"[CATEGORIZER] top_cat_scores={top_cats_dbg}")
+        print(f"[CATEGORIZER] top_tag_scores={ranked_tags[:8]}")
+        print(f"[CATEGORIZER] top_cat_scores={sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)[:5]}")
 
         return {
             "tags": tags,
