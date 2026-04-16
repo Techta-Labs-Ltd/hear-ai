@@ -16,3 +16,5 @@ numpy==1.26.4
 edge-tts==6.1.12
 soundfile==0.12.1
 openai>=1.0.0
+noisereduce>=3.0.0
+

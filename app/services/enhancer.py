@@ -13,6 +13,12 @@ from demucs.pretrained import get_model
 from app.config import settings
 from app.core.storage import storage
 
+try:
+    import noisereduce as nr
+    _NR_AVAILABLE = True
+except ImportError:
+    _NR_AVAILABLE = False
+
 
 @dataclass
 class EnhancementResult:
@@ -30,17 +36,15 @@ class AudioEnhancer:
     TARGET_SR = 44100
     TARGET_LUFS = -16.0
 
-    # EQ constants
-    _HP_FREQ = 80.0       # high-pass cutoff (Hz)
-    _LP_FREQ = 14_000.0   # low-pass cutoff  (Hz)
-    _EQ_CUT_FREQ = 200.0  # mud cut          (Hz)
+    _HP_FREQ = 80.0
+    _LP_FREQ = 14_000.0
+    _EQ_CUT_FREQ = 200.0
     _EQ_CUT_GAIN = -2.0
     _EQ_CUT_Q = 1.4
-    _EQ_BOOST_FREQ = 3_000.0  # presence boost (Hz)
+    _EQ_BOOST_FREQ = 3_000.0
     _EQ_BOOST_GAIN = 2.0
     _EQ_BOOST_Q = 2.0
 
-    # De-essing constants
     _DESS_FREQ1 = 7_000.0
     _DESS_GAIN1 = -3.0
     _DESS_Q1 = 1.5
@@ -51,10 +55,6 @@ class AudioEnhancer:
     def __init__(self):
         self._model = None
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # ------------------------------------------------------------------ #
-    #  Lifecycle
-    # ------------------------------------------------------------------ #
 
     def load(self):
         self._model = get_model(settings.DEMUCS_MODEL)
@@ -118,11 +118,64 @@ class AudioEnhancer:
         return round(max(0.0, snr_score * 0.6 + lufs_score * 0.4 - clip_penalty), 3)
 
     # ------------------------------------------------------------------ #
-    #  Processing pipeline (pure-PyTorch, no libsox required)
+    #  Processing pipeline
     # ------------------------------------------------------------------ #
 
+    def _noise_reduce(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        """
+        Non-stationary spectral noise reduction.
+
+        Uses noisereduce when available (handles dog barking, traffic, background
+        noise by profiling the noise floor in short windows and suppressing it).
+        Falls back to a pure-PyTorch Wiener-filter spectral gate that removes
+        stationary noise (hum, AC, room noise) when the library is absent.
+        """
+        try:
+            if _NR_AVAILABLE:
+                audio_np = w.squeeze(0).numpy()
+                reduced = nr.reduce_noise(
+                    y=audio_np,
+                    sr=sr,
+                    stationary=False,      # handles transient noise (barking, traffic)
+                    prop_decrease=0.85,    # aggressiveness: 0-1 (higher = more suppression)
+                    n_fft=1024,
+                    n_jobs=-1,
+                )
+                return torch.from_numpy(reduced).unsqueeze(0)
+
+            # --- Pure-PyTorch Wiener spectral gate (stationary noise only) ---
+            win_len = 1024
+            hop = 256
+            window = torch.hann_window(win_len, device=w.device)
+            spec = torch.stft(
+                w.squeeze(0), n_fft=win_len, hop_length=hop,
+                window=window, return_complex=True,
+            )
+            magnitude = spec.abs()
+            phase = spec / (magnitude + 1e-8)
+
+            frame_energy = magnitude.mean(dim=0)
+            n_noise = max(1, int(frame_energy.shape[0] * 0.15))
+            _, noise_idx = torch.topk(frame_energy, n_noise, largest=False)
+            noise_floor = magnitude[:, noise_idx].mean(dim=1, keepdim=True) * 2.0
+
+            gain = ((magnitude - noise_floor).clamp(min=0) / (magnitude + 1e-8)).pow(1.5)
+            denoised = torch.istft(
+                magnitude * gain * phase, n_fft=win_len, hop_length=hop,
+                window=window, length=w.shape[1],
+            )
+            return denoised.unsqueeze(0)
+        except Exception:
+            return w
+
     def _denoise_demucs(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
-        """Isolate vocals using Demucs source separation."""
+        """
+        Source separation via Demucs — extracts the vocals stem.
+
+        This removes background music and structured instrument noise.
+        It works best when combined with _noise_reduce() which handles
+        environmental noise that Demucs does not remove (dog barking, etc.).
+        """
         if waveform.dim() == 2 and waveform.shape[0] == 1:
             waveform = waveform.repeat(2, 1)
 
@@ -141,7 +194,6 @@ class AudioEnhancer:
         return self._to_mono(vocals)
 
     def _apply_eq(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        """High-pass → low-pass → mud cut → presence boost → peak limit."""
         try:
             w = F.highpass_biquad(w, sr, cutoff_freq=self._HP_FREQ)
             w = F.lowpass_biquad(w, sr, cutoff_freq=self._LP_FREQ)
@@ -157,7 +209,6 @@ class AudioEnhancer:
             return w
 
     def _de_ess(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        """Attenuate sibilant 7–9 kHz band to reduce harshness."""
         try:
             w = F.equalizer_biquad(w, sr, center_freq=self._DESS_FREQ1,
                                    gain=self._DESS_GAIN1, Q=self._DESS_Q1)
@@ -168,7 +219,6 @@ class AudioEnhancer:
             return w
 
     def _strip_silence(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        """Trim leading and trailing silence via 20 ms energy frames."""
         try:
             frame_size = int(sr * 0.02)
             n_frames = w.shape[1] // frame_size
@@ -193,7 +243,6 @@ class AudioEnhancer:
             return w
 
     def _remove_internal_silence(self, w: torch.Tensor, sr: int, max_gap_ms: int = 500) -> torch.Tensor:
-        """Collapse silent gaps longer than max_gap_ms in the middle of speech."""
         frame_size = int(sr * 0.02)
         threshold = 0.005
         max_gap_frames = int(max_gap_ms / 20)
@@ -221,7 +270,6 @@ class AudioEnhancer:
         return torch.cat(segments, dim=1) if segments else w
 
     def _normalise_loudness(self, w: torch.Tensor, target_lufs: float = -16.0) -> torch.Tensor:
-        """Scale to target LUFS then hard-clip protect at -0.086 dBFS."""
         rms = w.pow(2).mean().sqrt().item()
         if rms < 1e-8:
             return w
@@ -243,7 +291,22 @@ class AudioEnhancer:
         raw_clone = waveform.clone()
         clipping_input = self._detect_clipping(waveform)
 
-        enhanced = await loop.run_in_executor(None, self._denoise_demucs, waveform, sr)
+        # Step 1: spectral noise reduction on raw audio
+        # Profiles the noise floor and suppresses background sounds
+        # (dog barking, traffic, AC hum) BEFORE Demucs runs.
+        mono_raw = self._to_mono(waveform)
+        mono_raw = self._resample(mono_raw, sr, self.TARGET_SR)
+        mono_raw = self._noise_reduce(mono_raw, self.TARGET_SR)
+
+        # Step 2: Demucs source separation
+        # Removes background music / instrument bleed from the denoised signal.
+        enhanced = await loop.run_in_executor(None, self._denoise_demucs, mono_raw.repeat(2, 1), self.TARGET_SR)
+
+        # Step 3: second-pass noise reduction on the extracted vocals
+        # Catches any residual noise that Demucs let through.
+        enhanced = self._noise_reduce(enhanced, self.TARGET_SR)
+
+        # Step 4: tonal shaping + dynamics
         enhanced = self._apply_eq(enhanced, self.TARGET_SR)
         enhanced = self._de_ess(enhanced, self.TARGET_SR)
         enhanced = self._strip_silence(enhanced, self.TARGET_SR)
