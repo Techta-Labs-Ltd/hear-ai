@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     ffmpeg \
     libsndfile1 \
+    sox \
+    libsox-dev \
+    libsox-fmt-all \
     dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
