@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Security
 
 from app.api.auth import verify_service_key
 from app.models.schemas import CategorizeRequest
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/v1", tags=["Categorization"])
     summary="Categorize text content",
     description="Analyzes transcript text to assign relevant topic tags using the LLM categorizer. Supports custom tag dictionaries.",
 )
-async def categorize(body: CategorizeRequest, _auth: bool = Depends(verify_service_key)):
+async def categorize(body: CategorizeRequest, _auth: bool = Security(verify_service_key)):
     result = await categorizer.categorize(
         transcript=body.text,
         custom_tags=body.custom_tags,

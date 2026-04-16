@@ -1,9 +1,8 @@
-import tempfile
+import asyncio
 import uuid
 from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
 from sqlalchemy.exc import IntegrityError
 
 from app.api.auth import verify_service_key
@@ -25,7 +24,7 @@ router = APIRouter(tags=["Pipeline"])
     summary="Submit a full pipeline job",
     description="Enqueues a recording for processing. Returns immediately with a job ID.",
 )
-async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_service_key)):
+async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_service_key)):
     db = SessionLocal()
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
@@ -70,34 +69,25 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Depends(verify_s
 @router.post(
     "/api/v1/process-realtime",
     status_code=202,
-    summary="Process audio with real-time streaming",
-    description="Uploads an audio file and processes it in the background, streaming progress via SSE and WebSocket.",
+    summary="Process a recording with real-time streaming",
+    description="Fetches the recording and all its tracks from the backend, then processes each track with live progress streamed via SSE and WebSocket.",
 )
 async def process_realtime(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    recording_id: Optional[str] = None,
-    _auth: bool = Depends(verify_service_key),
+    recording_id: str,
+    _auth: bool = Security(verify_service_key),
 ):
     job_id = str(uuid.uuid4())
-    rec_id = recording_id or job_id
-    audio_bytes = await file.read()
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp.write(audio_bytes)
-        tmp_path = tmp.name
-
-    background_tasks.add_task(
-        orchestrator.process_and_stream,
-        job_id=job_id,
-        recording_id=rec_id,
-        audio_bytes=audio_bytes,
-        input_path=tmp_path,
+    asyncio.create_task(
+        orchestrator.process_and_stream(
+            job_id=job_id,
+            recording_id=recording_id,
+        )
     )
 
     return {
         "job_id": job_id,
-        "recording_id": rec_id,
+        "recording_id": recording_id,
         "sse_url": f"/api/v1/events/{job_id}",
         "ws_url": f"/ws/{job_id}",
     }
@@ -108,7 +98,7 @@ async def process_realtime(
     summary="Reconstruct an audio segment",
     description="Re-synthesises a segment of audio with new text using accent-aware Edge-TTS.",
 )
-async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Depends(verify_service_key)):
+async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(verify_service_key)):
     tmp_path = await download_audio(body.audio_url)
     try:
         result = await synthesizer.reconstruct_segment(
@@ -133,7 +123,7 @@ async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Depends(ve
     summary="Subscribe to job events (SSE)",
     description="Opens a Server-Sent Events stream for real-time pipeline progress updates.",
 )
-async def sse_stream(job_id: str, _auth: bool = Depends(verify_service_key)):
+async def sse_stream(job_id: str, _auth: bool = Security(verify_service_key)):
     return make_sse_response(job_id)
 
 
@@ -143,7 +133,7 @@ async def sse_stream(job_id: str, _auth: bool = Depends(verify_service_key)):
     summary="Get job status",
     description="Retrieves the current status and result of a processing job by its ID.",
 )
-async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
+async def get_job(job_id: str, _auth: bool = Security(verify_service_key)):
     db = SessionLocal()
     try:
         job = db.query(AiJob).filter(AiJob.id == job_id).first()
@@ -180,7 +170,7 @@ async def get_job(job_id: str, _auth: bool = Depends(verify_service_key)):
     summary="Cancel a job",
     description="Marks a pending or in-progress job as cancelled. No-op if the job is already completed or failed.",
 )
-async def cancel_job(job_id: str, _auth: bool = Depends(verify_service_key)):
+async def cancel_job(job_id: str, _auth: bool = Security(verify_service_key)):
     db = SessionLocal()
     try:
         job = db.query(AiJob).filter(AiJob.id == job_id).first()

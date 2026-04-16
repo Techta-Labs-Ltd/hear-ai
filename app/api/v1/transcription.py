@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Security
 from sqlalchemy.exc import IntegrityError
 
 from app.api.auth import verify_service_key
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1", tags=["Transcription"])
     summary="Submit a transcription job",
     description="Enqueues a recording for standalone speech-to-text transcription using Faster-Whisper.",
 )
-async def transcribe(body: TranscribeRequest, _auth: bool = Depends(verify_service_key)):
+async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_service_key)):
     db = SessionLocal()
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()

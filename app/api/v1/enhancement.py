@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Security
 from sqlalchemy.exc import IntegrityError
 
 from app.api.auth import verify_service_key
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1", tags=["Enhancement"])
     summary="Submit an enhancement job",
     description="Enqueues a recording for standalone vocal isolation and noise removal using Demucs.",
 )
-async def enhance(body: EnhanceRequest, _auth: bool = Depends(verify_service_key)):
+async def enhance(body: EnhanceRequest, _auth: bool = Security(verify_service_key)):
     db = SessionLocal()
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
