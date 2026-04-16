@@ -170,18 +170,21 @@ class AudioEnhancer:
         """DeepFilterNet SOTA speech enhancement @ 48 kHz on GPU."""
         try:
             print("[ENHANCER] DeepFilterNet running...")
-            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR).to(self._device)
+            w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR)
+            # Pass CPU tensor — df_enhance moves it to the model's device internally
             clean = df_enhance(self._dfn_model, self._dfn_state, w_48k)
             if isinstance(clean, np.ndarray):
                 clean = torch.from_numpy(clean)
+            if clean.is_cuda:
+                clean = clean.cpu()
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
-            clean = clean.cpu()
             print("[ENHANCER] DeepFilterNet done")
             return self._resample(clean, self.DFN_SR, self.TARGET_SR)
         except Exception as e:
             print(f"[ENHANCER] DeepFilterNet error: {e} — falling back to DNS")
             return self._dns_denoise(w)
+
 
 
 
