@@ -18,6 +18,7 @@ from nara_wpe.utils import stft as wpe_stft, istft as wpe_istft
 from app.config import settings
 from app.core.storage import storage
 
+
 @dataclass
 class EnhancementResult:
     b2_key: str
@@ -28,6 +29,7 @@ class EnhancementResult:
     peak_db: float
     lufs: float
     clipping_detected: bool
+
 
 class AudioEnhancer:
     TARGET_SR      = 44100
@@ -171,10 +173,29 @@ class AudioEnhancer:
         return self._to_mono(vocals)
 
     def _noise_gate(self, w: torch.Tensor) -> torch.Tensor:
-        # PyTorch vectorized noise gate (0 CPU usage, executes instantly on CUDA)
-        env = F.lowpass_biquad(w.abs(), self.TARGET_SR, cutoff_freq=10.0)
+        kernel_size = int(self.TARGET_SR * 0.02)
+        if kernel_size % 2 == 0: kernel_size += 1
+        
+        env = torch.nn.functional.avg_pool1d(
+            w.abs().unsqueeze(1),
+            kernel_size=kernel_size,
+            stride=1,
+            padding=kernel_size // 2
+        ).squeeze(1)
+        
         threshold_lin = 10 ** (self._GATE_THRESHOLD_DB / 20)
-        gain = torch.where(env > threshold_lin, torch.ones_like(env), env / (threshold_lin + 1e-8))
+        raw_gain = torch.clamp(env / threshold_lin, max=1.0)
+        
+        smooth_kernel = int(self.TARGET_SR * 0.05)
+        if smooth_kernel % 2 == 0: smooth_kernel += 1
+        
+        gain = torch.nn.functional.avg_pool1d(
+            raw_gain.unsqueeze(1),
+            kernel_size=smooth_kernel,
+            stride=1,
+            padding=smooth_kernel // 2
+        ).squeeze(1)
+        
         return w * gain
 
     def _apply_eq(self, w: torch.Tensor, sr: int) -> torch.Tensor:
@@ -199,19 +220,38 @@ class AudioEnhancer:
             return w
 
     def _compress(self, w: torch.Tensor) -> torch.Tensor:
-        # PyTorch vectorized dynamic compressor (0 CPU usage, executes instantly on CUDA)
-        env = F.lowpass_biquad(w.abs(), self.TARGET_SR, cutoff_freq=15.0)
+        kernel_size = int(self.TARGET_SR * 0.01)
+        if kernel_size % 2 == 0: kernel_size += 1
+        
+        env = torch.nn.functional.avg_pool1d(
+            w.abs().unsqueeze(1), 
+            kernel_size=kernel_size, 
+            stride=1, 
+            padding=kernel_size // 2
+        ).squeeze(1)
+        
         threshold_lin = 10 ** (self._COMP_THRESHOLD_DB / 20)
         makeup_lin = 10 ** (self._COMP_MAKEUP_DB / 20)
+        
         above = torch.clamp(env - threshold_lin, min=0.0)
         gain_reduce = threshold_lin + above / self._COMP_RATIO
-        gain = torch.where(env > 1e-8, gain_reduce / env, torch.ones_like(env))
-        gain = F.lowpass_biquad(gain, self.TARGET_SR, cutoff_freq=20.0)
+        raw_gain = torch.where(env > 1e-8, gain_reduce / env, torch.ones_like(env))
+        
+        smooth_kernel = int(self.TARGET_SR * 0.05)
+        if smooth_kernel % 2 == 0: smooth_kernel += 1
+        
+        gain = torch.nn.functional.avg_pool1d(
+            raw_gain.unsqueeze(1),
+            kernel_size=smooth_kernel,
+            stride=1,
+            padding=smooth_kernel // 2
+        ).squeeze(1)
+        
         return w * gain * makeup_lin
 
     def _strip_silence(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
-            frame_size = int(sr * 0.02)
+            frame_size = int(sr * 0.05)
             n_frames   = w.shape[1] // frame_size
             if n_frames < 2:
                 return w
@@ -222,27 +262,16 @@ class AudioEnhancer:
             start   = int(voiced[0].item()) * frame_size
             end     = min(w.shape[1], (int(voiced[-1].item()) + 1) * frame_size)
             trimmed = w[:, start:end]
-            return trimmed if trimmed.shape[1] >= sr * 0.1 else w
-        except Exception:
-            return w
-
-    def _remove_internal_silence(self, w: torch.Tensor, sr: int, max_gap_ms: int = 500) -> torch.Tensor:
-        try:
-            frame_size = int(sr * 0.02)
-            max_gap_frames = int(max_gap_ms / 20)
-            energies = w.pow(2).unfold(1, frame_size, frame_size).mean(dim=2).sqrt().squeeze(0)
-            voiced = energies > 0.005
-            segments = []
-            silence_run = 0
-            for i in range(len(voiced)):
-                if voiced[i]:
-                    if 0 < silence_run <= max_gap_frames:
-                        segments.append(w[:, (i - silence_run) * frame_size:i * frame_size])
-                    segments.append(w[:, i * frame_size:(i + 1) * frame_size])
-                    silence_run = 0
-                else:
-                    silence_run += 1
-            return torch.cat(segments, dim=1) if segments else w
+            
+            fade_len = int(sr * 0.02)
+            if trimmed.shape[1] > fade_len * 2:
+                fade_in = torch.linspace(0.0, 1.0, fade_len, device=w.device)
+                fade_out = torch.linspace(1.0, 0.0, fade_len, device=w.device)
+                trimmed = trimmed.clone()
+                trimmed[0, :fade_len] *= fade_in
+                trimmed[0, -fade_len:] *= fade_out
+                
+            return trimmed
         except Exception:
             return w
 
@@ -285,11 +314,9 @@ class AudioEnhancer:
         raw_clone = waveform.clone()
         clipping_input = self._detect_clipping(waveform)
 
-        # 1. Initialize and transfer to CUDA upfront
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        # 2. Stage process
         enhanced = await loop.run_in_executor(None, self._dereverberate, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
         enhanced = await loop.run_in_executor(None, self._dns_denoise, enhanced)
@@ -299,7 +326,6 @@ class AudioEnhancer:
         enhanced = await loop.run_in_executor(None, self._compress, enhanced)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
         enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
-        enhanced = await loop.run_in_executor(None, self._remove_internal_silence, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
         enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
 
