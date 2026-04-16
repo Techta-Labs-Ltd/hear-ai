@@ -89,36 +89,48 @@ class AudioEnhancer:
         return self._to_mono(vocals)
 
     def _apply_eq(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        effects = [
-            ["highpass", "f=80"],
-            ["lowpass", "f=14000"],
-            ["equalizer", "f=200", "width_type=o", "width=2", "g=-2"],
-            ["equalizer", "f=3000", "width_type=o", "width=1", "g=2"],
-            ["compand", "0.1,0.3", "6:-70,-60,-20", "-5", "-90", "0.1"],
-            ["rate", str(sr)],
-        ]
-        result, _ = torchaudio.sox_effects.apply_effects_tensor(w, sr, effects, channels_first=True)
-        return result
+        try:
+            effects = [
+                ["highpass", "f=80"],
+                ["lowpass", "f=14000"],
+                ["equalizer", "f=200", "width_type=o", "width=2", "g=-2"],
+                ["equalizer", "f=3000", "width_type=o", "width=1", "g=2"],
+                ["compand", "0.1,0.3", "6:-70,-60,-20", "-5", "-90", "0.1"],
+                ["rate", str(sr)],
+            ]
+            result, _ = torchaudio.sox_effects.apply_effects_tensor(w, sr, effects, channels_first=True)
+            return result
+        except (OSError, RuntimeError):
+            print("[ENHANCER] libsox not available — skipping EQ")
+            return w
 
     def _de_ess(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        effects = [
-            ["equalizer", "f=7000", "width_type=o", "width=1.5", "g=-3"],
-            ["equalizer", "f=9000", "width_type=o", "width=1", "g=-2"],
-        ]
-        result, _ = torchaudio.sox_effects.apply_effects_tensor(w, sr, effects, channels_first=True)
-        return result
+        try:
+            effects = [
+                ["equalizer", "f=7000", "width_type=o", "width=1.5", "g=-3"],
+                ["equalizer", "f=9000", "width_type=o", "width=1", "g=-2"],
+            ]
+            result, _ = torchaudio.sox_effects.apply_effects_tensor(w, sr, effects, channels_first=True)
+            return result
+        except (OSError, RuntimeError):
+            print("[ENHANCER] libsox not available — skipping de-essing")
+            return w
 
     def _strip_silence(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        effects = [
-            ["silence", "1", "0.1", "0.1%"],
-            ["reverse"],
-            ["silence", "1", "0.1", "0.1%"],
-            ["reverse"],
-        ]
-        trimmed, _ = torchaudio.sox_effects.apply_effects_tensor(w, sr, effects, channels_first=True)
-        if trimmed.shape[1] < sr * 0.1:
+        try:
+            effects = [
+                ["silence", "1", "0.1", "0.1%"],
+                ["reverse"],
+                ["silence", "1", "0.1", "0.1%"],
+                ["reverse"],
+            ]
+            trimmed, _ = torchaudio.sox_effects.apply_effects_tensor(w, sr, effects, channels_first=True)
+            if trimmed.shape[1] < sr * 0.1:
+                return w
+            return trimmed
+        except (OSError, RuntimeError):
+            print("[ENHANCER] libsox not available — skipping silence strip")
             return w
-        return trimmed
 
     def _remove_internal_silence(self, w: torch.Tensor, sr: int, max_gap_ms: int = 500) -> torch.Tensor:
         frame_size = int(sr * 0.02)
