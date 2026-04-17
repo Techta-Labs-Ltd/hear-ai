@@ -37,36 +37,27 @@ echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, libsox-dev, libsox-
 mkdir -p $LOG_DIR
 
 echo ""
-echo -e "${YELLOW}[3/6] Setting up Python virtual environment...${RESET}"
+echo -e "${YELLOW}[3/6] Installing Python dependencies (system-wide)...${RESET}"
 cd $WORKSPACE
+pip install --no-cache-dir -r requirements.txt
+echo -e "  ${GREEN}✓ All packages installed${RESET}"
 
-if [ ! -f "$VENV/bin/uvicorn" ]; then
-    rm -rf $VENV
-    python3 -m venv venv
-    source $VENV/bin/activate
-    echo -e "  ${GREEN}✓ Virtual environment created${RESET}"
-    echo ""
-    echo -e "${YELLOW}[4/6] Installing Python dependencies...${RESET}"
-    pip install --no-cache-dir -q -r requirements.txt
-    echo -e "  ${GREEN}✓ All packages installed from requirements.txt${RESET}"
-else
-    source $VENV/bin/activate
-    echo -e "  ${GREEN}✓ Virtual environment already exists — skipping install${RESET}"
-    echo -e "${YELLOW}[4/6] Skipping pip install (cached)${RESET}"
-fi
+echo ""
+echo -e "${YELLOW}[4/6] Verifying FastAPI is installed...${RESET}"
+python3 -c "import fastapi; print('  FastAPI', fastapi.__version__)"
+echo -e "  ${GREEN}✓ FastAPI OK${RESET}"
 
 echo ""
 echo -e "${YELLOW}[5/6] Writing Supervisor config...${RESET}"
 cat > $SUPERVISOR_CONF <<EOF
 [program:hear-ai]
-command=$VENV/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+command=python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 directory=$WORKSPACE
 autostart=true
 autorestart=true
 startretries=999
 stderr_logfile=$LOG_ERR
 stdout_logfile=$LOG_OUT
-environment=PATH="$VENV/bin:%(ENV_PATH)s"
 EOF
 echo -e "  ${GREEN}✓ Supervisor config written${RESET}"
 
