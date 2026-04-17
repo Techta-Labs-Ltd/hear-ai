@@ -80,13 +80,14 @@ hear-ai/
 │   └── worker.py                # Async job queue + multi-track pipeline
 ├── data/
 │   └── categories.txt           # 65 categories, 160+ tags, 35 keyword rules
+├── logs/                        # Runtime logs (auto-created)
 ├── tests/
 │   └── test_api.py              # Integration test suite
-├── Dockerfile                   # CUDA 12.1 + Python 3.12 + ffmpeg
+├── start.sh                     # One-command RunPod bootstrap script
+├── Makefile                     # Server lifecycle commands
 ├── requirements.txt
 ├── .env.example
-├── .gitignore
-└── .dockerignore
+└── .gitignore
 ```
 
 ---
@@ -135,7 +136,7 @@ All endpoints require `X-Service-Key` header matching `AI_SERVICE_SECRET`.
 | `POST` | `/api/v1/enhance` | Enhance audio file |
 | `POST` | `/api/v1/categorize` | Categorize text |
 | `POST` | `/api/v1/moderate` | Moderate text |
-| `GET` | `/api/v1/health` | Service health + GPU info |
+| `GET` | `/health` | Service health + GPU info |
 
 ---
 
@@ -197,7 +198,6 @@ POST /api/v1/process
       "flagged": false,
       "categories": {...},
       "scores": {...},
-      "openai": {...},
       "blocked_words": []
     }
   }
@@ -249,6 +249,7 @@ The enhancer applies the following chain:
 ```
 Raw audio → Demucs vocal isolation → High-pass 80Hz → Low-pass 14kHz
   → Midrange EQ (-2dB @ 200Hz, +2dB @ 3kHz)
+  → Noise Gate (–35dB threshold)
   → Compressor (0.1/0.3 attack/release)
   → De-esser (-3dB @ 7kHz, -2dB @ 9kHz)
   → Strip leading/trailing silence
@@ -266,9 +267,9 @@ Three classification layers are run in parallel and merged:
 
 | Layer | Method | Weight (with OpenAI) | Weight (without) |
 |---|---|---|---|
-| 1 — Keywords | Regex pattern matching from `categories.txt` | 25% | 45% |
-| 2 — Zero-Shot | `cross-encoder/nli-distilroberta-base` | 35% | 55% |
-| 3 — OpenAI | GPT-4o-mini structured prompt | 40% | — |
+| 1 — Keywords | Regex pattern matching from `categories.txt` | 40% | 60% |
+| 2 — Zero-Shot | `cross-encoder/nli-distilroberta-base` | 20% | 40% |
+| 3 — OpenAI | GPT-4o-mini structured prompt | 60% | — |
 
 Tags with score ≥ 0.35 are returned; categories with score ≥ 0.45.
 
@@ -337,7 +338,7 @@ Copy `.env.example` to `.env` and configure:
 | Variable | Required | Description |
 |---|---|---|
 | `AI_SERVICE_SECRET` | ✅ | Shared secret for X-Service-Key auth |
-| `HEAR_BACKEND_URL` | ✅ | Hear backend base URL (e.g. `https://api.hear.surf`) |
+| `HEAR_BACKEND_URL` | ✅ | Hear backend base URL (`https://api.hear.surf`) |
 | `B2_KEY_ID` | ✅ | Backblaze B2 key ID |
 | `B2_APPLICATION_KEY` | ✅ | Backblaze B2 application key |
 | `B2_BUCKET_NAME` | ✅ | B2 bucket name |
@@ -352,39 +353,57 @@ Copy `.env.example` to `.env` and configure:
 | `OPENAI_BASE_URL` | — | OpenAI base URL (default: `https://api.openai.com/v1`) |
 | `OPENAI_MODEL` | — | OpenAI model for categorization (default: `gpt-4o-mini`) |
 | `SENTRY_DSN` | — | Sentry DSN for error tracking |
-| `SENTRY_TRACES_SAMPLE_RATE` | — | Sentry trace sampling rate (default: `0.3`) |
 | `ENVIRONMENT` | — | Environment name (default: `production`) |
 
 ---
 
-## Deployment
+## Deployment (RunPod)
 
-### RunPod (Recommended)
+This service is designed to run on a RunPod GPU instance using Supervisor as the process manager.
 
-This service is designed to run on a RunPod GPU instance with NVIDIA CUDA support.
-
-```bash
-# Build
-docker build -t hear-ai .
-
-# Run
-docker run --gpus all -p 8000:8000 --env-file .env hear-ai
-```
-
-### Manual
+### First Boot
 
 ```bash
-# Install dependencies (requires CUDA-capable PyTorch)
-pip install -r requirements.txt
+cp .env.example .env
+nano .env          # paste your real API keys
 
-# Run
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+chmod +x start.sh
+make start
 ```
+
+The `start.sh` script will automatically:
+- Lock DNS to `8.8.8.8 / 8.8.4.4 / 1.1.1.1`
+- Install `ffmpeg`, `sox`, `libsndfile1` and all audio system libraries
+- Create a Python virtual environment
+- Install all Python dependencies
+- Configure and launch Supervisor as a permanent background process manager
+
+### Server Management
+
+| Command | Action |
+|---|---|
+| `make start` | Full bootstrap — installs everything and boots the server |
+| `make restart` | Restart the AI worker (fast, no reinstall) |
+| `make stop` | Stop the server |
+| `make status` | Check if the server is running |
+| `make logs` | Live stream of server output |
+| `make errors` | Live stream of error logs |
+| `make install` | Reinstall Python packages only |
+| `make clean` | Wipe venv and logs for a clean slate |
+
+### RunPod Start Command
+
+In the RunPod UI under **Pod Settings → Start Command**, set:
+```
+bash /workspace/hear-ai/start.sh
+```
+
+This ensures the server auto-boots every time the pod starts.
 
 ### GPU Requirements
 
 - **Minimum**: NVIDIA GPU with 8GB VRAM (RTX 3070 / A10G)
-- **Recommended**: 16GB+ VRAM (A100 / RTX 4090) for concurrent jobs
+- **Recommended**: 24GB+ VRAM (A40 / A100) for concurrent jobs
 - Models loaded at startup: Whisper large-v3 (~3GB), Demucs htdemucs (~300MB), Toxic-BERT (~250MB), Zero-shot NLI (~250MB), Sentiment (~250MB)
 
 ---
@@ -392,11 +411,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## Testing
 
 ```bash
-# Set the target URL and secret
 export AI_SERVICE_URL=http://localhost:8000
 export AI_SERVICE_SECRET=your-secret
 
-# Run integration tests
 python -m tests.test_api
 ```
 
