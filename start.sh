@@ -40,13 +40,14 @@ echo ""
 echo -e "${YELLOW}[3/6] Setting up Python virtual environment...${RESET}"
 cd $WORKSPACE
 
-if [ ! -d "$VENV" ]; then
+if [ ! -f "$VENV/bin/uvicorn" ]; then
+    rm -rf $VENV
     python3 -m venv venv
     source $VENV/bin/activate
     echo -e "  ${GREEN}✓ Virtual environment created${RESET}"
     echo ""
     echo -e "${YELLOW}[4/6] Installing Python dependencies...${RESET}"
-    pip install --no-cache-dir -q -r requirements.txt
+    pip install -r requirements.txt
     echo -e "  ${GREEN}✓ All packages installed from requirements.txt${RESET}"
 else
     source $VENV/bin/activate
