@@ -386,6 +386,7 @@ class PipelineWorker:
                 print(
                     f"[JOB:{job_id[:8]}] CATEGORIZE ✓ "
                     f"tags={categorization_data.get('tags')} "
+                    f"categories={categorization_data.get('categories')} "
                     f"sentiment={categorization_data.get('sentiment')}"
                 )
 

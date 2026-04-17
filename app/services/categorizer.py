@@ -82,7 +82,6 @@ class CategorizationService:
         data = category_loader.data
         loop = asyncio.get_event_loop()
 
-        # Step 1: keyword layer first — its results guide the zero-shot tag pool
         layer1 = await loop.run_in_executor(
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
@@ -134,7 +133,6 @@ class CategorizationService:
     # ------------------------------------------------------------------
 
     def _extract_transcript_words(self, transcript: str) -> set[str]:
-        """Return significant lowercase words from the transcript (length > 4, not stopwords)."""
         words = set()
         for w in re.split(r"[\s\.,;:!?\-\"\'()]+", transcript):
             w = w.lower().strip()
@@ -143,12 +141,6 @@ class CategorizationService:
         return words
 
     def _build_tag_pool(self, transcript: str, all_tags: list[str], keyword_scores: dict) -> list[str]:
-        """
-        Build an intelligent tag candidate pool:
-        1. Tags already matched by the keyword layer (guaranteed relevant)
-        2. Tags whose label words appear in the transcript
-        3. Fill remaining slots with a spread across all tag sections
-        """
         tx_words = self._extract_transcript_words(transcript)
         priority: list[str] = []
         seen: set[str] = set()
@@ -166,7 +158,6 @@ class CategorizationService:
                 priority.append(tag)
                 seen.add(tag)
 
-        # Fill remaining slots: spread evenly across the full tag list
         remaining = [t for t in all_tags if t not in seen]
         fill_slots = max(0, 120 - len(priority))
         if fill_slots and remaining:
@@ -326,14 +317,12 @@ class CategorizationService:
             s1 = l1.get(tag, 0)
             s2 = l2t.get(tag, 0)
             s3 = l3.get(tag, 0)
-            if s3 > 0:
-                merged_tag_scores[tag] = round(s1 * 0.25 + s2 * 0.35 + s3 * 0.40, 4)
-            elif s1 > 0 and s2 > 0:
-                merged_tag_scores[tag] = round(s1 * 0.45 + s2 * 0.55, 4)
-            elif s1 > 0:
-                merged_tag_scores[tag] = round(s1 * 0.80, 4)
-            else:
-                merged_tag_scores[tag] = round(s2, 4)
+            
+            score = max(s1, s2, s3)
+            if sum(x > 0 for x in (s1, s2, s3)) > 1:
+                score = min(0.99, score + 0.15)
+                
+            merged_tag_scores[tag] = round(score, 4)
 
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
@@ -345,7 +334,10 @@ class CategorizationService:
         for c in all_categories:
             s2 = l2c.get(c, 0)
             s3 = l3.get(c, 0)
-            cat_scores[c] = round(s2 * 0.4 + s3 * 0.6, 4) if s3 > 0 else round(s2, 4)
+            score = max(s2, s3)
+            if s2 > 0 and s3 > 0:
+                score = min(0.99, score + 0.15)
+            cat_scores[c] = round(score, 4)
 
         categories = [c for c, s in cat_scores.items() if s >= self._CAT_THRESHOLD]
         if not categories and all_categories:

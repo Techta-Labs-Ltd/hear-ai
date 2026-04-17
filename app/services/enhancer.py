@@ -122,7 +122,6 @@ class AudioEnhancer:
 
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            # Resample strictly on GPU first! Then move to CPU as df_enhance requires it.
             w_48k = self._resample(w, self.TARGET_SR, self.DFN_SR).cpu()
             _, dfn_state, _ = init_df()
             with torch.no_grad():
@@ -131,7 +130,6 @@ class AudioEnhancer:
                 clean = torch.from_numpy(clean)
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
-            # Move back to GPU immediately, then resample mathematically via CUDA
             return self._resample(clean.to(self._device), self.DFN_SR, self.TARGET_SR)
         except Exception:
             return w
@@ -265,7 +263,6 @@ class AudioEnhancer:
             energies = w.pow(2).unfold(1, frame_size, frame_size).mean(dim=2).sqrt().squeeze(0)
             voiced = energies > 0.001
             
-            # Bridge short natural gaps
             smoothed_voiced = voiced.clone()
             silence_run = 0
             for i in range(len(voiced)):
@@ -291,7 +288,7 @@ class AudioEnhancer:
             if not segments:
                 return w
                 
-            fade_len = int(sr * 0.015) # 15ms smooth crossfade protection
+            fade_len = int(sr * 0.015)
             fade_in = torch.linspace(0.0, 1.0, fade_len, device=w.device)
             fade_out = torch.linspace(1.0, 0.0, fade_len, device=w.device)
             
@@ -302,9 +299,9 @@ class AudioEnhancer:
                 
                 chunk = w[:, start_samp:end_samp].clone()
                 if chunk.shape[1] > fade_len * 2:
-                    if i > 0: # Smooth splice entrance
+                    if i > 0:
                         chunk[0, :fade_len] *= fade_in
-                    if i < len(segments) - 1: # Smooth splice exit
+                    if i < len(segments) - 1:
                         chunk[0, -fade_len:] *= fade_out
                 out_tensors.append(chunk)
                 
