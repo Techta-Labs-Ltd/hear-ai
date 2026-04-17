@@ -252,6 +252,20 @@ class PipelineWorker:
                     })
                 else:
                     print(f"[JOB:{job_id[:8]}] ENHANCE skip track={track.track_id[:8]} (is_enhanced={track.is_enhanced})")
+                    if track.is_enhanced:
+                        # Ensure already enhanced tracks are included in mixing and api return datasets
+                        enhanced_track_paths.append({
+                            "track_id": track.track_id,
+                            "path": tmp_path, # Backend provided the enhanced audio directly over audio_url
+                            "volume": track.volume,
+                            "is_muted": False,
+                        })
+                        track_results[track.track_id] = {
+                            "enhanced_url": track.audio_url,
+                            "b2_key": None,
+                            "quality_score": 1.0,
+                            "snr_db": 50.0,
+                        }
 
             mix_source = enhanced_track_paths if enhanced_track_paths else track_paths
             master_data = {}

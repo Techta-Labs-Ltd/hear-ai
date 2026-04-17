@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,6 +12,8 @@ import torchaudio.functional as F
 from demucs.apply import apply_model
 from demucs.pretrained import get_model
 from df.enhance import enhance as df_enhance, init_df
+
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only=False.*")
 
 from app.config import settings
 from app.core.storage import storage
@@ -55,7 +58,7 @@ class AudioEnhancer:
     _COMP_RATIO        = 3.5
     _COMP_MAKEUP_DB    = 6.0
 
-    _GATE_THRESHOLD_DB = -45.0
+    _GATE_THRESHOLD_DB = -35.0
 
     def __init__(self):
         self._demucs    = None
@@ -355,8 +358,8 @@ class AudioEnhancer:
         enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
-        enhanced = await loop.run_in_executor(None, self._compress, enhanced)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
+        enhanced = await loop.run_in_executor(None, self._compress, enhanced)
         enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._remove_internal_silence, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
