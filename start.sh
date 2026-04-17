@@ -11,7 +11,7 @@ VENV=$WORKSPACE/venv
 echo "[SETUP] Locking DNS..."
 chattr -i /etc/resolv.conf 2>/dev/null || true
 printf "nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\n" > /etc/resolv.conf
-chattr +i /etc/resolv.conf
+chattr +i /etc/resolv.conf 2>/dev/null || true
 
 nslookup media.hear.surf > /dev/null 2>&1 && echo "[DNS] media.hear.surf OK" || echo "[DNS] WARNING: media.hear.surf unreachable"
 nslookup api.hear.surf   > /dev/null 2>&1 && echo "[DNS] api.hear.surf OK"   || echo "[DNS] WARNING: api.hear.surf unreachable"
