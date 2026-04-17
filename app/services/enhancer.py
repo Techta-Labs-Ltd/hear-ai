@@ -256,6 +256,62 @@ class AudioEnhancer:
         except Exception:
             return w
 
+    def _remove_internal_silence(self, w: torch.Tensor, sr: int, max_gap_ms: int = 500) -> torch.Tensor:
+        try:
+            frame_ms = 20
+            frame_size = int(sr * (frame_ms / 1000.0))
+            max_gap_frames = int(max_gap_ms / frame_ms)
+            
+            energies = w.pow(2).unfold(1, frame_size, frame_size).mean(dim=2).sqrt().squeeze(0)
+            voiced = energies > 0.001
+            
+            # Bridge short natural gaps
+            smoothed_voiced = voiced.clone()
+            silence_run = 0
+            for i in range(len(voiced)):
+                if not voiced[i]:
+                    silence_run += 1
+                else:
+                    if silence_run > 0 and silence_run <= max_gap_frames:
+                        smoothed_voiced[i-silence_run:i] = True
+                    silence_run = 0
+                    
+            segments = []
+            current_seg = []
+            for i, v in enumerate(smoothed_voiced):
+                if v:
+                    current_seg.append(i)
+                else:
+                    if current_seg:
+                        segments.append((current_seg[0], current_seg[-1]))
+                        current_seg = []
+            if current_seg:
+                segments.append((current_seg[0], current_seg[-1]))
+                
+            if not segments:
+                return w
+                
+            fade_len = int(sr * 0.015) # 15ms smooth crossfade protection
+            fade_in = torch.linspace(0.0, 1.0, fade_len, device=w.device)
+            fade_out = torch.linspace(1.0, 0.0, fade_len, device=w.device)
+            
+            out_tensors = []
+            for i, (sf, ef) in enumerate(segments):
+                start_samp = sf * frame_size
+                end_samp = min(w.shape[1], (ef + 1) * frame_size)
+                
+                chunk = w[:, start_samp:end_samp].clone()
+                if chunk.shape[1] > fade_len * 2:
+                    if i > 0: # Smooth splice entrance
+                        chunk[0, :fade_len] *= fade_in
+                    if i < len(segments) - 1: # Smooth splice exit
+                        chunk[0, -fade_len:] *= fade_out
+                out_tensors.append(chunk)
+                
+            return torch.cat(out_tensors, dim=1) if out_tensors else w
+        except Exception:
+            return w
+
     def _normalise_lufs(self, w: torch.Tensor) -> torch.Tensor:
         try:
             meter = pyln.Meter(self.TARGET_SR)
@@ -305,6 +361,7 @@ class AudioEnhancer:
         enhanced = await loop.run_in_executor(None, self._compress, enhanced)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
         enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
+        enhanced = await loop.run_in_executor(None, self._remove_internal_silence, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
         enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
 
