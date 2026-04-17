@@ -47,7 +47,7 @@ if [ ! -f "$VENV/bin/uvicorn" ]; then
     echo -e "  ${GREEN}✓ Virtual environment created${RESET}"
     echo ""
     echo -e "${YELLOW}[4/6] Installing Python dependencies...${RESET}"
-    pip install -r requirements.txt
+    pip install --no-cache-dir -q -r requirements.txt
     echo -e "  ${GREEN}✓ All packages installed from requirements.txt${RESET}"
 else
     source $VENV/bin/activate
