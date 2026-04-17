@@ -72,4 +72,4 @@ echo -e "${CYAN}${BOLD}║  🛑 Stop:    make stop                   ║${RESET
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-exec supervisord
+exec supervisord -n

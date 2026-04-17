@@ -2,7 +2,10 @@ WORKSPACE=/workspace/hear-ai
 LOG_OUT=$(WORKSPACE)/logs/hear-ai.out.log
 LOG_ERR=$(WORKSPACE)/logs/hear-ai.err.log
 
-.PHONY: start restart stop logs status install clean
+.PHONY: boot start bootstrap-logs restart stop logs errors status install clean
+
+boot:
+	bash $(WORKSPACE)/start.sh
 
 start:
 	mkdir -p $(WORKSPACE)/logs
