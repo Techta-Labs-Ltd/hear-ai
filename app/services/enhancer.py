@@ -38,27 +38,27 @@ class AudioEnhancer:
     TARGET_LUFS    = -12.0
     TRUE_PEAK_DBTP = -1.0
 
-    _HP_FREQ       = 80.0
-    _LP_FREQ       = 14_000.0
+    _HP_FREQ       = 20.0     # Widened to preserve sub-bass
+    _LP_FREQ       = 20_000.0 # Widened to preserve high-end air
     _EQ_CUT_FREQ   = 200.0
-    _EQ_CUT_GAIN   = -2.0
+    _EQ_CUT_GAIN   = -1.0
     _EQ_CUT_Q      = 1.4
     _EQ_BOOST_FREQ = 3_000.0
-    _EQ_BOOST_GAIN = 2.0
+    _EQ_BOOST_GAIN = 1.0     # Softened boost
     _EQ_BOOST_Q    = 2.0
 
     _DESS_FREQ1 = 7_000.0
-    _DESS_GAIN1 = -3.0
+    _DESS_GAIN1 = -1.5       # Softened de-esser for cymbals
     _DESS_Q1    = 1.5
     _DESS_FREQ2 = 9_000.0
-    _DESS_GAIN2 = -2.0
+    _DESS_GAIN2 = -1.0
     _DESS_Q2    = 2.0
 
     _COMP_THRESHOLD_DB = -18.0
     _COMP_RATIO        = 3.5
     _COMP_MAKEUP_DB    = 6.0
 
-    _GATE_THRESHOLD_DB = -35.0
+    _GATE_THRESHOLD_DB = -80.0 # Deepened so music fades naturally don't clip out
 
     def __init__(self):
         self._demucs    = None
@@ -309,8 +309,11 @@ class AudioEnhancer:
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-        enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
+        # DeepFilterNet (AI Noise Reduction) and Demucs (Vocal Isolation) permanently disabled
+        # to ensure music, instrumentals, and background audio are NEVER removed.
+        # enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+        # enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
+        
         enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
