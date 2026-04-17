@@ -264,8 +264,8 @@ class PipelineWorker:
                         track_results[track.track_id] = {
                             "enhanced_url": track.audio_url,
                             "b2_key": None,
-                            "quality_score": 1.0,
-                            "snr_db": 50.0,
+                            "quality_score": track.quality_score if track.quality_score is not None else 1.0,
+                            "snr_db": track.snr_db if track.snr_db is not None else 50.0,
                         }
 
             mix_source = enhanced_track_paths if enhanced_track_paths else track_paths

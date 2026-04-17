@@ -133,7 +133,10 @@ class AudioEnhancer:
                 clean = torch.from_numpy(clean)
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
-            return self._resample(clean.to(self._device), self.DFN_SR, self.TARGET_SR)
+            resampled_clean = self._resample(clean.to(self._device), self.DFN_SR, self.TARGET_SR)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return resampled_clean
         except Exception:
             return w
 
@@ -145,6 +148,8 @@ class AudioEnhancer:
             sources = apply_model(self._demucs, resampled[None], progress=False)[0]
         idx    = self._demucs.sources.index("vocals")
         vocals = self._resample(sources[idx], self._demucs.samplerate, self.TARGET_SR)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return self._to_mono(vocals)
 
     def _noise_gate(self, w: torch.Tensor) -> torch.Tensor:
@@ -216,8 +221,9 @@ class AudioEnhancer:
             env
         )
         
-        # Calculate raw gain securely avoiding divide-by-zero
-        raw_gain = torch.where(env > 1e-8, output_env / env, torch.ones_like(env))
+        # Calculate raw gain securely avoiding divide-by-zero (Inf/NaN)
+        safe_env = torch.clamp(env, min=1e-8)
+        raw_gain = torch.where(env > 1e-8, output_env / safe_env, torch.ones_like(env))
         
         smooth_kernel = int(self.TARGET_SR * 0.05)
         if smooth_kernel % 2 == 0: smooth_kernel += 1
@@ -258,59 +264,8 @@ class AudioEnhancer:
             return w
 
     def _remove_internal_silence(self, w: torch.Tensor, sr: int, max_gap_ms: int = 500) -> torch.Tensor:
-        try:
-            frame_ms = 20
-            frame_size = int(sr * (frame_ms / 1000.0))
-            max_gap_frames = int(max_gap_ms / frame_ms)
-            
-            energies = w.pow(2).unfold(1, frame_size, frame_size).mean(dim=2).sqrt().squeeze(0)
-            voiced = energies > 0.001
-            
-            smoothed_voiced = voiced.clone()
-            silence_run = 0
-            for i in range(len(voiced)):
-                if not voiced[i]:
-                    silence_run += 1
-                else:
-                    if silence_run > 0 and silence_run <= max_gap_frames:
-                        smoothed_voiced[i-silence_run:i] = True
-                    silence_run = 0
-                    
-            segments = []
-            current_seg = []
-            for i, v in enumerate(smoothed_voiced):
-                if v:
-                    current_seg.append(i)
-                else:
-                    if current_seg:
-                        segments.append((current_seg[0], current_seg[-1]))
-                        current_seg = []
-            if current_seg:
-                segments.append((current_seg[0], current_seg[-1]))
-                
-            if not segments:
-                return w
-                
-            fade_len = int(sr * 0.015)
-            fade_in = torch.linspace(0.0, 1.0, fade_len, device=w.device)
-            fade_out = torch.linspace(1.0, 0.0, fade_len, device=w.device)
-            
-            out_tensors = []
-            for i, (sf, ef) in enumerate(segments):
-                start_samp = sf * frame_size
-                end_samp = min(w.shape[1], (ef + 1) * frame_size)
-                
-                chunk = w[:, start_samp:end_samp].clone()
-                if chunk.shape[1] > fade_len * 2:
-                    if i > 0:
-                        chunk[0, :fade_len] *= fade_in
-                    if i < len(segments) - 1:
-                        chunk[0, -fade_len:] *= fade_out
-                out_tensors.append(chunk)
-                
-            return torch.cat(out_tensors, dim=1) if out_tensors else w
-        except Exception:
-            return w
+        # Disabled as manual audio splicing creates phase-mismatch pops/cracks
+        return w
 
     def _normalise_lufs(self, w: torch.Tensor) -> torch.Tensor:
         try:
