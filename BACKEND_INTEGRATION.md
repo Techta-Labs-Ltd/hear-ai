@@ -42,7 +42,7 @@ Content-Type: application/json
 {
   "recording_id": "rec_abc123",
   "job_id": "unique-uuid-v4",
-  "callback_url": "https://api.yourapp.com/api/internal/ai-callback",
+  "callback_url": "https://api.hear.surf/api/internal/ai-callback",
   "skip_enhancement": false,
   "skip_transcription": false,
   "existing_transcript": null,
@@ -394,7 +394,7 @@ AI_SERVICE_SECRET=your-shared-secret-here
 
 # On Hear AI (.env)
 AI_SERVICE_SECRET=your-shared-secret-here
-HEAR_BACKEND_URL=https://api.yourapp.com
+HEAR_BACKEND_URL=https://api.hear.surf
 ```
 
 ---

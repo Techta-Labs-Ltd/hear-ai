@@ -18,7 +18,14 @@ services:
   hear-ai:
     build: .
     restart: unless-stopped
-    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: '16gb'
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
     env_file:

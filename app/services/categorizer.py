@@ -6,8 +6,12 @@ from typing import Optional
 
 import httpx
 import torch
+import warnings
 from transformers import pipeline as hf_pipeline
+from transformers import logging as hf_logging
 
+hf_logging.set_verbosity_error()
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*clean_up_tokenization_spaces.*")
 from app.config import settings
 from app.core.category_loader import category_loader
 from app.core.platform_settings import fetch_platform_settings
@@ -312,17 +316,23 @@ class CategorizationService:
             if tag.startswith("#") and tag not in known_tags:
                 known_tags.add(tag)
 
+        has_openai = len(l3) > 0
+
         merged_tag_scores: dict[str, float] = {}
         for tag in known_tags:
             s1 = l1.get(tag, 0)
             s2 = l2t.get(tag, 0)
             s3 = l3.get(tag, 0)
             
-            score = max(s1, s2, s3)
-            if sum(x > 0 for x in (s1, s2, s3)) > 1:
-                score = min(0.99, score + 0.15)
+            if has_openai:
+                score = (s1 * 0.4) + (s2 * 0.2) + (s3 * 0.6)
+                if s1 > 0 and s3 > 0: score += 0.15
+                elif s2 > 0 and s3 > 0: score += 0.10
+            else:
+                score = (s1 * 0.6) + (s2 * 0.4)
+                if s1 > 0 and s2 > 0: score += 0.15
                 
-            merged_tag_scores[tag] = round(score, 4)
+            merged_tag_scores[tag] = round(min(1.0, score), 4)
 
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
@@ -334,20 +344,25 @@ class CategorizationService:
         for c in all_categories:
             s2 = l2c.get(c, 0)
             s3 = l3.get(c, 0)
-            score = max(s2, s3)
-            if s2 > 0 and s3 > 0:
-                score = min(0.99, score + 0.15)
-            cat_scores[c] = round(score, 4)
+            
+            if has_openai:
+                score = (s2 * 0.3) + (s3 * 0.7)
+                if s2 > 0 and s3 > 0: score += 0.15
+            else:
+                score = s2 * 1.0
+                
+            cat_scores[c] = round(min(1.0, score), 4)
 
-        categories = [c for c, s in cat_scores.items() if s >= self._CAT_THRESHOLD]
-        if not categories and all_categories:
-            categories = [max(all_categories, key=lambda c: cat_scores.get(c, 0))]
+        ranked_cats = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)
+        categories = [c for c, s in ranked_cats if s >= self._CAT_THRESHOLD][:3]
+        if not categories and ranked_cats:
+            categories = [c for c, _ in ranked_cats[:1]]
 
         print(f"[CATEGORIZER] top_tag_scores={ranked_tags[:8]}")
         print(f"[CATEGORIZER] top_cat_scores={sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)[:5]}")
 
         return {
             "tags": tags,
-            "categories": categories[:3],
+            "categories": categories,
             "confidence_scores": {**merged_tag_scores, **cat_scores},
         }
