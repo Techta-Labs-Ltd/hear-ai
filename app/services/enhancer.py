@@ -209,8 +209,6 @@ class AudioEnhancer:
         
         above = torch.clamp(env - threshold_lin, min=0.0)
         
-        # CORRECT DOWNWARD COMPRESSION
-        # target = env if below threshold, or compressed target if above threshold
         output_env = torch.where(
             env > threshold_lin,
             threshold_lin + (env - threshold_lin) / self._COMP_RATIO,
