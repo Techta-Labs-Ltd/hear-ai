@@ -2,6 +2,7 @@ import asyncio
 import traceback
 from datetime import datetime
 
+import httpx
 import sentry_sdk
 
 from app.core.gpu import gpu
@@ -485,7 +486,10 @@ class PipelineWorker:
                 db = SessionLocal()
                 job = db.query(AiJob).filter(AiJob.id == job_id).first()
                 if job:
-                    non_retryable = isinstance(e, (ValueError, TypeError, AttributeError))
+                    non_retryable = isinstance(e, (
+                        ValueError, TypeError, AttributeError,
+                        httpx.HTTPStatusError,
+                    ))
                     if not non_retryable and job.attempts < MAX_RETRIES:
                         job.status = "pending"
                         job.attempts += 1
