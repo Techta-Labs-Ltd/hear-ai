@@ -400,7 +400,7 @@ bash /workspace/hear-ai/start.sh
 
 This ensures the server auto-boots every time the pod starts.
 
-### GPU Requirements
+### GPU Requirements !
 
 - **Minimum**: NVIDIA GPU with 8GB VRAM (RTX 3070 / A10G)
 - **Recommended**: 24GB+ VRAM (A40 / A100) for concurrent jobs
