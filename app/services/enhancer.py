@@ -309,11 +309,12 @@ class AudioEnhancer:
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        # DeepFilterNet (AI Noise Reduction) and Demucs (Vocal Isolation) permanently disabled
-        # to ensure music, instrumentals, and background audio are NEVER removed.
-        # enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+        # DeepFilterNet — AI noise removal (dogs, fans, traffic, etc.) — ENABLED
+        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+
+        # Demucs — vocal isolation (strips instruments/music) — DISABLED
         # enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
-        
+
         enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
