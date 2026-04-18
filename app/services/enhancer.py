@@ -161,11 +161,22 @@ class AudioEnhancer:
 
     def _noise_gate(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
-            threshold = 10 ** (-45 / 20)  # aggressive floor
-            mask = w.abs() > threshold
-            return w * mask
+            threshold = 10 ** (-40 / 20)
+            kernel_size = int(sr * 0.02)
+            if kernel_size % 2 == 0: kernel_size += 1
+            env = F_nn.avg_pool1d(w.abs(), kernel_size, stride=1, padding=kernel_size // 2)
+            gate = torch.clamp(env / threshold, 0.0, 1.0)
+            smooth_kernel = int(sr * 0.05)
+            if smooth_kernel % 2 == 0: smooth_kernel += 1
+            gate = F_nn.avg_pool1d(gate, smooth_kernel, stride=1, padding=smooth_kernel // 2)
+            return w * gate
         except Exception:
             return w
+
+    def _vad_suppress(self, w: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        min_len = min(w.shape[1], mask.shape[1])
+        suppression = 0.02 + (mask[:, :min_len] * 0.98)
+        return w[:, :min_len] * suppression
 
     def _compress(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
@@ -306,16 +317,22 @@ class AudioEnhancer:
         # DeepFilterNet
         dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
 
-        # Dynamic denoise (stronger)
+        # Dynamic denoise
         enhanced = await loop.run_in_executor(
             None, self._dynamic_denoise, enhanced, dfn_cleaned, vad_mask
+        )
+
+        # VAD suppression — actively silence non-speech regions
+        enhanced = await loop.run_in_executor(
+            None, self._vad_suppress, enhanced, vad_mask
         )
 
         # Noise energy check
         min_len = min(enhanced.shape[1], vad_mask.shape[1])
         noise_energy = (enhanced[:, :min_len] * (1.0 - vad_mask[:, :min_len])).pow(2).mean().sqrt().item()
+        logger.info(f"Noise energy after denoise: {noise_energy:.4f}")
 
-        # Demucs (stronger)
+        # Demucs — only for extreme noise
         if noise_energy > 0.08:
             enhanced = await loop.run_in_executor(
                 None, self._demucs_extract_vocals, enhanced, self.TARGET_SR, 0.3
@@ -327,11 +344,8 @@ class AudioEnhancer:
         # Compression
         enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR)
 
-        # Noise gate (critical)
+        # Noise gate (smooth)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced, self.TARGET_SR)
-        
-        # Soft saturation removes micro-noise
-        enhanced = torch.tanh(enhanced * 1.2)
 
         # Trim silence
         enhanced = await loop.run_in_executor(
