@@ -35,7 +35,7 @@ class AudioEnhancer:
     TARGET_SR      = 44100
     DFN_SR         = 48_000
     DNS_SR         = 16_000
-    TARGET_LUFS    = -14.0  # Conservative normalization
+    TARGET_LUFS    = -16.0  # Conservative normalization
     TRUE_PEAK_DBTP = -1.0
 
     _HP_FREQ       = 60.0
@@ -309,6 +309,31 @@ class AudioEnhancer:
             w = w * (ceiling / tp)
         return w
 
+    def _generate_vad_mask(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        # Generates a smooth energetic VAD mask (0.0 to 1.0)
+        kernel_size = int(sr * 0.05)
+        if kernel_size % 2 == 0: kernel_size += 1
+        
+        import torch.nn.functional as F_nn
+        power = w.pow(2)
+        rms = F_nn.avg_pool1d(power, kernel_size, stride=1, padding=kernel_size//2).sqrt()
+        
+        max_rms = rms.max()
+        if max_rms < 1e-6:
+            return torch.zeros_like(rms)
+            
+        normalized = rms / max_rms
+        mask = torch.clamp((normalized - 0.05) * 10.0, 0.0, 1.0)
+        return mask
+
+    def _dynamic_denoise(self, raw: torch.Tensor, cleaned: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        # Apply strict VAD-guided noise suppression
+        # Strong suppression where speech is absent (mask=0) -> 100% cleaned
+        # Lighter suppression where speech is present (mask=1) -> 60% cleaned, 40% raw
+        blend = 1.0 - (mask * 0.4)
+        min_len = min(raw.shape[1], cleaned.shape[1], mask.shape[1])
+        return (cleaned[:, :min_len] * blend[:, :min_len]) + (raw[:, :min_len] * (1.0 - blend[:, :min_len]))
+
     async def enhance(self, input_path: str, recording_id: str, job_id: str) -> EnhancementResult:
         loop = asyncio.get_event_loop()
         waveform, sr = self._load_audio(input_path)
@@ -318,21 +343,33 @@ class AudioEnhancer:
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        # 1. Apply light noise reduction using DeepFilterNet (removes hums, AC)
-        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+        # 1. Voice Activity Detection (VAD)
+        # Detect speech vs non-speech segments to guide downstream processing
+        vad_mask = await loop.run_in_executor(None, self._generate_vad_mask, enhanced, self.TARGET_SR)
 
-        # 5. If noise is extreme, optionally apply Demucs lightly 
-        # (65% blend eliminates the majority of barks and claps without making it sound robotic)
-        enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR, 0.65)
+        # 3. Noise Suppression (DeepFilterNet)
+        # Dynamically adjust strength based on VAD confidence (100% on noise, 60% on speech)
+        dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+        enhanced = await loop.run_in_executor(None, self._dynamic_denoise, enhanced, dfn_cleaned, vad_mask)
+
+        # 4. Optional Heavy Cleaning (Demucs - Conditional)
+        # ONLY apply if noise level is extreme
+        min_len = min(enhanced.shape[1], vad_mask.shape[1])
+        noise_energy = (enhanced[:, :min_len] * (1.0 - vad_mask[:, :min_len])).pow(2).mean().sqrt().item()
+        if noise_energy > 0.05:
+            # Extreme noise detected -> blend Demucs gracefully
+            enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR, 0.45)
 
         # 2. Preserve vocal frequencies, mid-range priority
         enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
         
         enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
+        
+        # 5/6. Silence Handling & Post Processing
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
         enhanced = await loop.run_in_executor(None, self._compress, enhanced)
         
-        # 4. Trim only long silent sections (threshold-based via VAD in strip_silence)
+        # Trim only long silent segments via VAD
         enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
 
         # Apply final loudness normalization cleanly for both paths
