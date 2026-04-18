@@ -138,13 +138,9 @@ class AudioEnhancer:
             sources = apply_model(self._demucs, resampled[None], progress=False)[0]
         idx    = self._demucs.sources.index("vocals")
         vocals = self._resample(sources[idx], self._demucs.samplerate, self.TARGET_SR)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            
         vocals_mono = self._to_mono(vocals)
         
         if blend < 1.0:
-            # Parallel blend slightly hides robotic Demucs artifacts while reducing dogs/claps
             min_len = min(vocals_mono.shape[1], orig_mono.shape[1])
             return (vocals_mono[:, :min_len] * blend) + (orig_mono[:, :min_len] * (1.0 - blend))
             
@@ -296,9 +292,21 @@ class AudioEnhancer:
         return torch.clamp(smoothed, 0.0, 1.0), scaled_timestamps
 
     def _dynamic_denoise(self, raw: torch.Tensor, cleaned: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        blend = 1.0 - (mask * 0.3)
+        blend = 1.0 - (mask * 0.1)
         min_len = min(raw.shape[1], cleaned.shape[1], mask.shape[1])
         return (cleaned[:, :min_len] * blend[:, :min_len]) + (raw[:, :min_len] * (1.0 - blend[:, :min_len]))
+
+    def _detect_music(self, vad_mask: torch.Tensor) -> bool:
+        speech_ratio = vad_mask.mean().item()
+        logger.info(f"VAD speech ratio: {speech_ratio:.3f}")
+        return speech_ratio < 0.15
+
+    def _apply_music_eq(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        try:
+            w = F.highpass_biquad(w, sr, cutoff_freq=30.0)
+            return w
+        except Exception:
+            return w
 
     async def enhance(self, input_path: str, recording_id: str, job_id: str) -> EnhancementResult:
         loop = asyncio.get_event_loop()
@@ -314,45 +322,52 @@ class AudioEnhancer:
             None, self._generate_vad_mask, enhanced, self.TARGET_SR
         )
 
-        # DeepFilterNet
-        dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+        is_music = self._detect_music(vad_mask)
 
-        # Dynamic denoise
-        enhanced = await loop.run_in_executor(
-            None, self._dynamic_denoise, enhanced, dfn_cleaned, vad_mask
-        )
+        if is_music:
+            logger.info("Music detected — skipping speech cleaning pipeline")
+            enhanced = await loop.run_in_executor(None, self._apply_music_eq, enhanced, self.TARGET_SR)
+        else:
+            logger.info("Speech detected — running full cleaning pipeline")
 
-        # VAD suppression — actively silence non-speech regions
-        enhanced = await loop.run_in_executor(
-            None, self._vad_suppress, enhanced, vad_mask
-        )
+            # DeepFilterNet
+            dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
 
-        # Noise energy check
-        min_len = min(enhanced.shape[1], vad_mask.shape[1])
-        noise_energy = (enhanced[:, :min_len] * (1.0 - vad_mask[:, :min_len])).pow(2).mean().sqrt().item()
-        logger.info(f"Noise energy after denoise: {noise_energy:.4f}")
-
-        # Demucs — only for extreme noise
-        if noise_energy > 0.08:
+            # Dynamic denoise
             enhanced = await loop.run_in_executor(
-                None, self._demucs_extract_vocals, enhanced, self.TARGET_SR, 0.3
+                None, self._dynamic_denoise, enhanced, dfn_cleaned, vad_mask
             )
 
-        # EQ
-        enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
+            # Noise energy check BEFORE vad_suppress
+            min_len = min(enhanced.shape[1], vad_mask.shape[1])
+            noise_energy = (enhanced[:, :min_len] * (1.0 - vad_mask[:, :min_len])).pow(2).mean().sqrt().item()
 
-        # Compression
-        enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR)
+            # VAD suppression — actively silence non-speech regions
+            enhanced = await loop.run_in_executor(
+                None, self._vad_suppress, enhanced, vad_mask
+            )
 
-        # Noise gate (smooth)
-        enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced, self.TARGET_SR)
+            # Demucs — trigger if noise is still high, with a strong blend (0.85) to actually wipe dogs/claps
+            if noise_energy > 0.05:
+                enhanced = await loop.run_in_executor(
+                    None, self._demucs_extract_vocals, enhanced, self.TARGET_SR, 0.85
+                )
 
-        # Trim silence
-        enhanced = await loop.run_in_executor(
-            None, self._strip_silence, enhanced, speech_timestamps, self.TARGET_SR
-        )
+            # EQ
+            enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
 
-        # Normalize + limit
+            # Compression
+            enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR)
+
+            # Noise gate (smooth)
+            enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced, self.TARGET_SR)
+
+            # Trim silence
+            enhanced = await loop.run_in_executor(
+                None, self._strip_silence, enhanced, speech_timestamps, self.TARGET_SR
+            )
+
+        # Normalize + limit (both paths)
         enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
         enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
 
