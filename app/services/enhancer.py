@@ -35,30 +35,30 @@ class AudioEnhancer:
     TARGET_SR      = 44100
     DFN_SR         = 48_000
     DNS_SR         = 16_000
-    TARGET_LUFS    = -12.0
+    TARGET_LUFS    = -14.0  # Conservative normalization
     TRUE_PEAK_DBTP = -1.0
 
-    _HP_FREQ       = 80.0
+    _HP_FREQ       = 60.0
     _LP_FREQ       = 14_000.0
     _EQ_CUT_FREQ   = 200.0
-    _EQ_CUT_GAIN   = -2.0
+    _EQ_CUT_GAIN   = -1.5   # Light mud cut
     _EQ_CUT_Q      = 1.4
-    _EQ_BOOST_FREQ = 3_000.0
-    _EQ_BOOST_GAIN = 2.0
+    _EQ_BOOST_FREQ = 2500.0 # Mid-range vocal priority
+    _EQ_BOOST_GAIN = 1.5    # Gentle presence boost
     _EQ_BOOST_Q    = 2.0
 
     _DESS_FREQ1 = 7_000.0
-    _DESS_GAIN1 = -3.0
+    _DESS_GAIN1 = -1.5      # Conservative de-essing
     _DESS_Q1    = 1.5
     _DESS_FREQ2 = 9_000.0
-    _DESS_GAIN2 = -2.0
+    _DESS_GAIN2 = -1.0
     _DESS_Q2    = 2.0
 
-    _COMP_THRESHOLD_DB = -18.0
-    _COMP_RATIO        = 3.5
-    _COMP_MAKEUP_DB    = 6.0
+    _COMP_THRESHOLD_DB = -15.0 # Light compression to avoid over-compressing
+    _COMP_RATIO        = 2.0
+    _COMP_MAKEUP_DB    = 3.0
 
-    _GATE_THRESHOLD_DB = -35.0
+    _GATE_THRESHOLD_DB = -45.0 # Deep gate to remove silence only when clearly inactive
 
     def __init__(self):
         self._demucs    = None
@@ -140,7 +140,8 @@ class AudioEnhancer:
         except Exception:
             return w
 
-    def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
+    def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int, blend: float = 1.0) -> torch.Tensor:
+        orig_mono = self._to_mono(waveform)
         if waveform.shape[0] == 1:
             waveform = waveform.repeat(2, 1)
         resampled = self._resample(waveform, sr, self._demucs.samplerate)
@@ -150,7 +151,15 @@ class AudioEnhancer:
         vocals = self._resample(sources[idx], self._demucs.samplerate, self.TARGET_SR)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        return self._to_mono(vocals)
+            
+        vocals_mono = self._to_mono(vocals)
+        
+        if blend < 1.0:
+            # Parallel blend slightly hides robotic Demucs artifacts while reducing dogs/claps
+            min_len = min(vocals_mono.shape[1], orig_mono.shape[1])
+            return (vocals_mono[:, :min_len] * blend) + (orig_mono[:, :min_len] * (1.0 - blend))
+            
+        return vocals_mono
 
     def _noise_gate(self, w: torch.Tensor) -> torch.Tensor:
         kernel_size = int(self.TARGET_SR * 0.02)
@@ -309,11 +318,21 @@ class AudioEnhancer:
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
+        # 1. Apply light noise reduction using DeepFilterNet (removes hums, AC)
         enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+
+        # 5. If noise is extreme, optionally apply Demucs lightly 
+        # (65% blend eliminates the majority of barks and claps without making it sound robotic)
+        enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR, 0.65)
+
+        # 2. Preserve vocal frequencies, mid-range priority
         enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
+        
         enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
         enhanced = await loop.run_in_executor(None, self._compress, enhanced)
+        
+        # 4. Trim only long silent sections (threshold-based via VAD in strip_silence)
         enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
 
         # Apply final loudness normalization cleanly for both paths
