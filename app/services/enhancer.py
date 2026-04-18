@@ -455,7 +455,8 @@ class AudioEnhancer:
         dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
 
         if mode == ContentMode.SPEECH:
-            noise_energy = (enhanced[:, :dfn_cleaned.shape[1]] - dfn_cleaned).pow(2).mean().sqrt().item()
+            _n = min(enhanced.shape[1], dfn_cleaned.shape[1])
+            noise_energy = (enhanced[:, :_n] - dfn_cleaned[:, :_n]).pow(2).mean().sqrt().item()
             if noise_energy > 0.005:
                 dfn_cleaned = await loop.run_in_executor(
                     None, self._demucs_extract_vocals, dfn_cleaned, self.TARGET_SR
