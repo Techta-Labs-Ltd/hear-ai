@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 try:
     from pyrnnoise import RNNoise as _RNNoise
     _RNNOISE_AVAILABLE = True
-except ImportError:
+except Exception:
     _RNNoise = None
     _RNNOISE_AVAILABLE = False
-    logger.warning("pyrnnoise not available — RNNoise stage will be bypassed")
+    logger.warning("pyrnnoise unavailable — RNNoise stage will be bypassed")
 class ContentMode(str, Enum):
     SPEECH  = "speech"
     MUSIC   = "music"
