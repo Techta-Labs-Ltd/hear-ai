@@ -152,6 +152,42 @@ class AudioEnhancer:
             torch.cuda.empty_cache()
         return self._to_mono(vocals)
 
+    def _detect_is_music(self, w: torch.Tensor, sr: int) -> bool:
+        """
+        Takes a 10-second slice of audio and evaluates the energetic ratio
+        of instruments vs vocals using Demucs. If instruments hold > 15% of the energy,
+        it classifies the track as Music.
+        """
+        try:
+            mid = w.shape[1] // 2
+            half_slice = sr * 5
+            start = max(0, mid - half_slice)
+            end = min(w.shape[1], mid + half_slice)
+            w_slice = w[:, start:end]
+            
+            if w_slice.shape[0] == 1:
+                w_slice = w_slice.repeat(2, 1)
+                
+            resampled = self._resample(w_slice, sr, self._demucs.samplerate)
+            with torch.no_grad():
+                sources = apply_model(self._demucs, resampled[None], progress=False)[0]
+                
+            idx_v = self._demucs.sources.index("vocals")
+            vocals_rms = sources[idx_v].pow(2).mean().sqrt().item()
+            
+            instruments_idx = [i for i in range(len(self._demucs.sources)) if i != idx_v]
+            instruments_rms = sources[instruments_idx].pow(2).mean().sqrt().item()
+            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            total = vocals_rms + instruments_rms + 1e-8
+            ratio = instruments_rms / total
+            
+            return ratio > 0.15
+        except Exception:
+            return False
+
     def _noise_gate(self, w: torch.Tensor) -> torch.Tensor:
         kernel_size = int(self.TARGET_SR * 0.02)
         if kernel_size % 2 == 0: kernel_size += 1
@@ -309,17 +345,39 @@ class AudioEnhancer:
         mono = self._to_mono(waveform)
         enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
-        # DeepFilterNet — AI noise removal (dogs, fans, traffic, etc.) — ENABLED
-        enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+        # 1. Automatically detect if the track is Speech or Music
+        is_music = await loop.run_in_executor(None, self._detect_is_music, enhanced, self.TARGET_SR)
+        print(f"[JOB:{job_id[:8]}] DETECTED: {'MUSIC' if is_music else 'SPEECH'}")
 
-        # Demucs — vocal isolation (strips instruments/music) — DISABLED
-        # enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
+        if is_music:
+            # ------------ MUSIC MODE ------------
+            # Bypass Demucs and DeepFilterNet to preserve the instrumental background.
+            # Relax the High-Pass and Gate so the sub-bass and natural fades stay intact.
+            self._HP_FREQ = 20.0
+            self._GATE_THRESHOLD_DB = -80.0
+            
+            # Basic mastering chain
+            enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
+            enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
+            enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
+            enhanced = await loop.run_in_executor(None, self._compress, enhanced)
+            
+        else:
+            # ------------ SPEECH MODE ------------
+            # Aggressively remove dogs, claps, fans, and background noise.
+            self._HP_FREQ = 80.0
+            self._GATE_THRESHOLD_DB = -35.0
+            
+            enhanced = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+            enhanced = await loop.run_in_executor(None, self._demucs_extract_vocals, enhanced, self.TARGET_SR)
+            enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
+            enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
+            enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
+            enhanced = await loop.run_in_executor(None, self._compress, enhanced)
+            # Remove giant silent gaps from speeches
+            enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
 
-        enhanced = await loop.run_in_executor(None, self._apply_eq, enhanced, self.TARGET_SR)
-        enhanced = await loop.run_in_executor(None, self._de_ess, enhanced, self.TARGET_SR)
-        enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced)
-        enhanced = await loop.run_in_executor(None, self._compress, enhanced)
-        enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, self.TARGET_SR)
+        # Apply final loudness normalization cleanly for both paths
         enhanced = await loop.run_in_executor(None, self._remove_internal_silence, enhanced, self.TARGET_SR)
         enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
         enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
