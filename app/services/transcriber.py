@@ -8,7 +8,7 @@ from faster_whisper import WhisperModel
 
 from app.config import settings
 
-
+# 
 class TranscriptionService:
     def __init__(self):
         self._model = None
