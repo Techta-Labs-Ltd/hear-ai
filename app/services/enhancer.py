@@ -107,7 +107,6 @@ class AudioEnhancer:
     _DEMUCS_SEGMENT           = 10
 
     def __init__(self):
-        self._demucs    = None
         self._dfn_model = None
         self._vad_model = None
         self._device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -115,9 +114,6 @@ class AudioEnhancer:
         self._dfn_lock  = threading.Lock()
 
     def load(self):
-        self._demucs = get_model(settings.DEMUCS_MODEL)
-        self._demucs.to(self._device)
-        self._demucs.eval()
         self._dfn_model, _, _ = init_df()
         self._vad_model = load_silero_vad()
 
@@ -208,39 +204,24 @@ class AudioEnhancer:
             logger.error("DeepFilterNet failed: %s", e)
             return w
 
-    def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
-        original_len = waveform.shape[1]
-        stereo       = waveform.repeat(2, 1) if waveform.shape[0] == 1 else waveform
-        resampled    = self._resample(stereo, sr, self._demucs.samplerate)
-        with torch.no_grad():
-            sources = apply_model(
-                self._demucs, resampled[None], progress=False,
-            )[0]
-        idx    = self._demucs.sources.index("vocals")
-        vocals = self._resample(sources[idx], self._demucs.samplerate, self.TARGET_SR)
-        vocals = self._to_mono(vocals)
-        if vocals.shape[1] < original_len:
-            pad    = torch.zeros((1, original_len - vocals.shape[1]), device=vocals.device)
-            vocals = torch.cat([vocals, pad], dim=1)
-        return vocals[:, :original_len]
-
-    def _demucs_separate_music(self, waveform: torch.Tensor, sr: int) -> dict[str, torch.Tensor]:
-        original_len = waveform.shape[1]
-        stereo       = waveform.repeat(2, 1) if waveform.shape[0] == 1 else waveform
-        resampled    = self._resample(stereo, sr, self._demucs.samplerate)
-        with torch.no_grad():
-            sources = apply_model(
-                self._demucs, resampled[None], progress=False,
-            )[0]
-        result = {}
-        for i, name in enumerate(self._demucs.sources):
-            stem = self._resample(sources[i], self._demucs.samplerate, self.TARGET_SR)
-            stem = self._to_mono(stem)
-            if stem.shape[1] < original_len:
-                pad  = torch.zeros((1, original_len - stem.shape[1]), device=stem.device)
-                stem = torch.cat([stem, pad], dim=1)
-            result[name] = stem[:, :original_len]
-        return result
+    def _suppress_transients(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        try:
+            w_np = w.squeeze(0).cpu().numpy()
+            b, a = ss.butter(4, 4000, 'highpass', fs=sr)
+            high_freq = ss.filtfilt(b, a, w_np)
+            env = np.abs(high_freq)
+            kernel_size = int(sr * 0.02)
+            if kernel_size % 2 == 0: kernel_size += 1
+            local_median = ss.medfilt(env, kernel_size)
+            threshold = local_median * 5.0 + 0.02
+            spikes = env > threshold
+            gain = np.ones_like(w_np)
+            gain[spikes] = 0.1
+            gain_smooth = ss.savgol_filter(gain, 101, 3)
+            out = w_np * gain_smooth
+            return torch.from_numpy(out.astype(np.float32)).unsqueeze(0).to(w.device)
+        except Exception:
+            return w
 
     def _apply_eq_speech(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
@@ -377,99 +358,7 @@ class AudioEnhancer:
         floor   = self._VAD_SUPPRESS_FLOOR
         return w * (floor + mask * (1.0 - floor))
 
-    def _remove_breaths_and_smacks(self, w: torch.Tensor, sr: int, vad_mask: torch.Tensor) -> torch.Tensor:
-        try:
-            w, vad_mask = _match_length(w, vad_mask)
-            sig_np      = w.squeeze(0).cpu().numpy().astype(np.float64)
-            mask_np     = vad_mask.squeeze(0).cpu().numpy().astype(np.float32)
-
-            window_n     = max(1, int(sr * 0.010))
-            n_windows    = len(sig_np) // window_n
-            energy       = np.array([
-                np.abs(sig_np[i * window_n:(i + 1) * window_n]).mean()
-                for i in range(n_windows)
-            ])
-
-            max_breath_w = max(1, int(sr * self._BREATH_MAX_DURATION_MS / 1000 / window_n))
-            xfade_n      = max(1, int(sr * self._BREATH_CROSSFADE_MS / 1000))
-            result_np    = sig_np.copy()
-
-            i = 0
-            while i < len(energy):
-                if energy[i] > self._BREATH_ENERGY_THRESHOLD:
-                    j = i
-                    while j < len(energy) and energy[j] > self._BREATH_ENERGY_THRESHOLD:
-                        j += 1
-                    duration_w = j - i
-                    s_samp     = i * window_n
-                    e_samp     = min(j * window_n, len(result_np))
-
-                    mid_samp   = (s_samp + e_samp) // 2
-                    mid_samp   = min(mid_samp, len(mask_np) - 1)
-                    is_non_speech = mask_np[mid_samp] < 0.3
-
-                    if duration_w <= max_breath_w and is_non_speech:
-                        fi_s = max(0, s_samp - xfade_n)
-                        fo_e = min(len(result_np), e_samp + xfade_n)
-
-                        if fi_s < s_samp:
-                            fn = s_samp - fi_s
-                            t  = np.linspace(0.0, 1.0, fn)
-                            result_np[fi_s:s_samp] *= (1.0 + np.cos(t * np.pi)) * 0.5
-
-                        result_np[s_samp:e_samp] = 0.0
-
-                        if e_samp < fo_e:
-                            fn = fo_e - e_samp
-                            t  = np.linspace(0.0, 1.0, fn)
-                            result_np[e_samp:fo_e] *= (1.0 - np.cos(t * np.pi)) * 0.5
-
-                    i = j
-                else:
-                    i += 1
-            return torch.from_numpy(result_np.astype(np.float32)).unsqueeze(0).to(w.device)
-        except Exception:
-            return w
-
-    def _suppress_transients(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        try:
-            n_fft, hop = 2048, 512
-            window = torch.hann_window(n_fft, device=w.device)
-
-            stft = torch.stft(
-                w.squeeze(0), n_fft=n_fft, hop_length=hop, win_length=n_fft,
-                window=window, return_complex=True
-            )
-            
-            mag, phase = stft.abs(), stft.angle()
-            mag_b = mag.unsqueeze(0)
-
-            kernel_size = 11
-            pad = kernel_size // 2
-            
-            padded_mag = F_nn.pad(mag_b, (pad, pad), mode="reflect")
-            local_median, _ = padded_mag.unfold(-1, kernel_size, 1).median(dim=-1)
-
-            threshold = local_median * 4.0 + 1e-6
-            spike_mask = mag_b > threshold
-
-            gain = torch.ones_like(mag_b)
-            gain[spike_mask] = (local_median[spike_mask] * 1.5) / mag_b[spike_mask]
-
-            smooth_kernel = 3
-            gain = F_nn.avg_pool1d(gain, smooth_kernel, stride=1, padding=smooth_kernel//2)
-
-            new_mag = mag_b * gain
-            new_stft = torch.polar(new_mag.squeeze(0), phase)
-
-            out = torch.istft(
-                new_stft, n_fft=n_fft, hop_length=hop, win_length=n_fft,
-                window=window, length=w.shape[-1]
-            )
-            return out.unsqueeze(0)
-        except Exception as e:
-            logger.error("Transient suppression failed: %s", e)
-            return w
+    # Removed faulty transient and breath DSP logic that silenced recordings
     def _strip_silence(self, w: torch.Tensor, timestamps: list[dict], sr: int) -> torch.Tensor:
         try:
             if not timestamps:
@@ -601,52 +490,19 @@ class AudioEnhancer:
                 
                 dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
                 dfn_cleaned, enhanced = _match_length(dfn_cleaned, enhanced)
-                
-                noise_energy = (enhanced - dfn_cleaned).pow(2).mean().sqrt().item()
-                if noise_energy > 0.005:
-                    dfn_cleaned = await loop.run_in_executor(
-                        None, self._demucs_extract_vocals, dfn_cleaned, self.TARGET_SR
-                    )
                 enhanced = dfn_cleaned
-
-                enhanced = await loop.run_in_executor(
-                    None, self._vad_suppress, enhanced, vad_mask
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._remove_breaths_and_smacks, enhanced, self.TARGET_SR, vad_mask
-                )
-
+                
+                enhanced = await loop.run_in_executor(None, self._vad_suppress, enhanced, vad_mask)
                 snr = self._compute_snr(raw_at_target, enhanced)
 
-                enhanced = await loop.run_in_executor(
-                    None, self._strip_silence, enhanced, speech_timestamps, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._apply_eq_speech, enhanced, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._noise_gate, enhanced, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._compress, enhanced, self.TARGET_SR, mode
-                )
-
+                enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, speech_timestamps, self.TARGET_SR)
+                enhanced = await loop.run_in_executor(None, self._apply_eq_speech, enhanced, self.TARGET_SR)
+                enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced, self.TARGET_SR)
+                enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
             else:
-                separated = await loop.run_in_executor(
-                    None, self._demucs_separate_music, enhanced, self.TARGET_SR
-                )
-                stems    = list(separated.values())
-                min_len  = min(s.shape[1] for s in stems)
-                enhanced = sum(s[:, :min_len] for s in stems)
-
+                enhanced = await loop.run_in_executor(None, self._apply_eq_music, enhanced, self.TARGET_SR)
+                enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
                 snr = self._compute_snr(raw_at_target, enhanced)
-
-                enhanced = await loop.run_in_executor(
-                    None, self._apply_eq_music, enhanced, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._compress, enhanced, self.TARGET_SR, mode
-                )
 
             enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
             enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
