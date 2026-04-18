@@ -19,7 +19,7 @@ from silero_vad import get_speech_timestamps, load_silero_vad
 
 from app.config import settings
 from app.core.storage import storage
-import rnnoise
+from pyrnnoise import RNNoise as _RNNoise
 
 warnings.filterwarnings("ignore")
 
@@ -62,7 +62,7 @@ class AudioEnhancer:
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._vad_lock = threading.Lock()
         self._dfn_lock = threading.Lock()
-        self._rnnoise = rnnoise.RNNoise()
+        self._rnn = _RNNoise(sample_rate=48000)
         self._rnnoise_lock = threading.Lock()
 
     def load(self):
@@ -105,24 +105,28 @@ class AudioEnhancer:
     def _rnnoise_denoise(self, w: torch.Tensor) -> torch.Tensor:
         try:
             target_sr = 48000
-            frame_size = 480
-            w_48 = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy().astype(np.float32)
+            x48 = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy()
+            x16 = (np.clip(x48, -1.0, 1.0) * 32767).astype(np.int16)
 
-            pad_len = frame_size - (len(w_48) % frame_size)
-            if pad_len < frame_size:
-                w_48 = np.pad(w_48, (0, pad_len), mode='constant')
-
-            out = np.zeros_like(w_48)
+            out_chunks = []
             with self._rnnoise_lock:
-                for i in range(0, len(w_48), frame_size):
-                    chunk = w_48[i:i + frame_size]
-                    out[i:i + frame_size] = self._rnnoise.process(chunk) if hasattr(self._rnnoise, 'process') else self._rnnoise.filter(chunk)
+                for _, denoised in self._rnn.denoise_chunk(x16[np.newaxis, :]):
+                    out_chunks.append(denoised)
 
-            if pad_len < frame_size:
-                out = out[:-pad_len]
+            if not out_chunks:
+                return w
 
-            out_tensor = torch.from_numpy(out).unsqueeze(0).to(self._device)
-            return self._resample(out_tensor, target_sr, self.TARGET_SR)
+            out16 = np.concatenate(out_chunks, axis=-1).squeeze()
+            out_f = out16.astype(np.float32) / 32767.0
+
+            pad = len(x48) - len(out_f)
+            if pad > 0:
+                out_f = np.pad(out_f, (0, pad))
+            else:
+                out_f = out_f[:len(x48)]
+
+            y = torch.from_numpy(out_f).unsqueeze(0).to(self._device)
+            return self._resample(y, target_sr, self.TARGET_SR)
         except Exception:
             return w
 

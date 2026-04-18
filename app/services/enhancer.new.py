@@ -19,7 +19,7 @@ from silero_vad import get_speech_timestamps, load_silero_vad
 
 from app.config import settings
 from app.core.storage import storage
-import rnnoise
+from pyrnnoise import RNNoise as _RNNoise
 
 warnings.filterwarnings("ignore")
 
@@ -60,7 +60,7 @@ class AudioEnhancer:
         self._demucs = None
         self._dfn_model = None
         self._vad_model = None
-        self._rnnoise = rnnoise.RNNoise()
+        self._rnn = _RNNoise(sample_rate=48000)
         self._vad_lock = threading.Lock()
         self._dfn_lock = threading.Lock()
         self._rn_lock = threading.Lock()
@@ -80,26 +80,33 @@ class AudioEnhancer:
     def _resample(self, w, a, b):
         return F.resample(w, a, b) if a != b else w
 
-    def _rnnoise(self, w):
-        target_sr = 48000
-        frame = 480
+    def _rnnoise_denoise(self, w):
+        try:
+            target_sr = 48000
+            x48 = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy()
+            x16 = (np.clip(x48, -1.0, 1.0) * 32767).astype(np.int16)
 
-        x = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy().astype(np.float32)
-        pad = (frame - len(x) % frame) % frame
-        if pad:
-            x = np.pad(x, (0, pad))
+            out_chunks = []
+            with self._rn_lock:
+                for _, denoised in self._rnn.denoise_chunk(x16[np.newaxis, :]):
+                    out_chunks.append(denoised)
 
-        out = np.zeros_like(x)
+            if not out_chunks:
+                return w
 
-        with self._rn_lock:
-            for i in range(0, len(x), frame):
-                out[i:i+frame] = self._rnnoise.filter(x[i:i+frame])
+            out16 = np.concatenate(out_chunks, axis=-1).squeeze()
+            out_f = out16.astype(np.float32) / 32767.0
 
-        if pad:
-            out = out[:-pad]
+            pad = len(x48) - len(out_f)
+            if pad > 0:
+                out_f = np.pad(out_f, (0, pad))
+            else:
+                out_f = out_f[:len(x48)]
 
-        y = torch.from_numpy(out).unsqueeze(0).to(self._device)
-        return self._resample(y, target_sr, self.TARGET_SR)
+            y = torch.from_numpy(out_f).unsqueeze(0).to(self._device)
+            return self._resample(y, target_sr, self.TARGET_SR)
+        except Exception:
+            return w
 
     def _deepfilter(self, w):
         w48 = self._resample(w.cpu(), self.TARGET_SR, self.DFN_SR)
@@ -195,7 +202,7 @@ class AudioEnhancer:
         w = self._mono(w)
         w = self._resample(w, sr, self.TARGET_SR).to(self._device)
 
-        w = await loop.run_in_executor(None, self._rnnoise, w)
+        w = await loop.run_in_executor(None, self._rnnoise_denoise, w)
         w = await loop.run_in_executor(None, self._deepfilter, w)
 
         vocals = await loop.run_in_executor(None, self._demucs_vocals, w)
