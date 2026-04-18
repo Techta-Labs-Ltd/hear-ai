@@ -4,6 +4,7 @@ import tempfile
 import warnings
 from dataclasses import dataclass
 
+import logging
 import numpy as np
 import pyloudnorm as pyln
 import torch
@@ -14,6 +15,8 @@ from demucs.apply import apply_model
 from demucs.pretrained import get_model
 from df.enhance import enhance as df_enhance, init_df
 from silero_vad import get_speech_timestamps, load_silero_vad
+
+logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only=False.*")
 
@@ -58,7 +61,6 @@ class AudioEnhancer:
         self._demucs.eval()
 
         self._dfn_model, self._dfn_state, _ = init_df()
-        self._dfn_model = self._dfn_model.to(self._device)
 
         self._vad_model = load_silero_vad()
 
@@ -113,15 +115,18 @@ class AudioEnhancer:
 
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            w_48k = self._resample(w.to(self._device), self.TARGET_SR, self.DFN_SR)
+            w_cpu = w.cpu()
+            w_48k = self._resample(w_cpu, self.TARGET_SR, self.DFN_SR)
+            _, dfn_state, _ = init_df()
             with torch.no_grad():
-                clean = df_enhance(self._dfn_model, self._dfn_state, w_48k)
+                clean = df_enhance(self._dfn_model, dfn_state, w_48k)
             if isinstance(clean, np.ndarray):
                 clean = torch.from_numpy(clean)
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
-            return self._resample(clean.to(self._device), self.DFN_SR, self.TARGET_SR)
-        except Exception:
+            return self._resample(clean, self.DFN_SR, self.TARGET_SR).to(self._device)
+        except Exception as e:
+            logger.error(f"DeepFilterNet failed: {e}")
             return w
 
     def _demucs_extract_vocals(self, waveform: torch.Tensor, sr: int, blend: float = 1.0) -> torch.Tensor:
