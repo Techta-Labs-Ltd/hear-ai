@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import tempfile
 import threading
@@ -6,12 +7,10 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 
-import logging
 import numpy as np
 import pyloudnorm as pyln
 import scipy.signal as ss
 import torch
-import torch.nn.functional as F_nn
 import torchaudio
 import torchaudio.functional as F
 from demucs.apply import apply_model
@@ -19,18 +18,25 @@ from demucs.pretrained import get_model
 from df.enhance import enhance as df_enhance, init_df
 from silero_vad import get_speech_timestamps, load_silero_vad
 
-logger = logging.getLogger(__name__)
-
-warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only=False.*")
-# 
 from app.config import settings
 from app.core.storage import storage
 
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only=False.*")
 
+logger = logging.getLogger(__name__)
+
+try:
+    from pyrnnoise import RNNoise as _RNNoise
+    _RNNOISE_AVAILABLE = True
+except ImportError:
+    _RNNoise = None
+    _RNNOISE_AVAILABLE = False
+    logger.warning("pyrnnoise not available — RNNoise stage will be bypassed")
 class ContentMode(str, Enum):
-    SPEECH = "speech"
-    MUSIC  = "music"
-    AUTO   = "auto"
+    SPEECH  = "speech"
+    MUSIC   = "music"
+    PODCAST = "podcast"
+    AUTO    = "auto"
 
 
 @dataclass
@@ -60,9 +66,9 @@ def _iir_envelope(sig: np.ndarray, attack_coef: float, release_coef: float) -> n
     env  = np.zeros_like(sig)
     prev = 0.0
     for i, x in enumerate(sig):
-        c       = attack_coef if x > prev else release_coef
-        prev    = c * prev + (1.0 - c) * x
-        env[i]  = prev
+        c      = attack_coef if x > prev else release_coef
+        prev   = c * prev + (1.0 - c) * x
+        env[i] = prev
     return env
 
 
@@ -85,40 +91,42 @@ class AudioEnhancer:
     _MUSIC_COMP_ATTACK_MS     = 20
     _MUSIC_COMP_RELEASE_MS    = 200
 
-    _GATE_THRESHOLD_DB        = -65.0
-    _GATE_ATTACK_MS           = 1
-    _GATE_RELEASE_MS          = 150
-    _GATE_HOLD_MS             = 50
+    _GATE_THRESHOLD_DB = -72.0
+    _GATE_ATTACK_MS    = 1
+    _GATE_RELEASE_MS   = 200
+    _GATE_HOLD_MS      = 80
 
-    _VAD_SPEECH_THRESHOLD     = 0.35
-    _VAD_MIN_SPEECH_MS        = 100
-    _VAD_MIN_SILENCE_MS       = 400
-    _VAD_PAD_MS               = 120
-    _VAD_CROSSFADE_MS         = 20
-    _VAD_SUPPRESS_FLOOR       = 0.08
+    _VAD_SPEECH_THRESHOLD  = 0.30
+    _VAD_MIN_SPEECH_MS     = 100
+    _VAD_MIN_SILENCE_MS    = 600
+    _VAD_PAD_MS            = 150
+    _VAD_CROSSFADE_MS      = 25
+    _VAD_SUPPRESS_FLOOR    = 0.12
 
-    _BREATH_ENERGY_THRESHOLD  = 0.003
-    _BREATH_MAX_DURATION_MS   = 200
-    _BREATH_CROSSFADE_MS      = 12
+    _BREATH_ENERGY_THRESHOLD  = 0.002
+    _BREATH_MAX_DURATION_MS   = 180
+    _BREATH_CROSSFADE_MS      = 15
 
-    _STRIP_FADE_MS            = 25
-    _CLASSIFY_WINDOW_S        = 30
-    _MUSIC_ENERGY_RATIO       = 0.65
-    _DEMUCS_SEGMENT           = 10
+    _STRIP_FADE_MS               = 30
+    _CLASSIFY_WINDOW_S           = 30
+    _PODCAST_STEM_ATTENUATION_DB = -8.0
 
     def __init__(self):
         self._demucs    = None
         self._dfn_model = None
+        self._dfn_state = None
         self._vad_model = None
         self._device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._vad_lock  = threading.Lock()
         self._dfn_lock  = threading.Lock()
+        self._rnn      = _RNNoise(sample_rate=48000) if _RNNOISE_AVAILABLE else None
+        self._rnn_lock  = threading.Lock()
 
     def load(self):
         self._demucs = get_model(settings.DEMUCS_MODEL)
         self._demucs.to(self._device)
         self._demucs.eval()
-        self._dfn_model, _, _ = init_df()
+        self._dfn_model, self._dfn_state, _ = init_df()
         self._vad_model = load_silero_vad()
 
     @property
@@ -146,14 +154,53 @@ class AudioEnhancer:
     def _detect_clipping(self, w: torch.Tensor) -> bool:
         return (w.abs() > 0.99).float().mean().item() > 0.001
 
-    def _detect_mode_from_stems(self, stems: dict[str, torch.Tensor]) -> ContentMode:
-        drums_rms = stems['drums'].pow(2).mean().sqrt().item()
-        bass_rms  = stems['bass'].pow(2).mean().sqrt().item()
-        other_rms = stems['other'].pow(2).mean().sqrt().item()
-        vocals_rms = stems['vocals'].pow(2).mean().sqrt().item()
-        
-        music_power = drums_rms + bass_rms
-        if music_power > (vocals_rms + other_rms) * 0.1:
+    def _iir_coefs(self, time_ms: float, sr: int) -> tuple[np.ndarray, np.ndarray]:
+        coef = np.exp(-1.0 / (sr * time_ms / 1000.0))
+        b    = np.array([1.0 - coef])
+        a    = np.array([1.0, -coef])
+        return b, a
+
+    def _detect_content_mode(
+        self, w: torch.Tensor, sr: int, precomputed_ts: list[dict] | None = None
+    ) -> ContentMode:
+        max_samples = int(self._CLASSIFY_WINDOW_S * sr)
+        segment     = w[:, :max_samples] if w.shape[1] > max_samples else w
+        n_fft       = 2048
+        hop         = 512
+        window      = torch.hann_window(n_fft, device=segment.device)
+        stft        = torch.stft(
+            segment.squeeze(0), n_fft=n_fft, hop_length=hop,
+            win_length=n_fft, window=window, return_complex=True,
+        )
+        mag   = stft.abs()
+        freqs = torch.linspace(0, sr / 2, mag.shape[0], device=segment.device)
+
+        speech_energy  = mag[(freqs >= 250) & (freqs <= 4000)].pow(2).mean().item()
+        music_energy   = mag[(freqs > 5000) & (freqs <= 16000)].pow(2).mean().item()
+        total_energy   = speech_energy + music_energy + 1e-10
+        spectral_ratio = music_energy / total_energy
+
+        if precomputed_ts is not None:
+            ts = precomputed_ts
+            total_16k = int(segment.shape[1] * self.VAD_SR / sr)
+        else:
+            w_16k = self._resample(segment.cpu(), sr, self.VAD_SR).squeeze(0)
+            with self._vad_lock:
+                with torch.no_grad():
+                    ts = get_speech_timestamps(
+                        w_16k, self._vad_model,
+                        sampling_rate=self.VAD_SR,
+                        threshold=self._VAD_SPEECH_THRESHOLD,
+                        return_seconds=False,
+                    )
+            total_16k = w_16k.shape[0]
+
+        speech_samples = sum(t["end"] - t["start"] for t in ts)
+        speech_ratio   = speech_samples / max(total_16k, 1)
+
+        if spectral_ratio > 0.35 and speech_ratio > 0.40:
+            return ContentMode.PODCAST
+        if spectral_ratio > 0.65 and speech_ratio <= 0.40:
             return ContentMode.MUSIC
         return ContentMode.SPEECH
 
@@ -200,15 +247,47 @@ class AudioEnhancer:
             logger.error("DeepFilterNet failed: %s", e)
             return w
 
+    def _rnnoise_denoise(self, w: torch.Tensor) -> torch.Tensor:
+        if not _RNNOISE_AVAILABLE or self._rnn is None:
+            logger.warning("RNNoise unavailable — skipping transient suppression stage")
+            return w
+        try:
+            target_sr = 48000
+            x48       = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy()
+            x16       = (np.clip(x48, -1.0, 1.0) * 32767).astype(np.int16)
+
+            out_chunks: list[np.ndarray] = []
+            with self._rnn_lock:
+                for _, denoised in self._rnn.denoise_chunk(x16[np.newaxis, :]):
+                    out_chunks.append(denoised)
+
+            if not out_chunks:
+                return w
+
+            out16 = np.concatenate(out_chunks, axis=-1).squeeze()
+            out_f = out16.astype(np.float32) / 32767.0
+            pad   = len(x48) - len(out_f)
+            if pad > 0:
+                out_f = np.pad(out_f, (0, pad))
+            else:
+                out_f = out_f[:len(x48)]
+
+            y = torch.from_numpy(out_f).unsqueeze(0).to(self._device)
+            return self._resample(y, target_sr, self.TARGET_SR)
+        except Exception as e:
+            logger.error("RNNoise failed: %s", e)
+            return w
+
     def _demucs_separate(self, waveform: torch.Tensor, sr: int) -> dict[str, torch.Tensor]:
         original_len = waveform.shape[1]
         stereo       = waveform.repeat(2, 1) if waveform.shape[0] == 1 else waveform
         resampled    = self._resample(stereo, sr, self._demucs.samplerate)
         with torch.no_grad():
             sources = apply_model(
-                self._demucs, resampled[None], progress=False,
+                self._demucs, resampled[None],
+                progress=False, num_workers=0,
             )[0]
-        result = {}
+        result: dict[str, torch.Tensor] = {}
         for i, name in enumerate(self._demucs.sources):
             stem = self._resample(sources[i], self._demucs.samplerate, self.TARGET_SR)
             stem = self._to_mono(stem)
@@ -217,76 +296,6 @@ class AudioEnhancer:
                 stem = torch.cat([stem, pad], dim=1)
             result[name] = stem[:, :original_len]
         return result
-
-    def _apply_eq_speech(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        try:
-            w = F.highpass_biquad(w, sr, cutoff_freq=100.0)
-            w = F.equalizer_biquad(w, sr, center_freq=300.0,  gain=-2.0, Q=1.5)
-            w = F.equalizer_biquad(w, sr, center_freq=1000.0, gain=1.0,  Q=2.0)
-            w = F.equalizer_biquad(w, sr, center_freq=3000.0, gain=2.5,  Q=1.8)
-            w = F.equalizer_biquad(w, sr, center_freq=8000.0, gain=1.5,  Q=2.0)
-            w = F.lowpass_biquad(w, sr, cutoff_freq=12000.0)
-            return w
-        except Exception:
-            return w
-
-    def _apply_eq_music(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        try:
-            w = F.highpass_biquad(w, sr, cutoff_freq=30.0)
-            w = F.equalizer_biquad(w, sr, center_freq=100.0,  gain=1.0,  Q=1.2)
-            w = F.equalizer_biquad(w, sr, center_freq=3000.0, gain=-1.0, Q=2.0)
-            w = F.equalizer_biquad(w, sr, center_freq=8000.0, gain=2.0,  Q=1.5)
-            return w
-        except Exception:
-            return w
-
-    def _iir_coefs(self, time_ms: float, sr: int) -> tuple[np.ndarray, np.ndarray]:
-        coef = np.exp(-1.0 / (sr * time_ms / 1000.0))
-        b    = np.array([1.0 - coef])
-        a    = np.array([1.0, -coef])
-        return b, a
-
-    def _noise_gate(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        try:
-            threshold_lin  = 10 ** (self._GATE_THRESHOLD_DB / 20)
-            hold_samples   = int(sr * self._GATE_HOLD_MS / 1000)
-
-            sig_np  = w.squeeze(0).cpu().numpy().astype(np.float64)
-            abs_sig = np.abs(sig_np)
-
-            b_a, a_a = self._iir_coefs(self._GATE_ATTACK_MS,  sr)
-            b_r, a_r = self._iir_coefs(self._GATE_RELEASE_MS, sr)
-
-            env = _iir_envelope(abs_sig, float(1.0 - b_a[0]), float(1.0 - b_r[0]))
-
-            gate_open = env > threshold_lin
-            held      = np.zeros(len(gate_open), dtype=bool)
-            counter   = 0
-            for i in range(len(gate_open)):
-                if gate_open[i]:
-                    counter = hold_samples
-                    held[i] = True
-                elif counter > 0:
-                    held[i] = True
-                    counter -= 1
-
-            target_np = held.astype(np.float64)
-            b_gs, a_gs = self._iir_coefs(self._GATE_ATTACK_MS,  sr)
-            b_gr, a_gr = self._iir_coefs(self._GATE_RELEASE_MS, sr)
-
-            gain_np = np.zeros_like(target_np)
-            prev_g  = 1.0
-            for i, t in enumerate(target_np):
-                b, a    = (b_gs, a_gs) if t > prev_g else (b_gr, a_gr)
-                prev_g  = float(a[1] * (-prev_g) + b[0] * t) * (-1) + prev_g
-                c       = float(1.0 - b[0])
-                prev_g  = c * prev_g + (1.0 - c) * t
-                gain_np[i] = prev_g
-
-            gain = torch.from_numpy(gain_np.astype(np.float32)).unsqueeze(0).to(w.device)
-            return w * gain
-        except Exception:
-            return w
 
     def _generate_vad_mask(self, w: torch.Tensor, sr: int) -> tuple[torch.Tensor, list[dict]]:
         w_16k = self._resample(w.cpu(), sr, self.VAD_SR)
@@ -326,9 +335,8 @@ class AudioEnhancer:
 
             fade_in_end = min(s44 + xfade_n, e44)
             fade_out_st = max(e44 - xfade_n, fade_in_end)
-
-            fi_n = fade_in_end - s44
-            fo_n = e44 - fade_out_st
+            fi_n        = fade_in_end - s44
+            fo_n        = e44 - fade_out_st
 
             if fi_n > 0:
                 t = np.linspace(0.0, 1.0, fi_n)
@@ -348,26 +356,186 @@ class AudioEnhancer:
         mask = torch.from_numpy(mask_np).unsqueeze(0).to(self._device)
         return mask, scaled_timestamps
 
+    def _dual_vad_mask(
+        self, raw: torch.Tensor, dfn: torch.Tensor, sr: int
+    ) -> tuple[torch.Tensor, list[dict]]:
+        mask_raw, ts_raw = self._generate_vad_mask(raw, sr)
+        mask_dfn, ts_dfn = self._generate_vad_mask(dfn, sr)
+        mask_raw, mask_dfn = _match_length(mask_raw, mask_dfn)
+        union_mask = torch.maximum(mask_raw, mask_dfn)
+        seen = set()
+        merged_ts = []
+        for ts in ts_raw + ts_dfn:
+            key = (ts["start"], ts["end"])
+            if key not in seen:
+                seen.add(key)
+                merged_ts.append(ts)
+        merged_ts.sort(key=lambda x: x["start"])
+        return union_mask, merged_ts
+
     def _vad_suppress(self, w: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         w, mask = _match_length(w, mask)
         floor   = self._VAD_SUPPRESS_FLOOR
         return w * (floor + mask * (1.0 - floor))
 
-    # Removed faulty transient and breath DSP logic that silenced recordings
-    def _strip_silence(self, w: torch.Tensor, timestamps: list[dict], sr: int) -> torch.Tensor:
+    def _noise_gate(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
-            if not timestamps:
+            window_n   = int(sr * 0.10)
+            sig_np     = w.squeeze(0).cpu().numpy().astype(np.float64)
+            local_rms  = np.sqrt(np.mean(sig_np[:window_n] ** 2) + 1e-12)
+            bypass_thr = 10 ** (-30.0 / 20)
+            if local_rms > bypass_thr:
                 return w
-            start   = max(0, timestamps[0]["start"])
-            end     = min(w.shape[1], timestamps[-1]["end"])
-            if end <= start:
+
+            threshold_lin = 10 ** (self._GATE_THRESHOLD_DB / 20)
+            hold_samples  = int(sr * self._GATE_HOLD_MS / 1000)
+            abs_sig       = np.abs(sig_np)
+            b_a, a_a      = self._iir_coefs(self._GATE_ATTACK_MS, sr)
+            b_r, a_r      = self._iir_coefs(self._GATE_RELEASE_MS, sr)
+            env           = _iir_envelope(abs_sig, float(1.0 - b_a[0]), float(1.0 - b_r[0]))
+
+            gate_open = env > threshold_lin
+            held      = np.zeros(len(gate_open), dtype=bool)
+            counter   = 0
+            for i in range(len(gate_open)):
+                if gate_open[i]:
+                    counter = hold_samples
+                    held[i] = True
+                elif counter > 0:
+                    held[i] = True
+                    counter -= 1
+
+            target_np  = held.astype(np.float64)
+            b_gs, a_gs = self._iir_coefs(self._GATE_ATTACK_MS, sr)
+            b_gr, a_gr = self._iir_coefs(self._GATE_RELEASE_MS, sr)
+            gain_np    = np.zeros_like(target_np)
+            prev_g     = 1.0
+            for i, t in enumerate(target_np):
+                c_b, c_a = (b_gs, a_gs) if t > prev_g else (b_gr, a_gr)
+                c          = float(1.0 - c_b[0])
+                prev_g     = c * prev_g + (1.0 - c) * t
+                gain_np[i] = prev_g
+
+            gain = torch.from_numpy(gain_np.astype(np.float32)).unsqueeze(0).to(w.device)
+            return w * gain
+        except Exception:
+            return w
+
+    def _remove_breaths_and_smacks(
+        self, w: torch.Tensor, sr: int, vad_mask: torch.Tensor
+    ) -> torch.Tensor:
+        try:
+            w, vad_mask = _match_length(w, vad_mask)
+            sig_np      = w.squeeze(0).cpu().numpy().astype(np.float64)
+            mask_np     = vad_mask.squeeze(0).cpu().numpy().astype(np.float32)
+
+            window_n     = max(1, int(sr * 0.010))
+            n_windows    = len(sig_np) // window_n
+            energy       = np.array([
+                np.abs(sig_np[i * window_n:(i + 1) * window_n]).mean()
+                for i in range(n_windows)
+            ])
+
+            max_breath_w = max(1, int(sr * self._BREATH_MAX_DURATION_MS / 1000 / window_n))
+            xfade_n      = max(1, int(sr * self._BREATH_CROSSFADE_MS / 1000))
+            result_np    = sig_np.copy()
+
+            i = 0
+            while i < len(energy):
+                if energy[i] > self._BREATH_ENERGY_THRESHOLD:
+                    j = i
+                    while j < len(energy) and energy[j] > self._BREATH_ENERGY_THRESHOLD:
+                        j += 1
+                    duration_w = j - i
+                    s_samp     = i * window_n
+                    e_samp     = min(j * window_n, len(result_np))
+
+                    event_mask_vals = mask_np[s_samp:e_samp]
+                    is_non_speech   = np.all(event_mask_vals < 0.2) if len(event_mask_vals) > 0 else False
+
+                    if duration_w <= max_breath_w and is_non_speech:
+                        fi_s = max(0, s_samp - xfade_n)
+                        fo_e = min(len(result_np), e_samp + xfade_n)
+
+                        if fi_s < s_samp:
+                            fn = s_samp - fi_s
+                            t  = np.linspace(0.0, 1.0, fn)
+                            result_np[fi_s:s_samp] *= (1.0 + np.cos(t * np.pi)) * 0.5
+
+                        result_np[s_samp:e_samp] = 0.0
+
+                        if e_samp < fo_e:
+                            fn = fo_e - e_samp
+                            t  = np.linspace(0.0, 1.0, fn)
+                            result_np[e_samp:fo_e] *= (1.0 - np.cos(t * np.pi)) * 0.5
+
+                    i = j
+                else:
+                    i += 1
+
+            return torch.from_numpy(result_np.astype(np.float32)).unsqueeze(0).to(w.device)
+        except Exception:
+            return w
+
+    def _strip_silence(self, w: torch.Tensor, vad_mask: torch.Tensor, sr: int) -> torch.Tensor:
+        try:
+            w, vad_mask   = _match_length(w, vad_mask)
+            mask_np       = vad_mask.squeeze(0).cpu().numpy()
+            min_silence_n = int(sr * 0.300)
+            threshold     = 0.05
+            fade_n        = max(1, int(sr * self._STRIP_FADE_MS / 1000))
+            total         = len(mask_np)
+
+            head = 0
+            run  = 0
+            for k in range(total):
+                if mask_np[k] <= threshold:
+                    run += 1
+                else:
+                    run = 0
+                if run >= min_silence_n:
+                    head = k + 1
+
+            tail = total
+            run  = 0
+            for k in range(total - 1, -1, -1):
+                if mask_np[k] <= threshold:
+                    run += 1
+                else:
+                    run = 0
+                if run >= min_silence_n:
+                    tail = k
+
+            if tail <= head:
                 return w
-            trimmed = w[:, start:end].clone()
-            fade_n  = max(1, int(sr * self._STRIP_FADE_MS / 1000))
+
+            trimmed = w[:, head:tail].clone()
             if trimmed.shape[1] > fade_n * 2:
                 trimmed[0, :fade_n]  *= _cosine_fade(fade_n, w.device)
                 trimmed[0, -fade_n:] *= _cosine_fade(fade_n, w.device).flip(0)
             return trimmed
+        except Exception:
+            return w
+
+    def _apply_eq_speech(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        try:
+            w = F.highpass_biquad(w, sr, cutoff_freq=100.0)
+            w = F.equalizer_biquad(w, sr, center_freq=300.0,  gain=-2.0, Q=1.5)
+            w = F.equalizer_biquad(w, sr, center_freq=1000.0, gain=1.0,  Q=2.0)
+            w = F.equalizer_biquad(w, sr, center_freq=3000.0, gain=2.5,  Q=1.8)
+            w = F.equalizer_biquad(w, sr, center_freq=8000.0, gain=1.5,  Q=2.0)
+            w = F.lowpass_biquad(w, sr, cutoff_freq=12000.0)
+            return w
+        except Exception:
+            return w
+
+    def _apply_eq_music(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        try:
+            w = F.highpass_biquad(w, sr, cutoff_freq=30.0)
+            w = F.equalizer_biquad(w, sr, center_freq=100.0,  gain=1.0,  Q=1.2)
+            w = F.equalizer_biquad(w, sr, center_freq=3000.0, gain=-1.0, Q=2.0)
+            w = F.equalizer_biquad(w, sr, center_freq=8000.0, gain=2.0,  Q=1.5)
+            return w
         except Exception:
             return w
 
@@ -386,16 +554,16 @@ class AudioEnhancer:
                 attack_ms    = self._SPEECH_COMP_ATTACK_MS
                 release_ms   = self._SPEECH_COMP_RELEASE_MS
 
-            threshold_lin  = 10 ** (threshold_db / 20)
-            attack_coef    = np.exp(-1.0 / (sr * attack_ms  / 1000))
-            release_coef   = np.exp(-1.0 / (sr * release_ms / 1000))
-            makeup_lin     = 10 ** (makeup_db / 20)
+            threshold_lin = 10 ** (threshold_db / 20)
+            attack_coef   = np.exp(-1.0 / (sr * attack_ms / 1000))
+            release_coef  = np.exp(-1.0 / (sr * release_ms / 1000))
+            makeup_lin    = 10 ** (makeup_db / 20)
 
             sig_np  = w.squeeze(0).cpu().numpy().astype(np.float64)
             env_np  = _iir_envelope(np.abs(sig_np), attack_coef, release_coef)
 
-            gain_np = np.ones_like(env_np)
-            over    = env_np > threshold_lin
+            gain_np      = np.ones_like(env_np)
+            over         = env_np > threshold_lin
             gain_np[over] = (
                 (threshold_lin + (env_np[over] - threshold_lin) / ratio)
                 / (env_np[over] + 1e-12)
@@ -421,7 +589,7 @@ class AudioEnhancer:
             meter    = pyln.Meter(self.TARGET_SR)
             audio_np = w.cpu().squeeze(0).numpy().astype(np.float64)
             loudness = meter.integrated_loudness(audio_np)
-            if not np.isfinite(loudness) or loudness < -70.0 or loudness > 0.0:
+            if not np.isfinite(loudness) or loudness > 0.0 or loudness < -70.0:
                 return self._peak_normalise(w)
             if abs(loudness - self.TARGET_LUFS) <= 0.5:
                 return w
@@ -459,7 +627,7 @@ class AudioEnhancer:
         job_id:       str,
         mode:         ContentMode = ContentMode.AUTO,
     ) -> EnhancementResult:
-        loop    = asyncio.get_running_loop()
+        loop     = asyncio.get_running_loop()
         out_path = None
 
         try:
@@ -471,47 +639,119 @@ class AudioEnhancer:
             enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
             if mode == ContentMode.AUTO:
-                separated = await loop.run_in_executor(
-                    None, self._demucs_separate, enhanced, self.TARGET_SR
+                mode = await loop.run_in_executor(
+                    None, self._detect_content_mode, enhanced, self.TARGET_SR
                 )
-                mode = self._detect_mode_from_stems(separated)
-            else:
-                if mode == ContentMode.SPEECH:
-                    separated = await loop.run_in_executor(
-                        None, self._demucs_separate, enhanced, self.TARGET_SR
-                    )
-                else:
-                    separated = None
 
-            vad_mask, speech_timestamps = await loop.run_in_executor(
-                None, self._generate_vad_mask, enhanced, self.TARGET_SR
-            )
             raw_at_target = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
 
             if mode == ContentMode.SPEECH:
-                # Use only vocals. Throws away drums/bass (music) and other (wind/cars/claps)
-                enhanced = separated['vocals']
-                
                 dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-                dfn_cleaned, enhanced = _match_length(dfn_cleaned, enhanced)
-                enhanced = dfn_cleaned
-                
-                enhanced = await loop.run_in_executor(None, self._vad_suppress, enhanced, vad_mask)
+
+                vad_mask, speech_timestamps = await loop.run_in_executor(
+                    None, self._dual_vad_mask, enhanced, dfn_cleaned, self.TARGET_SR
+                )
+
+                noise_energy = (
+                    (enhanced - dfn_cleaned[:, :enhanced.shape[1]]).pow(2).mean().sqrt().item()
+                )
+                if noise_energy > 0.005:
+                    separated   = await loop.run_in_executor(
+                        None, self._demucs_separate, dfn_cleaned, self.TARGET_SR
+                    )
+                    enhanced = separated["vocals"]
+                else:
+                    enhanced = dfn_cleaned
+
+                enhanced = await loop.run_in_executor(
+                    None, self._rnnoise_denoise, enhanced
+                )
+                enhanced = await loop.run_in_executor(
+                    None, self._noise_gate, enhanced, self.TARGET_SR
+                )
+                enhanced = await loop.run_in_executor(
+                    None, self._vad_suppress, enhanced, vad_mask
+                )
+                enhanced = await loop.run_in_executor(
+                    None, self._remove_breaths_and_smacks, enhanced, self.TARGET_SR, vad_mask
+                )
+
                 snr = self._compute_snr(raw_at_target, enhanced)
 
-                enhanced = await loop.run_in_executor(None, self._strip_silence, enhanced, speech_timestamps, self.TARGET_SR)
-                enhanced = await loop.run_in_executor(None, self._apply_eq_speech, enhanced, self.TARGET_SR)
-                enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced, self.TARGET_SR)
-                enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
-            else:
-                if separated is not None:
-                    stems = list(separated.values())
-                    min_len = min(s.shape[1] for s in stems)
-                    enhanced = sum(s[:, :min_len] for s in stems)
-                    
-                enhanced = await loop.run_in_executor(None, self._apply_eq_music, enhanced, self.TARGET_SR)
-                enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
+                enhanced = await loop.run_in_executor(
+                    None, self._strip_silence, enhanced, vad_mask, self.TARGET_SR
+                )
+                enhanced = await loop.run_in_executor(
+                    None, self._apply_eq_speech, enhanced, self.TARGET_SR
+                )
+                enhanced = await loop.run_in_executor(
+                    None, self._compress, enhanced, self.TARGET_SR, mode
+                )
+
+            elif mode == ContentMode.PODCAST:
+                dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+
+                vad_mask, _ = await loop.run_in_executor(
+                    None, self._dual_vad_mask, enhanced, dfn_cleaned, self.TARGET_SR
+                )
+
+                separated = await loop.run_in_executor(
+                    None, self._demucs_separate, dfn_cleaned, self.TARGET_SR
+                )
+
+                vocals   = separated["vocals"]
+                non_keys = [k for k in separated if k != "vocals"]
+
+                vocals = await loop.run_in_executor(
+                    None, self._noise_gate, vocals, self.TARGET_SR
+                )
+                vocals = await loop.run_in_executor(
+                    None, self._vad_suppress, vocals, vad_mask
+                )
+                vocals = await loop.run_in_executor(
+                    None, self._remove_breaths_and_smacks, vocals, self.TARGET_SR, vad_mask
+                )
+                vocals = await loop.run_in_executor(
+                    None, self._apply_eq_speech, vocals, self.TARGET_SR
+                )
+                vocals = await loop.run_in_executor(
+                    None, self._compress, vocals, self.TARGET_SR, ContentMode.SPEECH
+                )
+
+                attenuation = 10 ** (self._PODCAST_STEM_ATTENUATION_DB / 20)
+                non_vocal_stems = [separated[k] * attenuation for k in non_keys]
+                min_len = min(vocals.shape[1], *(s.shape[1] for s in non_vocal_stems))
+                non_vocal_mix = sum(s[:, :min_len] for s in non_vocal_stems)
+                non_vocal_mix = await loop.run_in_executor(
+                    None, self._apply_eq_music, non_vocal_mix, self.TARGET_SR
+                )
+
+                voc_trim, nv_trim = _match_length(vocals, non_vocal_mix)
+                enhanced = voc_trim + nv_trim
+
                 snr = self._compute_snr(raw_at_target, enhanced)
+
+                enhanced = await loop.run_in_executor(
+                    None, self._strip_silence, enhanced, vad_mask, self.TARGET_SR
+                )
+
+            else:
+                dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+                separated   = await loop.run_in_executor(
+                    None, self._demucs_separate, dfn_cleaned, self.TARGET_SR
+                )
+                stems   = list(separated.values())
+                min_len = min(s.shape[1] for s in stems)
+                enhanced = sum(s[:, :min_len] for s in stems)
+
+                snr = self._compute_snr(raw_at_target, enhanced)
+
+                enhanced = await loop.run_in_executor(
+                    None, self._apply_eq_music, enhanced, self.TARGET_SR
+                )
+                enhanced = await loop.run_in_executor(
+                    None, self._compress, enhanced, self.TARGET_SR, mode
+                )
 
             enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
             enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
