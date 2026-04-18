@@ -214,7 +214,6 @@ class AudioEnhancer:
         with torch.no_grad():
             sources = apply_model(
                 self._demucs, resampled[None], progress=False,
-                segment=self._DEMUCS_SEGMENT,
             )[0]
         idx    = self._demucs.sources.index("vocals")
         vocals = self._resample(sources[idx], self._demucs.samplerate, self.TARGET_SR)
@@ -231,7 +230,6 @@ class AudioEnhancer:
         with torch.no_grad():
             sources = apply_model(
                 self._demucs, resampled[None], progress=False,
-                segment=self._DEMUCS_SEGMENT,
             )[0]
         result = {}
         for i, name in enumerate(self._demucs.sources):
