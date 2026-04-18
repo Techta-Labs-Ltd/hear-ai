@@ -11,6 +11,7 @@ import numpy as np
 import pyloudnorm as pyln
 import scipy.signal as ss
 import torch
+import torch.nn.functional as F_nn
 import torchaudio
 import torchaudio.functional as F
 from demucs.apply import apply_model
@@ -426,11 +427,49 @@ class AudioEnhancer:
                     i = j
                 else:
                     i += 1
-
             return torch.from_numpy(result_np.astype(np.float32)).unsqueeze(0).to(w.device)
         except Exception:
             return w
 
+    def _suppress_transients(self, w: torch.Tensor, sr: int) -> torch.Tensor:
+        try:
+            n_fft, hop = 2048, 512
+            window = torch.hann_window(n_fft, device=w.device)
+
+            stft = torch.stft(
+                w.squeeze(0), n_fft=n_fft, hop_length=hop, win_length=n_fft,
+                window=window, return_complex=True
+            )
+            
+            mag, phase = stft.abs(), stft.angle()
+            mag_b = mag.unsqueeze(0)
+
+            kernel_size = 11
+            pad = kernel_size // 2
+            
+            padded_mag = F_nn.pad(mag_b, (pad, pad), mode="reflect")
+            local_median, _ = padded_mag.unfold(-1, kernel_size, 1).median(dim=-1)
+
+            threshold = local_median * 4.0 + 1e-6
+            spike_mask = mag_b > threshold
+
+            gain = torch.ones_like(mag_b)
+            gain[spike_mask] = (local_median[spike_mask] * 1.5) / mag_b[spike_mask]
+
+            smooth_kernel = 3
+            gain = F_nn.avg_pool1d(gain, smooth_kernel, stride=1, padding=smooth_kernel//2)
+
+            new_mag = mag_b * gain
+            new_stft = torch.polar(new_mag.squeeze(0), phase)
+
+            out = torch.istft(
+                new_stft, n_fft=n_fft, hop_length=hop, win_length=n_fft,
+                window=window, length=w.shape[-1]
+            )
+            return out.unsqueeze(0)
+        except Exception as e:
+            logger.error("Transient suppression failed: %s", e)
+            return w
     def _strip_silence(self, w: torch.Tensor, timestamps: list[dict], sr: int) -> torch.Tensor:
         try:
             if not timestamps:
@@ -555,13 +594,14 @@ class AudioEnhancer:
             vad_mask, speech_timestamps = await loop.run_in_executor(
                 None, self._generate_vad_mask, enhanced, self.TARGET_SR
             )
-
-            dfn_cleaned       = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-            dfn_cleaned, enhanced = _match_length(dfn_cleaned, enhanced)
-
             raw_at_target = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
 
             if mode == ContentMode.SPEECH:
+                enhanced = await loop.run_in_executor(None, self._suppress_transients, enhanced, self.TARGET_SR)
+                
+                dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
+                dfn_cleaned, enhanced = _match_length(dfn_cleaned, enhanced)
+                
                 noise_energy = (enhanced - dfn_cleaned).pow(2).mean().sqrt().item()
                 if noise_energy > 0.005:
                     dfn_cleaned = await loop.run_in_executor(
@@ -593,7 +633,7 @@ class AudioEnhancer:
 
             else:
                 separated = await loop.run_in_executor(
-                    None, self._demucs_separate_music, dfn_cleaned, self.TARGET_SR
+                    None, self._demucs_separate_music, enhanced, self.TARGET_SR
                 )
                 stems    = list(separated.values())
                 min_len  = min(s.shape[1] for s in stems)
