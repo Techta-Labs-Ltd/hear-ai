@@ -61,7 +61,6 @@ class AudioEnhancer:
         self._dfn_model = self._dfn_model.to(self._device)
 
         self._vad_model = load_silero_vad()
-        self._vad_model = self._vad_model.to(self._device)
 
     @property
     def is_loaded(self) -> bool:
