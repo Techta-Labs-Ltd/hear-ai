@@ -8,8 +8,8 @@ from enum import Enum
 
 import numpy as np
 import pyloudnorm as pyln
-import scipy.signal as ss
 import torch
+import torch.nn.functional as F_nn
 import torchaudio
 import torchaudio.functional as F
 from demucs.apply import apply_model
@@ -56,30 +56,50 @@ class AudioEnhancer:
     TRUE_PEAK_DBTP = -1.0
 
     def __init__(self):
-        self._demucs_model = None
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._demucs = None
         self._dfn_model = None
         self._vad_model = None
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._rnnoise = rnnoise.RNNoise()
         self._vad_lock = threading.Lock()
         self._dfn_lock = threading.Lock()
-        self._rnnoise = rnnoise.RNNoise()
-        self._rnnoise_lock = threading.Lock()
+        self._rn_lock = threading.Lock()
 
     def load(self):
-        self._demucs_model = get_model(settings.DEMUCS_MODEL)
-        self._demucs_model.to(self._device).eval()
+        self._demucs = get_model(settings.DEMUCS_MODEL)
+        self._demucs.to(self._device).eval()
         self._dfn_model, _, _ = init_df()
         self._vad_model = load_silero_vad()
 
     def _load_audio(self, path):
-        waveform, sr = torchaudio.load(path)
-        return waveform, sr
+        return torchaudio.load(path)
 
     def _mono(self, w):
         return w.mean(dim=0, keepdim=True) if w.shape[0] > 1 else w
 
     def _resample(self, w, a, b):
         return F.resample(w, a, b) if a != b else w
+
+    def _rnnoise(self, w):
+        target_sr = 48000
+        frame = 480
+
+        x = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy().astype(np.float32)
+        pad = (frame - len(x) % frame) % frame
+        if pad:
+            x = np.pad(x, (0, pad))
+
+        out = np.zeros_like(x)
+
+        with self._rn_lock:
+            for i in range(0, len(x), frame):
+                out[i:i+frame] = self._rnnoise.filter(x[i:i+frame])
+
+        if pad:
+            out = out[:-pad]
+
+        y = torch.from_numpy(out).unsqueeze(0).to(self._device)
+        return self._resample(y, target_sr, self.TARGET_SR)
 
     def _deepfilter(self, w):
         w48 = self._resample(w.cpu(), self.TARGET_SR, self.DFN_SR)
@@ -95,64 +115,36 @@ class AudioEnhancer:
 
     def _demucs_vocals(self, w):
         stereo = w.repeat(2, 1)
-        res = self._resample(stereo, self.TARGET_SR, self._demucs_model.samplerate)
+        res = self._resample(stereo, self.TARGET_SR, self._demucs.samplerate)
         with torch.no_grad():
-            s = apply_model(self._demucs_model, res[None])[0]
-        idx = self._demucs_model.sources.index("vocals")
-        v = self._resample(s[idx], self._demucs_model.samplerate, self.TARGET_SR)
+            s = apply_model(self._demucs, res[None])[0]
+        idx = self._demucs.sources.index("vocals")
+        v = self._resample(s[idx], self._demucs.samplerate, self.TARGET_SR)
         return self._mono(v)
-
-    def _rnnoise_denoise(self, w: torch.Tensor) -> torch.Tensor:
-        try:
-            target_sr = 48000
-            frame_size = 480
-            w_48 = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy().astype(np.float32)
-
-            pad_len = frame_size - (len(w_48) % frame_size)
-            if pad_len < frame_size:
-                w_48 = np.pad(w_48, (0, pad_len), mode='constant')
-
-            out = np.zeros_like(w_48)
-            with self._rnnoise_lock:
-                for i in range(0, len(w_48), frame_size):
-                    chunk = w_48[i:i + frame_size]
-                    out[i:i + frame_size] = self._rnnoise.process(chunk) if hasattr(self._rnnoise, 'process') else self._rnnoise.filter(chunk)
-
-            if pad_len < frame_size:
-                out = out[:-pad_len]
-
-            out_tensor = torch.from_numpy(out).unsqueeze(0).to(self._device)
-            return self._resample(out_tensor, target_sr, self.TARGET_SR)
-        except Exception:
-            return w
-
-    def _transient_suppress(self, w):
-        x = w.squeeze(0).cpu().numpy()
-        env = np.abs(x)
-        avg = ss.uniform_filter1d(env, size=1024)
-        spikes = env > avg * 4.0
-        mask = (~spikes).astype(np.float32)
-        mask = ss.gaussian_filter1d(mask, sigma=20)
-        return torch.from_numpy(x * mask).unsqueeze(0).to(w.device)
 
     def _vad_mask(self, w):
         w16 = self._resample(w.cpu(), self.TARGET_SR, self.VAD_SR).squeeze()
         with self._vad_lock:
             ts = get_speech_timestamps(w16, self._vad_model, sampling_rate=self.VAD_SR)
+
         mask = torch.zeros((1, w.shape[1]), device=self._device)
         scale = self.TARGET_SR / self.VAD_SR
+
         for t in ts:
             s = int(t["start"] * scale)
             e = int(t["end"] * scale)
             mask[:, s:e] = 1.0
+
+        mask = F_nn.avg_pool1d(mask.unsqueeze(1), 2048, stride=1, padding=1024).squeeze(1)
         return mask
 
-    def _noise_gate(self, w):
+    def _gate(self, w):
         thr = 10 ** (-60 / 20)
         env = w.abs()
-        smoothed = torch.nn.functional.avg_pool1d(env.unsqueeze(1), 1024, stride=1, padding=512).squeeze(1)
-        mask = smoothed > thr
-        return w * mask.float()
+        smooth = F_nn.avg_pool1d(env.unsqueeze(1), 2048, stride=1, padding=1024).squeeze(1)
+        mask = smooth > thr
+        mask = F_nn.avg_pool1d(mask.float().unsqueeze(1), 4096, stride=1, padding=2048).squeeze(1)
+        return w * mask
 
     def _eq(self, w):
         w = F.highpass_biquad(w, self.TARGET_SR, 100)
@@ -161,7 +153,7 @@ class AudioEnhancer:
 
     def _compress(self, w):
         thr = 10 ** (-18 / 20)
-        ratio = 2.5
+        ratio = 2.0
         env = w.abs()
         gain = torch.ones_like(w)
         over = env > thr
@@ -169,10 +161,10 @@ class AudioEnhancer:
         return w * gain
 
     def _lufs(self, w):
-        meter = pyln.Meter(self.TARGET_SR)
         x = w.cpu().squeeze().numpy().astype(np.float64)
         if len(x) < self.TARGET_SR // 2:
             return w
+        meter = pyln.Meter(self.TARGET_SR)
         l = meter.integrated_loudness(x)
         y = pyln.normalize.loudness(x, l, self.TARGET_LUFS)
         return torch.from_numpy(y.astype(np.float32)).unsqueeze(0).to(self._device)
@@ -203,22 +195,18 @@ class AudioEnhancer:
         w = self._mono(w)
         w = self._resample(w, sr, self.TARGET_SR).to(self._device)
 
+        w = await loop.run_in_executor(None, self._rnnoise, w)
+        w = await loop.run_in_executor(None, self._deepfilter, w)
+
         vocals = await loop.run_in_executor(None, self._demucs_vocals, w)
         w, vocals = _match(w, vocals)
-        w = vocals
-
-        clean = await loop.run_in_executor(None, self._deepfilter, w)
-        w, clean = _match(w, clean)
-        w = clean
-
-        w = await loop.run_in_executor(None, self._rnnoise_denoise, w)
-        w = await loop.run_in_executor(None, self._transient_suppress, w)
+        w = 0.85 * vocals + 0.15 * w
 
         mask = await loop.run_in_executor(None, self._vad_mask, w)
         w, mask = _match(w, mask)
-        w = w * (0.1 + 0.9 * mask)
+        w = w * (0.2 + 0.8 * mask)
 
-        w = await loop.run_in_executor(None, self._noise_gate, w)
+        w = await loop.run_in_executor(None, self._gate, w)
         w = await loop.run_in_executor(None, self._eq, w)
         w = await loop.run_in_executor(None, self._compress, w)
 
@@ -230,6 +218,7 @@ class AudioEnhancer:
         snr = self._snr(raw_ref, w)
         lufs = self._loudness(w)
         peak = 20 * np.log10(w.abs().max().item() + 1e-8)
+        clipping = (w.abs() > 0.99).float().mean().item() > 0.001
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             out = tmp.name
@@ -247,6 +236,6 @@ class AudioEnhancer:
             snr_db=round(snr, 2),
             peak_db=round(peak, 2),
             lufs=round(lufs, 2),
-            clipping_detected=(w.abs() > 0.99).float().mean().item() > 0.001,
+            clipping_detected=clipping,
             mode_used=mode.value,
         )
