@@ -107,6 +107,7 @@ class AudioEnhancer:
     _DEMUCS_SEGMENT           = 10
 
     def __init__(self):
+        self._demucs    = None
         self._dfn_model = None
         self._vad_model = None
         self._device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -114,6 +115,9 @@ class AudioEnhancer:
         self._dfn_lock  = threading.Lock()
 
     def load(self):
+        self._demucs = get_model(settings.DEMUCS_MODEL)
+        self._demucs.to(self._device)
+        self._demucs.eval()
         self._dfn_model, _, _ = init_df()
         self._vad_model = load_silero_vad()
 
@@ -142,24 +146,16 @@ class AudioEnhancer:
     def _detect_clipping(self, w: torch.Tensor) -> bool:
         return (w.abs() > 0.99).float().mean().item() > 0.001
 
-    def _detect_content_mode(self, w: torch.Tensor, sr: int) -> ContentMode:
-        max_samples = int(self._CLASSIFY_WINDOW_S * sr)
-        segment     = w[:, :max_samples] if w.shape[1] > max_samples else w
-        n_fft       = 2048
-        hop         = 512
-        window      = torch.hann_window(n_fft, device=segment.device)
-        stft        = torch.stft(
-            segment.squeeze(0), n_fft=n_fft, hop_length=hop,
-            win_length=n_fft, window=window, return_complex=True,
-        )
-        mag   = stft.abs()
-        freqs = torch.linspace(0, sr / 2, mag.shape[0], device=segment.device)
-
-        speech_energy = mag[(freqs >= 250) & (freqs <= 4000)].pow(2).mean().item()
-        music_energy  = mag[(freqs > 5000) & (freqs <= 16000)].pow(2).mean().item()
-        total_energy  = speech_energy + music_energy + 1e-10
-
-        return ContentMode.MUSIC if music_energy / total_energy > self._MUSIC_ENERGY_RATIO else ContentMode.SPEECH
+    def _detect_mode_from_stems(self, stems: dict[str, torch.Tensor]) -> ContentMode:
+        drums_rms = stems['drums'].pow(2).mean().sqrt().item()
+        bass_rms  = stems['bass'].pow(2).mean().sqrt().item()
+        other_rms = stems['other'].pow(2).mean().sqrt().item()
+        vocals_rms = stems['vocals'].pow(2).mean().sqrt().item()
+        
+        music_power = drums_rms + bass_rms
+        if music_power > (vocals_rms + other_rms) * 0.1:
+            return ContentMode.MUSIC
+        return ContentMode.SPEECH
 
     def _compute_snr(self, raw: torch.Tensor, enhanced: torch.Tensor) -> float:
         raw, enhanced = _match_length(raw.cpu(), enhanced.cpu())
@@ -204,24 +200,23 @@ class AudioEnhancer:
             logger.error("DeepFilterNet failed: %s", e)
             return w
 
-    def _suppress_transients(self, w: torch.Tensor, sr: int) -> torch.Tensor:
-        try:
-            w_np = w.squeeze(0).cpu().numpy()
-            b, a = ss.butter(4, 4000, 'highpass', fs=sr)
-            high_freq = ss.filtfilt(b, a, w_np)
-            env = np.abs(high_freq)
-            kernel_size = int(sr * 0.02)
-            if kernel_size % 2 == 0: kernel_size += 1
-            local_median = ss.medfilt(env, kernel_size)
-            threshold = local_median * 5.0 + 0.02
-            spikes = env > threshold
-            gain = np.ones_like(w_np)
-            gain[spikes] = 0.1
-            gain_smooth = ss.savgol_filter(gain, 101, 3)
-            out = w_np * gain_smooth
-            return torch.from_numpy(out.astype(np.float32)).unsqueeze(0).to(w.device)
-        except Exception:
-            return w
+    def _demucs_separate(self, waveform: torch.Tensor, sr: int) -> dict[str, torch.Tensor]:
+        original_len = waveform.shape[1]
+        stereo       = waveform.repeat(2, 1) if waveform.shape[0] == 1 else waveform
+        resampled    = self._resample(stereo, sr, self._demucs.samplerate)
+        with torch.no_grad():
+            sources = apply_model(
+                self._demucs, resampled[None], progress=False,
+            )[0]
+        result = {}
+        for i, name in enumerate(self._demucs.sources):
+            stem = self._resample(sources[i], self._demucs.samplerate, self.TARGET_SR)
+            stem = self._to_mono(stem)
+            if stem.shape[1] < original_len:
+                pad  = torch.zeros((1, original_len - stem.shape[1]), device=stem.device)
+                stem = torch.cat([stem, pad], dim=1)
+            result[name] = stem[:, :original_len]
+        return result
 
     def _apply_eq_speech(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
@@ -476,9 +471,17 @@ class AudioEnhancer:
             enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
 
             if mode == ContentMode.AUTO:
-                mode = await loop.run_in_executor(
-                    None, self._detect_content_mode, enhanced, self.TARGET_SR
+                separated = await loop.run_in_executor(
+                    None, self._demucs_separate, enhanced, self.TARGET_SR
                 )
+                mode = self._detect_mode_from_stems(separated)
+            else:
+                if mode == ContentMode.SPEECH:
+                    separated = await loop.run_in_executor(
+                        None, self._demucs_separate, enhanced, self.TARGET_SR
+                    )
+                else:
+                    separated = None
 
             vad_mask, speech_timestamps = await loop.run_in_executor(
                 None, self._generate_vad_mask, enhanced, self.TARGET_SR
@@ -486,7 +489,8 @@ class AudioEnhancer:
             raw_at_target = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
 
             if mode == ContentMode.SPEECH:
-                enhanced = await loop.run_in_executor(None, self._suppress_transients, enhanced, self.TARGET_SR)
+                # Use only vocals. Throws away drums/bass (music) and other (wind/cars/claps)
+                enhanced = separated['vocals']
                 
                 dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
                 dfn_cleaned, enhanced = _match_length(dfn_cleaned, enhanced)
@@ -500,6 +504,11 @@ class AudioEnhancer:
                 enhanced = await loop.run_in_executor(None, self._noise_gate, enhanced, self.TARGET_SR)
                 enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
             else:
+                if separated is not None:
+                    stems = list(separated.values())
+                    min_len = min(s.shape[1] for s in stems)
+                    enhanced = sum(s[:, :min_len] for s in stems)
+                    
                 enhanced = await loop.run_in_executor(None, self._apply_eq_music, enhanced, self.TARGET_SR)
                 enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
                 snr = self._compute_snr(raw_at_target, enhanced)
