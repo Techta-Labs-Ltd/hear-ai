@@ -559,16 +559,6 @@ class AudioEnhancer:
                 )
 
             else:
-                stems = list(separated.values())
-                min_len = min(s.shape[1] for s in stems)
-                enhanced = sum(s[:, :min_len] for s in stems)
-
-                enhanced = await loop.run_in_executor(
-                    None, self._apply_eq_music, enhanced, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._compress, enhanced, self.TARGET_SR, mode
-                )
                 snr = self._compute_snr(raw_at_target, enhanced)
 
             enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
