@@ -25,14 +25,6 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_onl
 
 logger = logging.getLogger(__name__)
 
-try:
-    from pyrnnoise import RNNoise as _RNNoise
-    _RNNOISE_AVAILABLE = True
-except Exception:
-    _RNNoise = None
-    _RNNOISE_AVAILABLE = False
-    logger.warning("pyrnnoise unavailable — RNNoise stage will be bypassed")
-
 
 class ContentMode(str, Enum):
     SPEECH  = "speech"
@@ -146,8 +138,6 @@ class AudioEnhancer:
         self._device    = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._vad_lock  = threading.Lock()
         self._dfn_lock  = threading.Lock()
-        self._rnn      = _RNNoise(sample_rate=48000) if _RNNOISE_AVAILABLE else None
-        self._rnn_lock  = threading.Lock()
 
     def load(self):
         self._demucs = get_model(settings.DEMUCS_MODEL)
@@ -272,37 +262,6 @@ class AudioEnhancer:
             return clean[:, :original_len]
         except Exception as e:
             logger.error("DeepFilterNet failed: %s", e)
-            return w
-
-    def _rnnoise_denoise(self, w: torch.Tensor) -> torch.Tensor:
-        if not _RNNOISE_AVAILABLE or self._rnn is None:
-            logger.warning("RNNoise unavailable — skipping transient suppression stage")
-            return w
-        try:
-            target_sr = 48000
-            x48       = self._resample(w.cpu(), self.TARGET_SR, target_sr).squeeze().numpy()
-            x16       = (np.clip(x48, -1.0, 1.0) * 32767).astype(np.int16)
-
-            out_chunks: list[np.ndarray] = []
-            with self._rnn_lock:
-                for _, denoised in self._rnn.denoise_chunk(x16[np.newaxis, :]):
-                    out_chunks.append(denoised)
-
-            if not out_chunks:
-                return w
-
-            out16 = np.concatenate(out_chunks, axis=-1).squeeze()
-            out_f = out16.astype(np.float32) / 32767.0
-            pad   = len(x48) - len(out_f)
-            if pad > 0:
-                out_f = np.pad(out_f, (0, pad))
-            else:
-                out_f = out_f[:len(x48)]
-
-            y = torch.from_numpy(out_f).unsqueeze(0).to(self._device)
-            return self._resample(y, target_sr, self.TARGET_SR)
-        except Exception as e:
-            logger.error("RNNoise failed: %s", e)
             return w
 
     def _demucs_separate(self, waveform: torch.Tensor, sr: int) -> dict[str, torch.Tensor]:
@@ -841,9 +800,6 @@ class AudioEnhancer:
                 enhanced = await loop.run_in_executor(None, self._remove_clicks, enhanced, self.TARGET_SR)
                 enhanced = await loop.run_in_executor(None, self._remove_impulses, enhanced, self.TARGET_SR, mode)
                 
-                enhanced = await loop.run_in_executor(
-                    None, self._rnnoise_denoise, enhanced
-                )
                 enhanced = await loop.run_in_executor(
                     None, self._noise_gate, enhanced, self.TARGET_SR, mode
                 )
