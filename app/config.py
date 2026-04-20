@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.3
     ENVIRONMENT: str = "production"
-    ENABLE_DOCS: bool = False
+    ENABLE_DOCS: bool = True
 
     class Config:
         env_file = ".env"
