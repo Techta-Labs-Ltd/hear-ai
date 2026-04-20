@@ -129,10 +129,11 @@ class PipelineWorker:
         while self._running:
             try:
                 job_id = await asyncio.wait_for(self._queue.get(), timeout=5.0)
-                asyncio.create_task(self._process(job_id))
+                await self._process(job_id)
             except asyncio.TimeoutError:
                 continue
-            except Exception:
+            except Exception as e:
+                print(f"[WORKER] Loop error: {e}")
                 await asyncio.sleep(1)
 
     async def _fetch_recording_with_retry(self, recording_id: str):

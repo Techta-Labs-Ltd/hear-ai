@@ -92,9 +92,17 @@ class CategorizationService:
 
         tag_pool = self._build_tag_pool(transcript, data.tags, layer1["scores"])
 
-        layer2_cat, layer2_tag, layer3, sentiment = await asyncio.gather(
-            loop.run_in_executor(None, self._zero_shot_labels, transcript, data.categories),
-            loop.run_in_executor(None, self._zero_shot_labels, transcript, tag_pool),
+        # Zero-shot calls MUST run sequentially — the model is NOT thread-safe.
+        # Running two zero-shot inferences concurrently corrupts results.
+        layer2_cat = await loop.run_in_executor(
+            None, self._zero_shot_labels, transcript, data.categories
+        )
+        layer2_tag = await loop.run_in_executor(
+            None, self._zero_shot_labels, transcript, tag_pool
+        )
+
+        # OpenAI (network call) and sentiment (different model) can run in parallel
+        layer3, sentiment = await asyncio.gather(
             self._openai_layer(transcript, data.categories, data.tags),
             loop.run_in_executor(None, self._get_sentiment, transcript),
         )
@@ -231,7 +239,7 @@ class CategorizationService:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            async with httpx.AsyncClient(timeout=45) as client:
                 response = await client.post(
                     f"{settings.OPENAI_BASE_URL}/chat/completions",
                     headers={

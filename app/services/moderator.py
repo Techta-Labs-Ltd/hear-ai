@@ -136,7 +136,7 @@ class ModerationService:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            async with httpx.AsyncClient(timeout=45) as client:
                 response = await client.post(
                     f"{settings.OPENAI_BASE_URL}/chat/completions",
                     headers={
