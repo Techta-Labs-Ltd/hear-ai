@@ -92,14 +92,20 @@ class CategorizationService:
 
         tag_pool = self._build_tag_pool(transcript, data.tags, layer1["scores"])
 
-        # Zero-shot calls MUST run sequentially — the model is NOT thread-safe.
-        # Running two zero-shot inferences concurrently corrupts results.
+        # Zero-shot categories always runs (30-40 labels — NLI handles this well)
         layer2_cat = await loop.run_in_executor(
             None, self._zero_shot_labels, transcript, data.categories
         )
-        layer2_tag = await loop.run_in_executor(
-            None, self._zero_shot_labels, transcript, tag_pool
-        )
+
+        # Zero-shot for tags is only used when OpenAI is unavailable.
+        # With 120+ hashtags the NLI model drifts badly (e.g. "attack" → #Hacking).
+        # OpenAI produces far more accurate tags so we skip this layer when possible.
+        if not settings.OPENAI_API_KEY:
+            layer2_tag = await loop.run_in_executor(
+                None, self._zero_shot_labels, transcript, tag_pool[:30]
+            )
+        else:
+            layer2_tag = {"scores": {}}
 
         # OpenAI (network call) and sentiment (different model) can run in parallel
         layer3, sentiment = await asyncio.gather(
@@ -303,7 +309,7 @@ class CategorizationService:
         except Exception:
             return "neutral"
 
-    _TAG_THRESHOLD = 0.35
+    _TAG_THRESHOLD = 0.50
     _CAT_THRESHOLD = 0.40
 
     def _merge(

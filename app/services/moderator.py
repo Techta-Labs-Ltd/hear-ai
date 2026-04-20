@@ -24,6 +24,72 @@ TOXIC_CATEGORIES = {
     "identity_hate": "Identity-based hate speech",
 }
 
+HARM_KEYWORDS: list[str] = [
+    # Direct threats
+    "i will kill you", "i'm going to kill you", "i am going to kill you",
+    "gonna kill you", "gon kill you", "imma kill you", "i'll kill you",
+    "i will murder you", "i will end you", "i will hurt you",
+    "i am going to beat", "i'm going to beat", "gonna beat her up", "gonna beat him up",
+    "beat her up", "beat him up", "beat you up", "beat them up",
+    "beat her badly", "beat him badly", "beat her very badly", "beat him very badly",
+    "i'll beat you", "i will beat you", "imma beat you", "smash her face",
+    "smash his face", "punch her", "punch him", "kick her head", "kick his head",
+    "you're dead", "you are dead", "you're dead to me",
+    "i'll shoot you", "i will shoot you", "i'll stab you", "i will stab you",
+    "i'll blow your head off", "i'll put a bullet in you",
+    "i want you dead", "i hope you die",
+
+    # UK drill / road slang threats
+    "spin the block", "up the score", "catch a body", "caught a body",
+    "drop a body", "wet him up", "wet her up", "splash him", "splash her",
+    "poke him", "poke her", "shank him", "shank her", "shank them",
+    "ride out on", "back out the strap", "back out the tool",
+    "link man with the strap", "up the stick", "do him dirty",
+    "score on sight", "on sight", "put him in the dirt",
+    "slide on", "leave him leaking", "leave her leaking", "leave man leaking",
+    "stomp him out", "stomp her out", "rush him", "rush her",
+    "spin his block", "spin her block", "skeng", "no lacking",
+
+    # US slang / trap / gang threats
+    "cap him", "clap him", "blick him", "smoke him", "smoke her", "smoke them",
+    "catch him slipping", "catch her slipping", "run up on him", "run up on her",
+    "squeeze the trigger", "pull the trigger on",
+    "put him six feet", "put her six feet", "send him to god",
+    "drop him", "drop her", "body bag him", "body bag her",
+    "get smoked", "get merked", "get rocked", "get domed",
+    "put hands on", "beat him down", "beat her down", "stomp him out",
+    "bust at", "bust shots at", "send shots", "let it bang",
+    "bust a cap", "dump on", "chop him down", "chop her down",
+    "air him out", "air her out", "hit the lick", "rob him", "rob her",
+
+    # Weapons
+    "with my strap", "strapped up", "glizzy", "chopper", "draco",
+    "beam on it", "pole", "banger", "burner", "gat", "mac-10",
+    "uzi", "ak", "ar-15", "banana clip", "extended clip", "drum mag",
+    "switch", "auto switch", "glock with a switch",
+
+    # Hate speech / slurs
+    "kill all", "death to", "gas the", "exterminate the",
+    "white power", "white supremacy", "n*gger", "nigger", "nigga die",
+    "kike", "spic", "chink", "sand nigger", "raghead",
+    "bomb the mosque", "bomb the church", "blow up the school",
+    "jihad against", "holy war against",
+
+    # Sexual exploitation / CSAM
+    "child porn", "kiddie porn", "cp link", "rape a child",
+    "molest a child", "underaged naked", "loli",
+
+    # Self-harm
+    "kill myself", "killing myself", "want to die", "going to end it",
+    "slit my wrists", "hang myself", "suicide pact",
+    "overdose on purpose", "want to overdose",
+
+    # Extremism
+    "allahu akbar bomb", "suicide bomb", "blow myself up",
+    "school shooting", "mass shooting", "shoot up the", "bomb threat",
+    "pipe bomb", "ied", "nail bomb",
+]
+
 
 class ModerationService:
     def __init__(self):
@@ -51,6 +117,20 @@ class ModerationService:
                 "reason": "",
                 "flagged_categories": [],
                 "blocked_words_found": [],
+            }
+
+        text_lower = text.lower()
+
+        # Hard-match built-in harm phrases — short-circuit immediately
+        built_in_hits = [kw for kw in HARM_KEYWORDS if kw in text_lower]
+        if built_in_hits:
+            return {
+                "flagged": True,
+                "severity": SEVERITY_CRITICAL,
+                "intent": "harmful",
+                "reason": f"Contains flagged harmful language: {', '.join(built_in_hits[:5])}",
+                "flagged_categories": ["Threats / Violence"],
+                "blocked_words_found": built_in_hits,
             }
 
         loop = asyncio.get_event_loop()

@@ -395,23 +395,6 @@ class PipelineWorker:
                 return
 
             max_tags = job.max_tags if job.max_tags else 8
-            categorization_data = None
-            if transcript_text and job.job_type in ("tagging", "rebuild", "pipeline"):
-                print(f"[JOB:{job_id[:8]}] CATEGORIZE → max_tags={max_tags}")
-                job.status = "categorizing"
-                db.commit()
-                categorization_data = await self._categorizer.categorize(
-                    transcript=transcript_text,
-                    segments=segments,
-                    custom_tags=platform.auto_tag_keywords,
-                    max_tags=max_tags,
-                )
-                print(
-                    f"[JOB:{job_id[:8]}] CATEGORIZE ✓ "
-                    f"tags={categorization_data.get('tags')} "
-                    f"categories={categorization_data.get('categories')} "
-                    f"sentiment={categorization_data.get('sentiment')}"
-                )
 
             moderation_data = None
             if transcript_text:
@@ -445,6 +428,28 @@ class PipelineWorker:
                     f"severity={moderation_data.get('severity')} "
                     f"reason={moderation_data.get('reason')!r}"
                 )
+
+            is_flagged = moderation_data.get("flagged", False) if moderation_data else False
+
+            categorization_data = None
+            if transcript_text and not is_flagged and job.job_type in ("tagging", "rebuild", "pipeline"):
+                print(f"[JOB:{job_id[:8]}] CATEGORIZE → max_tags={max_tags}")
+                job.status = "categorizing"
+                db.commit()
+                categorization_data = await self._categorizer.categorize(
+                    transcript=transcript_text,
+                    segments=segments,
+                    custom_tags=platform.auto_tag_keywords,
+                    max_tags=max_tags,
+                )
+                print(
+                    f"[JOB:{job_id[:8]}] CATEGORIZE ✓ "
+                    f"tags={categorization_data.get('tags')} "
+                    f"categories={categorization_data.get('categories')} "
+                    f"sentiment={categorization_data.get('sentiment')}"
+                )
+            elif is_flagged:
+                print(f"[JOB:{job_id[:8]}] CATEGORIZE skipped — content flagged")
 
             result = {
                 "recording_id": job.recording_id,
