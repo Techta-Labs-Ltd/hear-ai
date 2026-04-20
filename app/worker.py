@@ -363,8 +363,7 @@ class PipelineWorker:
             )
 
             if no_speech:
-                reason = "no_speech_detected"
-                print(f"[JOB:{job_id[:8]}] SKIP categorize+moderate — {reason}")
+                print(f"[JOB:{job_id[:8]}] NO CONTENT — flagging recording")
                 self._complete_job(
                     db, job,
                     result={
@@ -373,12 +372,20 @@ class PipelineWorker:
                         "master": master_data,
                         "per_track_transcriptions": {},
                         "skipped": True,
-                        "reason": reason,
+                        "reason": "no_content",
+                        "moderation": {
+                            "flagged": True,
+                            "severity": "high",
+                            "intent": "no_content",
+                            "reason": "Recording contains no detectable audio content or speech.",
+                            "flagged_categories": ["Empty Content"],
+                            "blocked_words_found": [],
+                        },
                         "processing_summary": {
                             "enhanced": len(track_results),
                             "transcribed": 0,
                             "categorized": False,
-                            "moderated": False,
+                            "moderated": True,
                         },
                     },
                 )
