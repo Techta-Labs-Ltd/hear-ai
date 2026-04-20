@@ -1,9 +1,13 @@
 import asyncio
+import logging
 
 import torch
 from transformers import pipeline as hf_pipeline
 
 from app.core.keyword_loader import harm_keyword_loader
+from app.services.llm_service import llm_service
+
+logger = logging.getLogger(__name__)
 
 MODERATION_MODEL = "unitary/toxic-bert"
 INTENT_MODEL = "cross-encoder/nli-distilroberta-base"
@@ -86,6 +90,15 @@ HARM_KEYWORDS: list[str] = [
 ]
 
 
+# ── Routing thresholds ────────────────────────────────────────────────────────
+# Toxic-bert max_score drives which path content takes:
+#   < SAFE   → clearly safe, skip all LLM work (most podcast/music/news content)
+#   SAFE–HIGH → borderline, Llama is the deciding vote with full detoxify context
+#   ≥ HIGH   → clearly harmful, toxic-bert drives severity, Llama adds structured detail
+_SAFE_THRESHOLD = 0.30
+_HIGH_THRESHOLD = 0.80
+
+
 class ModerationService:
     def __init__(self):
         self._classifier = None
@@ -121,13 +134,13 @@ class ModerationService:
                 "blocked_words_found": [],
             }
 
-        # Sync platform keywords from backend settings into the loader
         if blocked_keywords:
             harm_keyword_loader.sync_platform_keywords(blocked_keywords)
 
         text_lower = text.lower()
         all_keywords = harm_keyword_loader.all_keywords
 
+        # ── Stage 1: Hard keyword match — instant, no model ──────────────────
         built_in_hits = [kw for kw in all_keywords if kw in text_lower]
         if built_in_hits:
             return {
@@ -140,34 +153,96 @@ class ModerationService:
             }
 
         keyword_hits = self._check_keywords(text, blocked_keywords or [])
-
         loop = asyncio.get_event_loop()
-        local_result, intent_result = await asyncio.gather(
-            loop.run_in_executor(None, self._classify_local, text),
-            loop.run_in_executor(None, self._classify_intent, text),
-        )
 
-        severity = self._compute_severity(local_result, intent_result)
-        flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
-        intent = intent_result.get("intent", "safe")
-        reason = self._build_reason(local_result, intent_result, keyword_hits, intent, severity)
-        flagged_categories = self._get_flagged_categories(local_result)
+        # ── Stage 2: Toxic-bert scoring — always runs, fast ────────────────
+        local_result = await loop.run_in_executor(None, self._classify_local, text)
+        scores: dict[str, float] = local_result.get("scores", {})
+        max_score: float = local_result.get("max_score", 0.0)
 
-        if flagged and intent == "harmful":
-            nli_scores = intent_result.get("scores", {})
-            harmful_score = max(
-                (nli_scores.get(lbl, 0) for lbl in HARMFUL_INTENT_LABELS),
-                default=0,
-            )
-            if harmful_score >= 0.70:
-                self._learn_phrases(text)
+        # ── Stage 3a: Clearly safe — no LLM work needed ───────────────────
+        if max_score < _SAFE_THRESHOLD:
+            return {
+                "flagged": False,
+                "severity": SEVERITY_NONE,
+                "intent": "safe",
+                "reason": "",
+                "flagged_categories": [],
+                "blocked_words_found": keyword_hits,
+            }
 
+        # ── Stage 3b: Borderline (0.30–0.79) — Llama is deciding vote ────────
+        if max_score < _HIGH_THRESHOLD:
+            if llm_service.is_available:
+                try:
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: llm_service.moderate(
+                            text,
+                            detoxify_scores=scores,
+                            harm_keywords=list(all_keywords),
+                            is_borderline=True,
+                        ),
+                    )
+                    if result["flagged"] and result["intent"] == "harmful":
+                        self._learn_phrases(text)
+                    return result
+                except Exception as exc:
+                    logger.warning(
+                        "[MODERATION] Llama failed on borderline (%.2f) (%s) — using NLI fallback",
+                        max_score, exc,
+                    )
+            # Fallback: NLI intent classifier
+            intent_result = await loop.run_in_executor(None, self._classify_intent, text)
+            severity = self._compute_severity(local_result, intent_result)
+            flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
+            intent = intent_result.get("intent", "safe")
+            reason = self._build_reason(local_result, intent_result, keyword_hits, intent, severity)
+            if flagged and intent == "harmful":
+                nli_scores = intent_result.get("scores", {})
+                if max((nli_scores.get(l, 0) for l in HARMFUL_INTENT_LABELS), default=0) >= 0.70:
+                    self._learn_phrases(text)
+            return {
+                "flagged": flagged,
+                "severity": severity,
+                "intent": intent,
+                "reason": reason,
+                "flagged_categories": self._get_flagged_categories(local_result),
+                "blocked_words_found": keyword_hits,
+            }
+
+        # ── Stage 3c: Clearly harmful (≥0.80) — Llama adds detail, score drives severity ─
+        severity = self._score_to_severity(max_score, local_result)
+        if llm_service.is_available:
+            try:
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: llm_service.moderate(
+                        text,
+                        detoxify_scores=scores,
+                        harm_keywords=list(all_keywords),
+                        is_borderline=False,
+                    ),
+                )
+                # Toxic-bert severity is authoritative at this score level
+                result["severity"] = severity
+                result["flagged"] = True
+                if result["intent"] != "safe":
+                    self._learn_phrases(text)
+                return result
+            except Exception as exc:
+                logger.warning(
+                    "[MODERATION] Llama failed on high-score (%.2f) (%s) — using toxic-bert result",
+                    max_score, exc,
+                )
+        # Fallback for clearly harmful with no Llama
+        self._learn_phrases(text)
         return {
-            "flagged": flagged,
+            "flagged": True,
             "severity": severity,
-            "intent": intent,
-            "reason": reason,
-            "flagged_categories": flagged_categories,
+            "intent": "harmful",
+            "reason": f"High toxicity detected (score {max_score:.2f})",
+            "flagged_categories": self._get_flagged_categories(local_result),
             "blocked_words_found": keyword_hits,
         }
 
@@ -186,13 +261,23 @@ class ModerationService:
             v >= 0.5 for k, v in scores.items()
             if k in ("severe_toxic", "threat", "identity_hate")
         )
-
         return {
             "flagged": flagged,
             "max_score": max(scores.values()) if scores else 0,
             "high_scores": high_scores,
             "scores": scores,
         }
+
+    def _score_to_severity(self, max_score: float, local_result: dict) -> str:
+        """Derive severity directly from toxic-bert max_score for the clearly-harmful path."""
+        local_flagged = local_result.get("flagged", False)
+        if max_score >= 0.95 or (local_flagged and max_score >= 0.85):
+            return SEVERITY_CRITICAL
+        if max_score >= 0.80:
+            return SEVERITY_HIGH
+        if max_score >= 0.60:
+            return SEVERITY_MEDIUM
+        return SEVERITY_LOW
 
     def _learn_phrases(self, text: str):
         import re

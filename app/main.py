@@ -20,6 +20,7 @@ from app.services.registry import (
     moderator,
     synthesizer,
     worker,
+    llm_service,
 )
 from app.api.router import api_router
 
@@ -51,6 +52,13 @@ async def lifespan(application: FastAPI):
     categorizer.load()
     moderator.load()
     synthesizer.load()
+    # Llama loads last — needs the most VRAM and only activates on GPU machines
+    print("[STARTUP] Loading Llama 3.1-8B (GPU only)...")
+    llm_service.load()
+    if llm_service.is_available:
+        print("[STARTUP] Llama 3.1-8B ready — moderation + tagging will use LLM path")
+    else:
+        print("[STARTUP] Llama not available — using toxic-bert + NLI fallback pipeline")
     print("[STARTUP] Models loaded. Starting worker...")
     await worker.start()
     print("[STARTUP] Ready.")

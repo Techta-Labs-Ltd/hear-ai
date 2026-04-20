@@ -3,6 +3,7 @@ from app.services.enhancer import AudioEnhancer
 from app.services.categorizer import CategorizationService
 from app.services.moderator import ModerationService
 from app.services.synthesizer import SpeechSynthesizer
+from app.services.llm_service import llm_service  # noqa: F401 — imported for startup access
 from app.realtime.orchestrator import PipelineOrchestrator
 from app.worker import PipelineWorker
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 from collections import Counter
 from typing import Optional
@@ -15,6 +16,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*clean_up_to
 from app.config import settings
 from app.core.category_loader import category_loader
 from app.core.platform_settings import fetch_platform_settings
+from app.services.llm_service import llm_service
+
+logger = logging.getLogger(__name__)
 
 PRETRAINED_BASE = "cross-encoder/nli-distilroberta-base"
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
@@ -97,6 +101,49 @@ class CategorizationService:
             None, self._zero_shot_labels, transcript, data.categories
         )
 
+        # ── PRIMARY: Llama 3B (GPU only) ────────────────────────────────
+        if llm_service.is_available:
+            try:
+                llm_result = await loop.run_in_executor(
+                    None,
+                    llm_service.categorize,
+                    transcript,
+                    data.categories,
+                    data.tags,
+                    layer1["scores"],
+                )
+                tags = llm_result["tags"]
+                categories = llm_result["categories"]
+                llm_sentiment = llm_result["sentiment"]
+
+                # Persist any tags Llama returned that aren't in the loader yet
+                new_tags_added: list[str] = []
+                for tag in tags:
+                    if tag not in data.tags:
+                        category_loader.add_tag(tag)
+                        new_tags_added.append(tag)
+
+                # Block platform-restricted keywords
+                if platform.blocked_keywords:
+                    tags = [
+                        t for t in tags
+                        if not any(bk in t.lower() for bk in platform.blocked_keywords)
+                    ]
+
+                return {
+                    "tags": tags,
+                    "categories": categories,
+                    "confidence_scores": {},
+                    "sentiment": llm_sentiment,
+                    "new_tags_added": new_tags_added,
+                    "new_categories_added": [],
+                    "settings_applied": settings_applied,
+                    "llm_used": True,
+                }
+            except Exception as exc:
+                logger.warning("[CATEGORIZER] Llama failed (%s) — falling back to NLI pipeline", exc)
+
+        # ── FALLBACK: NLI zero-shot + keyword merge (+ OpenAI if key set) ───
         # Zero-shot for tags is disabled: hashtag labels (#Animals, #AI etc.) are
         # too short/ambiguous for reliable NLI classification regardless of whether
         # OpenAI is available. Tags come from keyword rules + OpenAI only.
@@ -114,7 +161,7 @@ class CategorizationService:
 
         merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
 
-        new_tags_added: list[str] = []
+        new_tags_added = []
         for tag in merged["tags"]:
             normalised = tag if tag.startswith("#") else f"#{tag}"
             if normalised not in data.tags:
@@ -145,6 +192,7 @@ class CategorizationService:
             "new_tags_added": new_tags_added,
             "new_categories_added": new_categories_added,
             "settings_applied": settings_applied,
+            "llm_used": False,
         }
 
     # ------------------------------------------------------------------
@@ -349,9 +397,10 @@ class CategorizationService:
                 if s1 > 0 and s3 > 0: score += 0.15
                 elif s2 > 0 and s3 > 0: score += 0.10
             else:
-                score = (s1 * 0.6) + (s2 * 0.4)
-                if s1 > 0 and s2 > 0: score += 0.15
-                
+                # s2 is always 0 (zero-shot disabled for tags), so give s1 full weight.
+                # A single keyword match (s1=0.55) now passes the 0.50 threshold.
+                score = s1 * 1.0
+
             merged_tag_scores[tag] = round(min(1.0, score), 4)
 
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
