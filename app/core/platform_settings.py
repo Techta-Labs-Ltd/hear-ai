@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from app.config import settings
+from app.core.keyword_loader import harm_keyword_loader
 
 
 @dataclass
@@ -24,6 +25,9 @@ async def fetch_platform_settings() -> PlatformSettings:
 
         blocked = [k.strip().lower() for k in data.get("blocked_keywords", "").split(",") if k.strip()]
         auto_tags = [k.strip().lower() for k in data.get("auto_tag_keywords", "").split(",") if k.strip()]
+
+        if blocked:
+            harm_keyword_loader.sync_platform_keywords(blocked)
 
         return PlatformSettings(
             blocked_keywords=blocked,

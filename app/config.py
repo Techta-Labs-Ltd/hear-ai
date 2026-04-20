@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     B2_ENHANCED_PREFIX: str = "enhanced/"
 
     CATEGORIES_FILE: str = "./data/categories.txt"
+    HARM_KEYWORDS_FILE: str = "./data/harm_keywords.txt"
     DEMUCS_MODEL: str = "htdemucs"
     MODEL_CACHE_DIR: str = "/opt/ml/models"
 
