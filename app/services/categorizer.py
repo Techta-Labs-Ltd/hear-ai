@@ -229,6 +229,8 @@ class CategorizationService:
             "- Categories should represent high-level domains (e.g., Wildlife, Photography, Film, Nature, Awards)\n"
             "- Only include categories that are strongly supported by the transcript\n"
             "- Do NOT infer categories that are not clearly present\n\n"
+            "CRITICAL EXCEPTION:\n"
+            "- If the transcript is very short (e.g., under 15 words), purely conversational, a sudden threat, or lacks any distinct topic, you MUST return empty arrays [] for both tags and categories. Do not force tags.\n\n"
             "Output format (STRICT JSON):\n"
             "{\n"
             "  \"tags\": [\"#Tag1\", \"#Tag2\", \"#Tag3\", \"#Tag4\", \"#Tag5\"],\n"

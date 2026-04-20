@@ -46,7 +46,7 @@ class TranscriptionService:
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=400, speech_pad_ms=200),
                 word_timestamps=True,
-                condition_on_previous_text=True,
+                condition_on_previous_text=False,
             )
         except ValueError:
             return {
@@ -112,7 +112,7 @@ class TranscriptionService:
                     beam_size=5,
                     vad_filter=True,
                     word_timestamps=True,
-                    condition_on_previous_text=True,
+                    condition_on_previous_text=False,
                 )
                 for seg in segments_gen:
                     text = seg.text.strip()

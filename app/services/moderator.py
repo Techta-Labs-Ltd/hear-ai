@@ -86,10 +86,11 @@ class ModerationService:
             label = item["label"].lower()
             scores[label] = round(item["score"], 4)
 
-        high_scores = {k: v for k, v in scores.items() if v > 0.5}
+        high_scores = {k: v for k, v in scores.items() if v >= 0.5}
 
+        # Threats and severe toxicity > 0.5 must be hard flagged
         return {
-            "flagged": any(v > 0.7 for k, v in scores.items() if k in ("severe_toxic", "threat", "identity_hate")),
+            "flagged": any(v >= 0.5 for k, v in scores.items() if k in ("severe_toxic", "threat", "identity_hate")),
             "max_score": max(scores.values()) if scores else 0,
             "high_scores": high_scores,
             "scores": scores,
@@ -189,8 +190,9 @@ class ModerationService:
         if intent == "harmful":
             return SEVERITY_HIGH
 
-        if local_flagged and intent in ("safe", "cautionary"):
-            return SEVERITY_MEDIUM
+        if local_flagged:
+            # If the local model catches a severe direct threat/hate, we MUST flag it
+            return SEVERITY_HIGH
 
         if intent == "questionable":
             return SEVERITY_MEDIUM
