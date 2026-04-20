@@ -105,7 +105,9 @@ class AudioEnhancer:
 
     _STRIP_FADE_MS = 25
     _CLASSIFY_WINDOW_S = 30
-    _PODCAST_STEM_ATTENUATION_DB = -6.0
+    _PODCAST_STEM_ATTENUATION_DB = -12.0
+    _MUSIC_BED_MIN_RMS = 1e-4
+    _MUSIC_LUFS = -14.0
 
     def __init__(self):
         self._demucs = None
@@ -156,15 +158,21 @@ class AudioEnhancer:
 
         music_power = drums_rms + bass_rms + other_rms
         total_power = music_power + vocals_rms + 1e-10
+        rhythm_power = drums_rms + bass_rms
 
-        if vocals_rms < 1e-6 and music_power > 1e-6:
+        # No vocals at all → pure music/instrumental
+        if vocals_rms < 1e-5:
             return ContentMode.MUSIC
-        if music_power / total_power > 0.5:
-            if vocals_rms / total_power > 0.15:
-                return ContentMode.MUSIC
+
+        # Strong rhythm/bass and sparse vocals → music
+        if rhythm_power / total_power > 0.4 and vocals_rms / total_power < 0.2:
             return ContentMode.MUSIC
-        if vocals_rms / total_power > 0.4 and music_power / total_power > 0.1:
+
+        # Significant voice + some music → podcast / mixed content
+        if vocals_rms / total_power > 0.3 and music_power / total_power > 0.15:
             return ContentMode.PODCAST
+
+        # Voice dominant, minimal music → clean speech
         return ContentMode.SPEECH
 
     def _compute_snr(self, raw: torch.Tensor, enhanced: torch.Tensor) -> float:
@@ -466,6 +474,44 @@ class AudioEnhancer:
             w = w * (ceiling / tp_up)
         return w
 
+    def _normalise_lufs_stereo(self, w: torch.Tensor, target_lufs: float = -14.0) -> torch.Tensor:
+        try:
+            if w.shape[-1] < int(self.TARGET_SR * 0.5):
+                return self._peak_normalise(w)
+            meter = pyln.Meter(self.TARGET_SR)
+            audio_np = w.cpu().numpy().astype(np.float64)
+            if audio_np.ndim == 1:
+                pass
+            elif audio_np.shape[0] == 1:
+                audio_np = audio_np.squeeze(0)
+            else:
+                audio_np = audio_np.T  # pyloudnorm expects (samples, channels)
+            loudness = meter.integrated_loudness(audio_np)
+            if not np.isfinite(loudness) or loudness < -70.0 or loudness > 0.0:
+                return self._peak_normalise(w)
+            if abs(loudness - target_lufs) <= 0.5:
+                return w
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                normalised = pyln.normalize.loudness(audio_np, loudness, target_lufs)
+            if not np.isfinite(normalised).all():
+                return self._peak_normalise(w)
+            if normalised.ndim == 1:
+                result = torch.from_numpy(normalised.astype(np.float32)).unsqueeze(0)
+            else:
+                result = torch.from_numpy(normalised.T.astype(np.float32))  # back to (channels, samples)
+            result = result.to(self._device)
+            peak = result.abs().max().item()
+            if peak > 0.99:
+                result = result * (0.99 / peak)
+            return result
+        except Exception:
+            return self._peak_normalise(w)
+
+    _PODCAST_STEM_ATTENUATION_DB = -12.0
+    _MUSIC_BED_MIN_RMS = 1e-4
+    _MUSIC_LUFS = -14.0
+
     async def enhance(
         self,
         input_path: str,
@@ -481,88 +527,92 @@ class AudioEnhancer:
             raw_clone = waveform.clone()
             clipping_input = self._detect_clipping(waveform)
 
-            mono = self._to_mono(waveform)
-            enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
-            raw_at_target = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
-
-            separated = await loop.run_in_executor(
-                None, self._demucs_separate, enhanced, self.TARGET_SR
-            )
-
+            # Auto-detect content type using a short window to avoid full-file Demucs
             if mode == ContentMode.AUTO:
-                mode = self._detect_mode_from_stems(separated)
+                mono_detect = self._to_mono(waveform)
+                mono_detect = self._resample(mono_detect, sr, self.TARGET_SR).to(self._device)
+                window_len = int(self._CLASSIFY_WINDOW_S * self.TARGET_SR)
+                clip = mono_detect[:, :window_len]
+                window_stems = await loop.run_in_executor(None, self._demucs_separate, clip, self.TARGET_SR)
+                mode = self._detect_mode_from_stems(window_stems)
+                logger.info("[ENHANCE] Auto-detected mode=%s job=%s", mode.value, job_id)
 
-            logger.info("Content mode: %s for job %s", mode.value, job_id)
+            logger.info("[ENHANCE] mode=%s job=%s", mode.value, job_id)
 
-            if mode == ContentMode.SPEECH:
-                enhanced = separated["vocals"]
+            # ── MUSIC: stereo passthrough, no destructive processing ──────────────
+            if mode == ContentMode.MUSIC:
+                stereo = waveform
+                if sr != self.TARGET_SR:
+                    stereo = self._resample(stereo, sr, self.TARGET_SR)
+                stereo = stereo.to(self._device)
 
-                dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, enhanced)
-                dfn_cleaned, enhanced = _match_length(dfn_cleaned, enhanced)
-                enhanced = dfn_cleaned
+                raw_mono = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
+                snr = self._compute_snr(raw_mono, self._to_mono(stereo))
 
-                vad_mask, speech_timestamps = await loop.run_in_executor(
-                    None, self._generate_vad_mask, enhanced, self.TARGET_SR
+                stereo = await loop.run_in_executor(
+                    None, self._normalise_lufs_stereo, stereo, self._MUSIC_LUFS
                 )
-                enhanced = await loop.run_in_executor(
-                    None, self._vad_suppress, enhanced, vad_mask
+                stereo = await loop.run_in_executor(None, self._true_peak_limit, stereo)
+                enhanced = stereo
+
+            # ── SPEECH / PODCAST: full voice-focused processing ───────────────────
+            else:
+                mono = self._to_mono(waveform)
+                enhanced = self._resample(mono, sr, self.TARGET_SR).to(self._device)
+                raw_at_target = self._resample(self._to_mono(raw_clone), sr, self.TARGET_SR)
+
+                separated = await loop.run_in_executor(
+                    None, self._demucs_separate, enhanced, self.TARGET_SR
                 )
 
-                snr = self._compute_snr(raw_at_target, enhanced)
-
-                enhanced = await loop.run_in_executor(
-                    None, self._strip_silence, enhanced, speech_timestamps, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._apply_eq_speech, enhanced, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._noise_gate, enhanced, self.TARGET_SR
-                )
-                enhanced = await loop.run_in_executor(
-                    None, self._compress, enhanced, self.TARGET_SR, mode
-                )
-
-            elif mode == ContentMode.PODCAST:
                 vocals = separated["vocals"]
 
-                dfn_cleaned = await loop.run_in_executor(None, self._deepfilter_denoise, vocals)
-                dfn_cleaned, vocals = _match_length(dfn_cleaned, vocals)
-                vocals = dfn_cleaned
+                # Neural noise removal on isolated vocals
+                vocals = await loop.run_in_executor(None, self._deepfilter_denoise, vocals)
 
+                # VAD: detect and suppress non-speech regions
                 vad_mask, speech_timestamps = await loop.run_in_executor(
                     None, self._generate_vad_mask, vocals, self.TARGET_SR
                 )
-                vocals = await loop.run_in_executor(
-                    None, self._vad_suppress, vocals, vad_mask
-                )
-                vocals = await loop.run_in_executor(
-                    None, self._apply_eq_speech, vocals, self.TARGET_SR
-                )
-                vocals = await loop.run_in_executor(
-                    None, self._noise_gate, vocals, self.TARGET_SR
-                )
+                vocals = await loop.run_in_executor(None, self._vad_suppress, vocals, vad_mask)
 
-                non_keys = [k for k in separated if k != "vocals"]
-                attenuation = 10 ** (self._PODCAST_STEM_ATTENUATION_DB / 20)
-                non_vocal_stems = [separated[k] * attenuation for k in non_keys]
-                min_len = min(vocals.shape[1], *(s.shape[1] for s in non_vocal_stems))
-                non_vocal_mix = sum(s[:, :min_len] for s in non_vocal_stems)
+                # Clarity EQ and noise gate
+                vocals = await loop.run_in_executor(None, self._apply_eq_speech, vocals, self.TARGET_SR)
+                vocals = await loop.run_in_executor(None, self._noise_gate, vocals, self.TARGET_SR)
 
-                voc_trim, nv_trim = _match_length(vocals, non_vocal_mix)
-                enhanced = voc_trim + nv_trim
+                if mode == ContentMode.SPEECH:
+                    # Strip leading/trailing silence for pure speech recordings
+                    vocals = await loop.run_in_executor(
+                        None, self._strip_silence, vocals, speech_timestamps, self.TARGET_SR
+                    )
+                    enhanced = vocals
+                    snr = self._compute_snr(raw_at_target, enhanced)
 
-                snr = self._compute_snr(raw_at_target, enhanced)
+                else:  # PODCAST
+                    drums_rms = separated["drums"].pow(2).mean().sqrt().item()
+                    bass_rms = separated["bass"].pow(2).mean().sqrt().item()
+                    has_music_bed = (drums_rms > self._MUSIC_BED_MIN_RMS or bass_rms > self._MUSIC_BED_MIN_RMS)
 
-                enhanced = await loop.run_in_executor(
-                    None, self._compress, enhanced, self.TARGET_SR, mode
-                )
+                    if has_music_bed:
+                        attenuation = 10 ** (self._PODCAST_STEM_ATTENUATION_DB / 20)
+                        music_stems = [
+                            separated[k] * attenuation
+                            for k in ("drums", "bass", "other")
+                        ]
+                        min_len = min(vocals.shape[1], *(s.shape[1] for s in music_stems))
+                        music_mix = sum(s[:, :min_len] for s in music_stems)
+                        voc_t, nv_t = _match_length(vocals, music_mix)
+                        enhanced = voc_t + nv_t
+                        logger.info("[ENHANCE] Podcast: music bed detected, mixed back at %sdB", self._PODCAST_STEM_ATTENUATION_DB)
+                    else:
+                        enhanced = vocals
+                        logger.info("[ENHANCE] Podcast: no music bed detected, voice-only output")
 
-            else:
-                snr = self._compute_snr(raw_at_target, enhanced)
+                    snr = self._compute_snr(raw_at_target, enhanced)
 
-            enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
-            enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
+                enhanced = await loop.run_in_executor(None, self._compress, enhanced, self.TARGET_SR, mode)
+                enhanced = await loop.run_in_executor(None, self._normalise_lufs, enhanced)
+                enhanced = await loop.run_in_executor(None, self._true_peak_limit, enhanced)
 
             lufs = self._compute_lufs(enhanced)
             peak_db = 20 * np.log10(enhanced.abs().max().item() + 1e-8)
