@@ -184,8 +184,9 @@ class ModerationService:
                     "intent": "cautionary",
                     "reason": f"Contains monitored words: {', '.join(keyword_hits)}",
                     "blocked_words": keyword_hits,
+                    "openai_used": False,
                 }
-            return {"intent": "safe", "reason": "", "blocked_words": []}
+            return {"intent": "safe", "reason": "", "blocked_words": [], "openai_used": False}
 
         blocked_section = ""
         if blocked_keywords:
@@ -242,6 +243,7 @@ class ModerationService:
                 "intent": parsed.get("intent", "safe"),
                 "reason": parsed.get("reason", ""),
                 "blocked_words": parsed.get("blocked_words_in_harmful_context", []),
+                "openai_used": True,
             }
         except Exception:
             keyword_hits = self._check_keywords(text, blocked_keywords)
@@ -250,8 +252,9 @@ class ModerationService:
                     "intent": "cautionary",
                     "reason": f"Contains monitored words: {', '.join(keyword_hits)}. Context analysis unavailable.",
                     "blocked_words": keyword_hits,
+                    "openai_used": False,
                 }
-            return {"intent": "safe", "reason": "", "blocked_words": []}
+            return {"intent": "safe", "reason": "", "blocked_words": [], "openai_used": False}
 
     def _check_keywords(self, text: str, blocked_keywords: list[str]) -> list[str]:
         if not blocked_keywords:
@@ -261,23 +264,32 @@ class ModerationService:
 
     def _compute_severity(self, local_result: dict, context_result: dict) -> str:
         intent = context_result.get("intent", "safe")
+        openai_used = context_result.get("openai_used", True)
         max_toxic = local_result.get("max_score", 0)
         local_flagged = local_result.get("flagged", False)
 
+        # Both agree it's harmful
         if intent == "harmful" and local_flagged:
             return SEVERITY_CRITICAL
 
+        # OpenAI alone says harmful (context-aware)
         if intent == "harmful":
             return SEVERITY_HIGH
 
         if local_flagged:
-            # If the local model catches a severe direct threat/hate, we MUST flag it
-            return SEVERITY_HIGH
+            if not openai_used:
+                # No OpenAI to cross-check — trust toxic-bert directly
+                return SEVERITY_HIGH
+            # OpenAI is available and disagrees — only flag if uncertain
+            if intent == "questionable":
+                return SEVERITY_HIGH
+            # OpenAI says safe/cautionary — trust it, downgrade to non-flagged
+            return SEVERITY_MEDIUM
 
         if intent == "questionable":
             return SEVERITY_MEDIUM
 
-        if intent == "cautionary" or max_toxic > 0.5:
+        if intent == "cautionary" or max_toxic > 0.6:
             return SEVERITY_LOW
 
         return SEVERITY_NONE

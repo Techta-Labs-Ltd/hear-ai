@@ -97,9 +97,8 @@ class CategorizationService:
             None, self._zero_shot_labels, transcript, data.categories
         )
 
-        # Zero-shot for tags is only used when OpenAI is unavailable.
-        # With 120+ hashtags the NLI model drifts badly (e.g. "attack" → #Hacking).
-        # OpenAI produces far more accurate tags so we skip this layer when possible.
+        # When OpenAI is unavailable, run zero-shot on a focused 30-tag pool.
+        # With 120+ tags NLI drifts badly, so we cap at 30 best-match candidates.
         if not settings.OPENAI_API_KEY:
             layer2_tag = await loop.run_in_executor(
                 None, self._zero_shot_labels, transcript, tag_pool[:30]
@@ -107,11 +106,15 @@ class CategorizationService:
         else:
             layer2_tag = {"scores": {}}
 
-        # OpenAI (network call) and sentiment (different model) can run in parallel
-        layer3, sentiment = await asyncio.gather(
-            self._openai_layer(transcript, data.categories, data.tags),
-            loop.run_in_executor(None, self._get_sentiment, transcript),
-        )
+        # OpenAI layer — skipped when no key set
+        if settings.OPENAI_API_KEY:
+            layer3, sentiment = await asyncio.gather(
+                self._openai_layer(transcript, data.categories, data.tags),
+                loop.run_in_executor(None, self._get_sentiment, transcript),
+            )
+        else:
+            layer3 = {"scores": {}, "suggested_tags": [], "suggested_categories": []}
+            sentiment = await loop.run_in_executor(None, self._get_sentiment, transcript)
 
         merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
 
@@ -310,7 +313,7 @@ class CategorizationService:
             return "neutral"
 
     _TAG_THRESHOLD = 0.50
-    _CAT_THRESHOLD = 0.40
+    _CAT_THRESHOLD = 0.35
 
     def _merge(
         self,

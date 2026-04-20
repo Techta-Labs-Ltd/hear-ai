@@ -37,7 +37,27 @@ class TranscriptionService:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+    _HALLUCINATION_PHRASES = {
+        "thank you", "thanks for watching", "thanks for listening",
+        "please subscribe", "subscribe", "like and subscribe",
+        "you're welcome", "you are welcome", "welcome back",
+        "see you next time", "see you later", "bye", "goodbye",
+        "good morning", "good evening", "good afternoon", "good night",
+        "hello", "hi there", "hey there", "what's up",
+        "uh", "um", "hmm", "hm", "ah", "oh",
+        ".", "..", "...", "[music]", "[applause]", "[laughter]",
+        "[noise]", "[silence]", "[inaudible]", "[blank_audio]",
+    }
+    _MIN_WORD_CONFIDENCE = 0.40
+    _MIN_TRANSCRIPT_CONFIDENCE = 0.45
+    _MIN_REAL_WORDS = 3
+
     def _run(self, path: str) -> dict:
+        _silent = {
+            "transcript": "", "segments": [], "language": None,
+            "language_probability": 0.0, "duration": 0.0,
+            "confidence": 0.0, "silent": True,
+        }
         try:
             segments_gen, info = self._model.transcribe(
                 path,
@@ -49,15 +69,7 @@ class TranscriptionService:
                 condition_on_previous_text=False,
             )
         except ValueError:
-            return {
-                "transcript": "",
-                "segments": [],
-                "language": None,
-                "language_probability": 0.0,
-                "duration": 0.0,
-                "confidence": 0.0,
-                "silent": True,
-            }
+            return _silent
 
         segments = []
         full_text_parts = []
@@ -65,19 +77,29 @@ class TranscriptionService:
         word_count = 0
 
         for seg in segments_gen:
+            # Skip segments Whisper itself flagged as likely no-speech
+            if getattr(seg, "no_speech_prob", 0) > 0.6:
+                continue
+
             text = seg.text.strip()
             if not text or all(c in " \t\n.,-!?;:" for c in text):
                 continue
+
             words = []
             for w in (seg.words or []):
                 word_text = w.word.strip()
                 if not word_text:
                     continue
+                # Drop low-confidence words — hallucinated words score poorly
+                if w.probability < self._MIN_WORD_CONFIDENCE:
+                    continue
                 words.append({"word": w.word, "start": w.start, "end": w.end, "prob": w.probability})
                 total_conf += w.probability
                 word_count += 1
+
             if not words:
                 continue
+
             segments.append({
                 "id": seg.id,
                 "start": seg.start,
@@ -87,13 +109,35 @@ class TranscriptionService:
             })
             full_text_parts.append(text)
 
+        if not full_text_parts:
+            return _silent
+
+        transcript = " ".join(full_text_parts)
+        confidence = round(total_conf / max(word_count, 1), 4)
+
+        # Check for known Whisper hallucination phrases
+        normalized = transcript.strip().lower().rstrip(".,!?")
+        if normalized in self._HALLUCINATION_PHRASES:
+            print(f"[TRANSCRIBER] Hallucination detected: {transcript!r} — marking silent")
+            return _silent
+
+        # Discard if overall confidence is too low (noise/fan produces low-conf words)
+        if confidence < self._MIN_TRANSCRIPT_CONFIDENCE:
+            print(f"[TRANSCRIBER] Low confidence transcript ({confidence:.2f}): {transcript!r} — marking silent")
+            return _silent
+
+        # Discard if too few real words survived the confidence filter
+        if word_count < self._MIN_REAL_WORDS:
+            print(f"[TRANSCRIBER] Too few confident words ({word_count}): {transcript!r} — marking silent")
+            return _silent
+
         return {
-            "transcript": " ".join(full_text_parts),
+            "transcript": transcript,
             "segments": segments,
             "language": info.language,
             "language_probability": round(info.language_probability, 4),
             "duration": info.duration,
-            "confidence": round(total_conf / max(word_count, 1), 4),
+            "confidence": confidence,
             "silent": False,
         }
 
