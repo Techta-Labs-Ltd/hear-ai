@@ -97,14 +97,10 @@ class CategorizationService:
             None, self._zero_shot_labels, transcript, data.categories
         )
 
-        # When OpenAI is unavailable, run zero-shot on a focused 30-tag pool.
-        # With 120+ tags NLI drifts badly, so we cap at 30 best-match candidates.
-        if not settings.OPENAI_API_KEY:
-            layer2_tag = await loop.run_in_executor(
-                None, self._zero_shot_labels, transcript, tag_pool[:30]
-            )
-        else:
-            layer2_tag = {"scores": {}}
+        # Zero-shot for tags is disabled: hashtag labels (#Animals, #AI etc.) are
+        # too short/ambiguous for reliable NLI classification regardless of whether
+        # OpenAI is available. Tags come from keyword rules + OpenAI only.
+        layer2_tag: dict = {"scores": {}}
 
         # OpenAI layer — skipped when no key set
         if settings.OPENAI_API_KEY:
@@ -192,7 +188,11 @@ class CategorizationService:
         text_lower = transcript.lower()
         scores = {}
         for pattern, tag in keyword_rules.items():
-            matches = len(re.findall(pattern.lower(), text_lower))
+            # Wrap each pipe-separated alternative with word boundaries so that
+            # short tokens like 'AI', 'car', 'ant', 'bee' don't match as substrings
+            # inside unrelated words (e.g. 'AI' inside 'again', 'ant' inside 'advantage').
+            bounded = "|".join(f"\\b{p.strip()}\\b" for p in pattern.lower().split("|"))
+            matches = len(re.findall(bounded, text_lower))
             if matches > 0:
                 scores[tag] = min(1.0, matches * 0.15 + 0.4)
         if segments:
@@ -200,7 +200,8 @@ class CategorizationService:
             for seg in segments:
                 seg_text = seg.get("text", "").lower()
                 for pattern, tag in keyword_rules.items():
-                    if re.search(pattern.lower(), seg_text):
+                    bounded = "|".join(f"\\b{p.strip()}\\b" for p in pattern.lower().split("|"))
+                    if re.search(bounded, seg_text):
                         seg_counter[tag] += 1
             for tag, count in seg_counter.items():
                 density = count / max(len(segments), 1)
@@ -356,20 +357,24 @@ class CategorizationService:
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
         tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
-        if not tags and ranked_tags:
-            tags = [t for t, _ in ranked_tags[:min(max_tags, 2)]]
+        # No forced fallback — return empty rather than force irrelevant tags
 
         cat_scores: dict[str, float] = {}
         for c in all_categories:
+            # Keyword rules fire on tags like '#Sports', '#Food' — map those scores
+            # back to their matching category by stripping the '#'.
+            s1 = l1.get(f"#{c}", 0)
             s2 = l2c.get(c, 0)
             s3 = l3.get(c, 0)
-            
+
             if has_openai:
-                score = (s2 * 0.3) + (s3 * 0.7)
-                if s2 > 0 and s3 > 0: score += 0.15
+                score = (s1 * 0.2) + (s2 * 0.3) + (s3 * 0.7)
+                if (s1 > 0 or s2 > 0) and s3 > 0:
+                    score += 0.10
             else:
-                score = s2 * 1.0
-                
+                # l1 anchors keyword-confirmed topics, l2c provides NLI context
+                score = (s1 * 0.4) + (s2 * 0.6)
+
             cat_scores[c] = round(min(1.0, score), 4)
 
         ranked_cats = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)
