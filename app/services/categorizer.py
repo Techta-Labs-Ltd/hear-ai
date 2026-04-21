@@ -63,6 +63,7 @@ class CategorizationService:
         segments: Optional[list[dict]] = None,
         custom_tags: Optional[list[str]] = None,
         max_tags: int = 8,
+        per_track_transcripts: Optional[dict[str, str]] = None,
     ) -> dict:
         if not transcript or not transcript.strip():
             return {
@@ -90,26 +91,40 @@ class CategorizationService:
         data = category_loader.data
         loop = asyncio.get_event_loop()
 
+        # ── Multi-track: process each track independently and merge ─────────────
+        active_tracks = {
+            k: v for k, v in (per_track_transcripts or {}).items()
+            if v and v.strip()
+        }
+        if len(active_tracks) > 1:
+            return await self._categorize_multi_track(
+                track_texts=active_tracks,
+                data=data,
+                platform=platform,
+                settings_applied=settings_applied,
+                max_tags=max_tags,
+            )
+
         layer1 = await loop.run_in_executor(
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
 
         tag_pool = self._build_tag_pool(transcript, data.tags, layer1["scores"])
+        ranked_cats = self._rank_categories(data.categories, layer1["scores"])
 
         # Zero-shot categories always runs (30-40 labels — NLI handles this well)
         layer2_cat = await loop.run_in_executor(
             None, self._zero_shot_labels, transcript, data.categories
         )
 
-        # ── PRIMARY: Llama 3B (GPU only) ────────────────────────────────
         if llm_service.is_available:
             try:
                 llm_result = await loop.run_in_executor(
                     None,
                     llm_service.categorize,
                     transcript,
-                    data.categories,
-                    data.tags,
+                    ranked_cats,
+                    tag_pool,
                     layer1["scores"],
                 )
                 tags = llm_result["tags"]
@@ -141,12 +156,8 @@ class CategorizationService:
                     "llm_used": True,
                 }
             except Exception as exc:
-                logger.warning("[CATEGORIZER] Llama failed (%s) — falling back to NLI pipeline", exc)
+                logger.warning("[CATEGORIZER] Qwen failed (%s) — falling back to NLI pipeline", exc)
 
-        # ── FALLBACK: NLI zero-shot + keyword merge (+ OpenAI if key set) ───
-        # Zero-shot for tags is disabled: hashtag labels (#Animals, #AI etc.) are
-        # too short/ambiguous for reliable NLI classification regardless of whether
-        # OpenAI is available. Tags come from keyword rules + OpenAI only.
         layer2_tag: dict = {"scores": {}}
 
         # OpenAI layer — skipped when no key set
@@ -196,6 +207,139 @@ class CategorizationService:
         }
 
     # ------------------------------------------------------------------
+    # Multi-track
+    # ------------------------------------------------------------------
+
+    async def _categorize_multi_track(
+        self,
+        track_texts: dict[str, str],
+        data,
+        platform,
+        settings_applied: bool,
+        max_tags: int,
+    ) -> dict:
+        """Analyse each track independently then merge results.
+
+        This prevents the longest track (e.g. 3-minute football commentary)
+        from drowning out shorter ones (e.g. a 30-second recipe intro or
+        a music intro). Every track contributes its own tags and categories.
+        """
+        loop = asyncio.get_event_loop()
+        all_tags: list[str] = []
+        all_categories: list[str] = []
+        all_sentiments: list[str] = []
+        confidence_scores: dict[str, float] = {}
+        new_tags_added: list[str] = []
+        llm_was_used = False
+        per_track: dict[str, dict] = {}
+
+        for track_id, t_text in track_texts.items():
+            if not t_text or not t_text.strip():
+                continue
+
+            logger.info(
+                "[CATEGORIZER] Multi-track: analysing track %s (%d words)",
+                track_id[:16], len(t_text.split()),
+            )
+
+            # Keyword layer — always runs, gives Qwen context
+            layer1 = await loop.run_in_executor(
+                None, self._keyword_layer, t_text, [], data.keyword_rules
+            )
+            tag_pool = self._build_tag_pool(t_text, data.tags, layer1["scores"])
+            ranked_cats = self._rank_categories(data.categories, layer1["scores"])
+
+            if llm_service.is_available:
+                try:
+                    llm_result = await loop.run_in_executor(
+                        None,
+                        lambda lt=t_text, l1=layer1, tp=tag_pool, rc=ranked_cats: llm_service.categorize(
+                            lt,
+                            rc,
+                            tp,
+                            l1["scores"],
+                            max_categories=2,
+                        ),
+                    )
+                    t_tags = llm_result.get("tags", [])
+                    t_cats = llm_result.get("categories", [])
+                    t_sent = llm_result.get("sentiment", "neutral")
+
+                    per_track[track_id] = {"tags": t_tags, "categories": t_cats, "sentiment": t_sent}
+
+                    for tag in t_tags:
+                        if tag not in all_tags:
+                            all_tags.append(tag)
+                            confidence_scores[tag] = 0.85
+                            if tag not in data.tags:
+                                category_loader.add_tag(tag)
+                                new_tags_added.append(tag)
+                    for cat in t_cats:
+                        if cat not in all_categories:
+                            all_categories.append(cat)
+                    all_sentiments.append(t_sent)
+                    llm_was_used = True
+                    continue
+                except Exception as exc:
+                    logger.warning(
+                        "[CATEGORIZER] Qwen failed for track %s (%s) — using NLI",
+                        track_id[:16], exc,
+                    )
+
+            # NLI fallback for this track
+            layer2_cat = await loop.run_in_executor(
+                None, self._zero_shot_labels, t_text, data.categories
+            )
+            layer2_tag: dict = {"scores": {}}
+            layer3: dict = {"scores": {}, "suggested_tags": [], "suggested_categories": []}
+            nli_merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
+            t_sent = await loop.run_in_executor(None, self._get_sentiment, t_text)
+
+            t_tags = nli_merged.get("tags", [])
+            t_cats = nli_merged.get("categories", [])
+            per_track[track_id] = {"tags": t_tags, "categories": t_cats, "sentiment": t_sent}
+
+            for tag in t_tags:
+                if tag not in all_tags:
+                    all_tags.append(tag)
+                    confidence_scores[tag] = nli_merged.get("confidence_scores", {}).get(tag, 0.5)
+            for cat in t_cats:
+                if cat not in all_categories:
+                    all_categories.append(cat)
+            all_sentiments.append(t_sent)
+
+        # Apply blocked_keywords filter to global list AND per-track breakdown
+        if platform.blocked_keywords:
+            bk = platform.blocked_keywords
+            all_tags = [t for t in all_tags if not any(k in t.lower() for k in bk)]
+            for tid in per_track:
+                per_track[tid]["tags"] = [
+                    t for t in per_track[tid]["tags"] if not any(k in t.lower() for k in bk)
+                ]
+
+        final_sentiment = (
+            Counter(all_sentiments).most_common(1)[0][0]
+            if all_sentiments else "neutral"
+        )
+
+        logger.info(
+            "[CATEGORIZER] Multi-track merge: tags=%s categories=%s per_track_count=%d",
+            all_tags[:max_tags], all_categories, len(per_track),
+        )
+
+        return {
+            "tags": all_tags[:max_tags],
+            "categories": all_categories,
+            "confidence_scores": confidence_scores,
+            "sentiment": final_sentiment,
+            "new_tags_added": new_tags_added,
+            "new_categories_added": [],
+            "settings_applied": settings_applied,
+            "llm_used": llm_was_used,
+            "per_track": per_track,
+        }
+
+    # ------------------------------------------------------------------
 
     def _extract_transcript_words(self, transcript: str) -> set[str]:
         words = set()
@@ -204,6 +348,16 @@ class CategorizationService:
             if len(w) > 3 and w not in _STOPWORDS:
                 words.add(w)
         return words
+
+    def _rank_categories(self, categories: list[str], keyword_scores: dict[str, float]) -> list[str]:
+        hit: list[str] = []
+        rest: list[str] = []
+        for cat in categories:
+            if f"#{cat}" in keyword_scores or cat in keyword_scores:
+                hit.append(cat)
+            else:
+                rest.append(cat)
+        return hit + rest
 
     def _build_tag_pool(self, transcript: str, all_tags: list[str], keyword_scores: dict) -> list[str]:
         tx_words = self._extract_transcript_words(transcript)
@@ -391,14 +545,12 @@ class CategorizationService:
             s1 = l1.get(tag, 0)
             s2 = l2t.get(tag, 0)
             s3 = l3.get(tag, 0)
-            
+
             if has_openai:
                 score = (s1 * 0.4) + (s2 * 0.2) + (s3 * 0.6)
                 if s1 > 0 and s3 > 0: score += 0.15
                 elif s2 > 0 and s3 > 0: score += 0.10
             else:
-                # s2 is always 0 (zero-shot disabled for tags), so give s1 full weight.
-                # A single keyword match (s1=0.55) now passes the 0.50 threshold.
                 score = s1 * 1.0
 
             merged_tag_scores[tag] = round(min(1.0, score), 4)
@@ -406,12 +558,9 @@ class CategorizationService:
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
 
         tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
-        # No forced fallback — return empty rather than force irrelevant tags
 
         cat_scores: dict[str, float] = {}
         for c in all_categories:
-            # Keyword rules fire on tags like '#Sports', '#Food' — map those scores
-            # back to their matching category by stripping the '#'.
             s1 = l1.get(f"#{c}", 0)
             s2 = l2c.get(c, 0)
             s3 = l3.get(c, 0)
@@ -421,7 +570,6 @@ class CategorizationService:
                 if (s1 > 0 or s2 > 0) and s3 > 0:
                     score += 0.10
             else:
-                # l1 anchors keyword-confirmed topics, l2c provides NLI context
                 score = (s1 * 0.4) + (s2 * 0.6)
 
             cat_scores[c] = round(min(1.0, score), 4)

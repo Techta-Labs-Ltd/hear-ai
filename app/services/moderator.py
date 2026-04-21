@@ -90,11 +90,6 @@ HARM_KEYWORDS: list[str] = [
 ]
 
 
-# ── Routing thresholds ────────────────────────────────────────────────────────
-# Toxic-bert max_score drives which path content takes:
-#   < SAFE   → clearly safe, skip all LLM work (most podcast/music/news content)
-#   SAFE–HIGH → borderline, Llama is the deciding vote with full detoxify context
-#   ≥ HIGH   → clearly harmful, toxic-bert drives severity, Llama adds structured detail
 _SAFE_THRESHOLD = 0.30
 _HIGH_THRESHOLD = 0.80
 
@@ -140,7 +135,6 @@ class ModerationService:
         text_lower = text.lower()
         all_keywords = harm_keyword_loader.all_keywords
 
-        # ── Stage 1: Hard keyword match — instant, no model ──────────────────
         built_in_hits = [kw for kw in all_keywords if kw in text_lower]
         if built_in_hits:
             return {
@@ -155,12 +149,10 @@ class ModerationService:
         keyword_hits = self._check_keywords(text, blocked_keywords or [])
         loop = asyncio.get_event_loop()
 
-        # ── Stage 2: Toxic-bert scoring — always runs, fast ────────────────
         local_result = await loop.run_in_executor(None, self._classify_local, text)
         scores: dict[str, float] = local_result.get("scores", {})
         max_score: float = local_result.get("max_score", 0.0)
 
-        # ── Stage 3a: Clearly safe — no LLM work needed ───────────────────
         if max_score < _SAFE_THRESHOLD:
             return {
                 "flagged": False,
@@ -171,7 +163,6 @@ class ModerationService:
                 "blocked_words_found": keyword_hits,
             }
 
-        # ── Stage 3b: Borderline (0.30–0.79) — Llama is deciding vote ────────
         if max_score < _HIGH_THRESHOLD:
             if llm_service.is_available:
                 try:
@@ -189,10 +180,9 @@ class ModerationService:
                     return result
                 except Exception as exc:
                     logger.warning(
-                        "[MODERATION] Llama failed on borderline (%.2f) (%s) — using NLI fallback",
+                        "[MODERATION] Qwen failed on borderline (%.2f) (%s) — using NLI fallback",
                         max_score, exc,
                     )
-            # Fallback: NLI intent classifier
             intent_result = await loop.run_in_executor(None, self._classify_intent, text)
             severity = self._compute_severity(local_result, intent_result)
             flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
@@ -211,7 +201,6 @@ class ModerationService:
                 "blocked_words_found": keyword_hits,
             }
 
-        # ── Stage 3c: Clearly harmful (≥0.80) — Llama adds detail, score drives severity ─
         severity = self._score_to_severity(max_score, local_result)
         if llm_service.is_available:
             try:
@@ -224,7 +213,6 @@ class ModerationService:
                         is_borderline=False,
                     ),
                 )
-                # Toxic-bert severity is authoritative at this score level
                 result["severity"] = severity
                 result["flagged"] = True
                 if result["intent"] != "safe":
@@ -232,10 +220,9 @@ class ModerationService:
                 return result
             except Exception as exc:
                 logger.warning(
-                    "[MODERATION] Llama failed on high-score (%.2f) (%s) — using toxic-bert result",
+                    "[MODERATION] Qwen failed on high-score (%.2f) (%s) — using toxic-bert result",
                     max_score, exc,
                 )
-        # Fallback for clearly harmful with no Llama
         self._learn_phrases(text)
         return {
             "flagged": True,
@@ -269,7 +256,6 @@ class ModerationService:
         }
 
     def _score_to_severity(self, max_score: float, local_result: dict) -> str:
-        """Derive severity directly from toxic-bert max_score for the clearly-harmful path."""
         local_flagged = local_result.get("flagged", False)
         if max_score >= 0.95 or (local_flagged and max_score >= 0.85):
             return SEVERITY_CRITICAL

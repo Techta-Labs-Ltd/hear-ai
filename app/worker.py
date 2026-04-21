@@ -441,6 +441,11 @@ class PipelineWorker:
                     segments=segments,
                     custom_tags=platform.auto_tag_keywords,
                     max_tags=max_tags,
+                    per_track_transcripts={
+                        tid: d.get("transcript", "")
+                        for tid, d in per_track_transcriptions.items()
+                        if d.get("transcript", "").strip()
+                    } if per_track_transcriptions else None,
                 )
                 print(
                     f"[JOB:{job_id[:8]}] CATEGORIZE ✓ "
