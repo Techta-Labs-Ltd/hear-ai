@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -51,11 +51,16 @@ echo ""
 echo -e "${YELLOW}[5/6] Writing Supervisor config...${RESET}"
 cat > $SUPERVISOR_CONF <<EOF
 [program:hear-ai]
-command=python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+command=python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 directory=$WORKSPACE
 autostart=true
 autorestart=true
 startretries=999
+startsecs=20
+stopasgroup=true
+killasgroup=true
+stopsignal=TERM
+environment=PYTHONUNBUFFERED=1,GIT_PYTHON_REFRESH=quiet
 stderr_logfile=$LOG_ERR
 stdout_logfile=$LOG_OUT
 EOF
@@ -72,4 +77,17 @@ echo -e "${CYAN}${BOLD}║  🛑 Stop:    make stop                   ║${RESET
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-exec supervisord -n
+if pgrep -x supervisord >/dev/null 2>&1; then
+  supervisorctl reread >/dev/null 2>&1 || true
+  supervisorctl update >/dev/null 2>&1 || true
+  supervisorctl restart hear-ai >/dev/null 2>&1 || supervisorctl start hear-ai >/dev/null 2>&1
+  echo -e "${GREEN}✓ Reused existing supervisord and (re)started hear-ai${RESET}"
+  exit 0
+fi
+
+supervisord
+sleep 1
+supervisorctl reread >/dev/null 2>&1 || true
+supervisorctl update >/dev/null 2>&1 || true
+supervisorctl start hear-ai >/dev/null 2>&1 || true
+echo -e "${GREEN}✓ supervisord started in daemon mode${RESET}"

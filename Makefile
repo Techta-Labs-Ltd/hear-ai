@@ -9,8 +9,8 @@ boot:
 
 start:
 	mkdir -p $(WORKSPACE)/logs
-	nohup bash $(WORKSPACE)/start.sh > $(WORKSPACE)/logs/bootstrap.log 2>&1 &
-	@echo "Booting in background — run 'make bootstrap-logs' to watch install progress"
+	bash $(WORKSPACE)/start.sh > $(WORKSPACE)/logs/bootstrap.log 2>&1
+	@echo "Boot complete — run 'make status' or 'make logs'"
 
 bootstrap-logs:
 	tail -f $(WORKSPACE)/logs/bootstrap.log
