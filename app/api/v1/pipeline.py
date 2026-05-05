@@ -15,7 +15,7 @@ from app.services.registry import worker, synthesizer
 from app.services.callback import callback_service
 
 router = APIRouter(tags=["Pipeline"])
-ALLOWED_JOB_TYPES = {"pipeline", "rebuild", "transcription", "categorization"}
+ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "rebuild", "transcription", "categorization"}
 
 # 
 @router.post(
