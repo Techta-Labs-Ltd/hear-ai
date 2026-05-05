@@ -86,7 +86,7 @@ class CategorizationService:
 
         if combined_custom:
             for tag in combined_custom:
-                category_loader.add_tag(tag)
+                category_loader.add_tag(self._normalize_tag(tag))
 
         data = category_loader.data
         loop = asyncio.get_event_loop()
@@ -127,7 +127,7 @@ class CategorizationService:
                     tag_pool,
                     layer1["scores"],
                 )
-                tags = llm_result["tags"]
+                tags = self._normalize_tags(llm_result["tags"])
                 categories = llm_result["categories"]
                 llm_sentiment = llm_result["sentiment"]
 
@@ -135,28 +135,29 @@ class CategorizationService:
                 new_categories_added: list[str] = []
 
                 for tag in llm_result.get("new_tags", []):
-                    category_loader.add_tag(tag)
-                    new_tags_added.append(tag)
+                    normalised = self._normalize_tag(tag)
+                    if normalised and normalised not in new_tags_added:
+                        category_loader.add_tag(normalised)
+                        new_tags_added.append(normalised)
 
                 for cat in llm_result.get("new_categories", []):
                     category_loader.add_category(cat)
                     new_categories_added.append(cat)
 
                 for tag in tags:
-                    if tag not in data.tags and tag not in new_tags_added:
+                    if tag not in self._normalize_tags(data.tags) and tag not in new_tags_added:
                         category_loader.add_tag(tag)
                         new_tags_added.append(tag)
 
                 if platform.blocked_keywords:
-                    tags = [
-                        t for t in tags
-                        if not any(bk in t.lower() for bk in platform.blocked_keywords)
-                    ]
+                    tags = self._filter_blocked_tags(tags, platform.blocked_keywords)
+
+                confidence_scores = {t: 0.85 for t in tags}
 
                 return {
                     "tags": tags,
                     "categories": categories,
-                    "confidence_scores": {},
+                    "confidence_scores": confidence_scores,
                     "sentiment": llm_sentiment,
                     "new_tags_added": new_tags_added,
                     "new_categories_added": new_categories_added,
@@ -179,14 +180,11 @@ class CategorizationService:
             sentiment = await loop.run_in_executor(None, self._get_sentiment, transcript)
 
         merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
+        merged["tags"] = self._normalize_tags(merged["tags"])[:max_tags]
 
         new_tags_added = []
         for tag in merged["tags"]:
-            normalised = tag if tag.startswith("#") else f"#{tag}"
-            if normalised not in data.tags:
-                category_loader.add_tag(normalised)
-                new_tags_added.append(normalised)
-            elif tag not in data.tags:
+            if tag not in self._normalize_tags(data.tags):
                 category_loader.add_tag(tag)
                 new_tags_added.append(tag)
 
@@ -198,10 +196,7 @@ class CategorizationService:
                 new_categories_added.append(clean)
 
         if platform.blocked_keywords:
-            merged["tags"] = [
-                t for t in merged["tags"]
-                if not any(bk in t.lower() for bk in platform.blocked_keywords)
-            ]
+            merged["tags"] = self._filter_blocked_tags(merged["tags"], platform.blocked_keywords)
 
         return {
             "tags": merged["tags"],
@@ -269,7 +264,7 @@ class CategorizationService:
                             max_categories=2,
                         ),
                     )
-                    t_tags = llm_result.get("tags", [])
+                    t_tags = self._normalize_tags(llm_result.get("tags", []))
                     t_cats = llm_result.get("categories", [])
                     t_sent = llm_result.get("sentiment", "neutral")
 
@@ -279,7 +274,7 @@ class CategorizationService:
                         if tag not in all_tags:
                             all_tags.append(tag)
                             confidence_scores[tag] = 0.85
-                            if tag not in data.tags:
+                            if tag not in self._normalize_tags(data.tags):
                                 category_loader.add_tag(tag)
                                 new_tags_added.append(tag)
                     for cat in t_cats:
@@ -303,7 +298,7 @@ class CategorizationService:
             nli_merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
             t_sent = await loop.run_in_executor(None, self._get_sentiment, t_text)
 
-            t_tags = nli_merged.get("tags", [])
+            t_tags = self._normalize_tags(nli_merged.get("tags", []))
             t_cats = nli_merged.get("categories", [])
             per_track[track_id] = {"tags": t_tags, "categories": t_cats, "sentiment": t_sent}
 
@@ -319,11 +314,9 @@ class CategorizationService:
         # Apply blocked_keywords filter to global list AND per-track breakdown
         if platform.blocked_keywords:
             bk = platform.blocked_keywords
-            all_tags = [t for t in all_tags if not any(k in t.lower() for k in bk)]
+            all_tags = self._filter_blocked_tags(all_tags, bk)
             for tid in per_track:
-                per_track[tid]["tags"] = [
-                    t for t in per_track[tid]["tags"] if not any(k in t.lower() for k in bk)
-                ]
+                per_track[tid]["tags"] = self._filter_blocked_tags(per_track[tid]["tags"], bk)
 
         final_sentiment = (
             Counter(all_sentiments).most_common(1)[0][0]
@@ -346,6 +339,33 @@ class CategorizationService:
             "llm_used": llm_was_used,
             "per_track": per_track,
         }
+
+    def _normalize_tag(self, tag: str) -> str:
+        if not tag:
+            return ""
+        clean = str(tag).strip().lower()
+        clean = re.sub(r"\s+", "-", clean)
+        clean = clean.lstrip("#")
+        clean = re.sub(r"[^a-z0-9_\-]", "", clean)
+        if not clean:
+            return ""
+        return f"#{clean}"
+
+    def _normalize_tags(self, tags: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for tag in tags or []:
+            normalised = self._normalize_tag(tag)
+            if normalised and normalised not in seen:
+                out.append(normalised)
+                seen.add(normalised)
+        return out
+
+    def _filter_blocked_tags(self, tags: list[str], blocked_keywords: list[str]) -> list[str]:
+        blocked = [b.lower().strip() for b in (blocked_keywords or []) if b and b.strip()]
+        if not blocked:
+            return tags
+        return [t for t in tags if not any(bk in t.lower() for bk in blocked)]
 
     # ------------------------------------------------------------------
 

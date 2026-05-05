@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import re
 
 import torch
 from transformers import pipeline as hf_pipeline
 
+from app.config import settings
 from app.core.keyword_loader import harm_keyword_loader
 from app.services.llm_service import llm_service
 
@@ -135,7 +137,7 @@ class ModerationService:
         text_lower = text.lower()
         all_keywords = harm_keyword_loader.all_keywords
 
-        built_in_hits = [kw for kw in all_keywords if kw in text_lower]
+        built_in_hits = [kw for kw in all_keywords if self._contains_keyword(text_lower, kw)]
         if built_in_hits:
             return {
                 "flagged": True,
@@ -175,7 +177,7 @@ class ModerationService:
                             is_borderline=True,
                         ),
                     )
-                    if result["flagged"] and result["intent"] == "harmful":
+                    if result["flagged"] and result["intent"] == "harmful" and self._should_auto_learn():
                         self._learn_phrases(text)
                     return result
                 except Exception as exc:
@@ -190,7 +192,7 @@ class ModerationService:
             reason = self._build_reason(local_result, intent_result, keyword_hits, intent, severity)
             if flagged and intent == "harmful":
                 nli_scores = intent_result.get("scores", {})
-                if max((nli_scores.get(l, 0) for l in HARMFUL_INTENT_LABELS), default=0) >= 0.70:
+                if max((nli_scores.get(l, 0) for l in HARMFUL_INTENT_LABELS), default=0) >= 0.70 and self._should_auto_learn():
                     self._learn_phrases(text)
             return {
                 "flagged": flagged,
@@ -215,7 +217,7 @@ class ModerationService:
                 )
                 result["severity"] = severity
                 result["flagged"] = True
-                if result["intent"] != "safe":
+                if result["intent"] != "safe" and self._should_auto_learn():
                     self._learn_phrases(text)
                 return result
             except Exception as exc:
@@ -223,7 +225,8 @@ class ModerationService:
                     "[MODERATION] Qwen failed on high-score (%.2f) (%s) — using toxic-bert result",
                     max_score, exc,
                 )
-        self._learn_phrases(text)
+        if self._should_auto_learn():
+            self._learn_phrases(text)
         return {
             "flagged": True,
             "severity": severity,
@@ -317,7 +320,17 @@ class ModerationService:
         if not blocked_keywords:
             return []
         text_lower = text.lower()
-        return [kw for kw in blocked_keywords if kw.lower() in text_lower]
+        return [kw for kw in blocked_keywords if self._contains_keyword(text_lower, kw)]
+
+    def _contains_keyword(self, text_lower: str, keyword: str) -> bool:
+        kw = keyword.lower().strip()
+        if not kw:
+            return False
+        pattern = rf"(?<!\w){re.escape(kw)}(?!\w)"
+        return re.search(pattern, text_lower) is not None
+
+    def _should_auto_learn(self) -> bool:
+        return bool(settings.MODERATION_AUTO_LEARN)
 
     def _compute_severity(self, local_result: dict, intent_result: dict) -> str:
         intent = intent_result.get("intent", "safe")
