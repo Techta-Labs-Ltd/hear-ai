@@ -151,6 +151,7 @@ class CategorizationService:
 
                 if platform.blocked_keywords:
                     tags = self._filter_blocked_tags(tags, platform.blocked_keywords)
+                tags = self._ensure_non_empty_tags(tags, categories, transcript, max_tags)
 
                 confidence_scores = {t: 0.85 for t in tags}
 
@@ -197,6 +198,7 @@ class CategorizationService:
 
         if platform.blocked_keywords:
             merged["tags"] = self._filter_blocked_tags(merged["tags"], platform.blocked_keywords)
+        merged["tags"] = self._ensure_non_empty_tags(merged["tags"], merged["categories"], transcript, max_tags)
 
         return {
             "tags": merged["tags"],
@@ -317,6 +319,7 @@ class CategorizationService:
             all_tags = self._filter_blocked_tags(all_tags, bk)
             for tid in per_track:
                 per_track[tid]["tags"] = self._filter_blocked_tags(per_track[tid]["tags"], bk)
+        all_tags = self._ensure_non_empty_tags(all_tags, all_categories, " ".join(track_texts.values()), max_tags)
 
         final_sentiment = (
             Counter(all_sentiments).most_common(1)[0][0]
@@ -366,6 +369,19 @@ class CategorizationService:
         if not blocked:
             return tags
         return [t for t in tags if not any(bk in t.lower() for bk in blocked)]
+
+    def _ensure_non_empty_tags(self, tags: list[str], categories: list[str], transcript: str, max_tags: int) -> list[str]:
+        normalised = self._normalize_tags(tags)
+        if normalised:
+            return normalised[:max_tags]
+        category_tags = [self._normalize_tag(c) for c in categories if c]
+        category_tags = [t for t in category_tags if t]
+        if category_tags:
+            return self._normalize_tags(category_tags)[:max_tags]
+        words = [w for w in re.findall(r"[a-zA-Z]{4,}", transcript.lower()) if w not in _STOPWORDS]
+        if words:
+            return self._normalize_tags([words[0]])[:max_tags]
+        return []
 
     # ------------------------------------------------------------------
 

@@ -48,9 +48,9 @@ class TranscriptionService:
         ".", "..", "...", "[music]", "[applause]", "[laughter]",
         "[noise]", "[silence]", "[inaudible]", "[blank_audio]",
     }
-    _MIN_WORD_CONFIDENCE = 0.40
-    _MIN_TRANSCRIPT_CONFIDENCE = 0.45
-    _MIN_REAL_WORDS = 3
+    _MIN_WORD_CONFIDENCE = 0.20
+    _MIN_TRANSCRIPT_CONFIDENCE = 0.30
+    _MIN_REAL_WORDS = 2
 
     def _run(self, path: str) -> dict:
         _silent = {
@@ -58,16 +58,39 @@ class TranscriptionService:
             "language_probability": 0.0, "duration": 0.0,
             "confidence": 0.0, "silent": True,
         }
+        strict = self._run_pass(path, relaxed=False)
+        if not strict.get("silent"):
+            word_count = len(strict.get("transcript", "").split())
+            if word_count >= 40:
+                return strict
+        relaxed = self._run_pass(path, relaxed=True)
+        if relaxed.get("silent"):
+            return strict
+        strict_words = len(strict.get("transcript", "").split()) if not strict.get("silent") else 0
+        relaxed_words = len(relaxed.get("transcript", "").split())
+        if relaxed_words > strict_words:
+            return relaxed
+        return strict if not strict.get("silent") else relaxed
+
+    def _run_pass(self, path: str, relaxed: bool) -> dict:
+        _silent = {
+            "transcript": "", "segments": [], "language": None,
+            "language_probability": 0.0, "duration": 0.0,
+            "confidence": 0.0, "silent": True,
+        }
         try:
-            segments_gen, info = self._model.transcribe(
-                path,
-                beam_size=5,
-                language=None,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=400, speech_pad_ms=200),
-                word_timestamps=True,
-                condition_on_previous_text=False,
-            )
+            kwargs = {
+                "beam_size": 5,
+                "language": None,
+                "word_timestamps": True,
+                "condition_on_previous_text": False,
+            }
+            if relaxed:
+                kwargs["vad_filter"] = False
+            else:
+                kwargs["vad_filter"] = True
+                kwargs["vad_parameters"] = dict(min_silence_duration_ms=400, speech_pad_ms=200)
+            segments_gen, info = self._model.transcribe(path, **kwargs)
         except ValueError:
             return _silent
 
@@ -75,30 +98,30 @@ class TranscriptionService:
         full_text_parts = []
         total_conf = 0.0
         word_count = 0
+        min_word_conf = 0.05 if relaxed else self._MIN_WORD_CONFIDENCE
 
         for seg in segments_gen:
-            # Skip segments Whisper itself flagged as likely no-speech
-            if getattr(seg, "no_speech_prob", 0) > 0.6:
+            if not relaxed and getattr(seg, "no_speech_prob", 0) > 0.6:
                 continue
-
             text = seg.text.strip()
             if not text or all(c in " \t\n.,-!?;:" for c in text):
                 continue
-
             words = []
             for w in (seg.words or []):
                 word_text = w.word.strip()
                 if not word_text:
                     continue
-                if w.probability < self._MIN_WORD_CONFIDENCE:
+                if w.probability < min_word_conf:
                     continue
                 words.append({"word": w.word, "start": w.start, "end": w.end, "prob": w.probability})
                 total_conf += w.probability
                 word_count += 1
-
+            if not words and relaxed:
+                words = [{"word": text, "start": seg.start, "end": seg.end, "prob": max(float(getattr(seg, "avg_logprob", -1.0)) + 1.0, 0.1)}]
+                total_conf += words[0]["prob"]
+                word_count += 1
             if not words:
                 continue
-
             segments.append({
                 "id": seg.id,
                 "start": seg.start,
@@ -113,23 +136,13 @@ class TranscriptionService:
 
         transcript = " ".join(full_text_parts)
         confidence = round(total_conf / max(word_count, 1), 4)
-
-        # Check for known Whisper hallucination phrases
         normalized = transcript.strip().lower().rstrip(".,!?")
         if normalized in self._HALLUCINATION_PHRASES:
-            print(f"[TRANSCRIBER] Hallucination detected: {transcript!r} — marking silent")
             return _silent
-
-        # Discard if overall confidence is too low (noise/fan produces low-conf words)
-        if confidence < self._MIN_TRANSCRIPT_CONFIDENCE:
-            print(f"[TRANSCRIBER] Low confidence transcript ({confidence:.2f}): {transcript!r} — marking silent")
+        if not relaxed and confidence < self._MIN_TRANSCRIPT_CONFIDENCE:
             return _silent
-
-        # Discard if too few real words survived the confidence filter
-        if word_count < self._MIN_REAL_WORDS:
-            print(f"[TRANSCRIBER] Too few confident words ({word_count}): {transcript!r} — marking silent")
+        if not relaxed and word_count < self._MIN_REAL_WORDS:
             return _silent
-
         return {
             "transcript": transcript,
             "segments": segments,
