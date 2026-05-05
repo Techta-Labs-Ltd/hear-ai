@@ -299,6 +299,8 @@ class PipelineWorker:
                 raise ValueError("track_id is required")
 
             track = await self._fetch_track_with_retry(track_id)
+            if not track.audio_url:
+                raise ValueError(f"Track {track.track_id} has no audio_url")
             platform = await fetch_platform_settings()
 
             transcript_data = None

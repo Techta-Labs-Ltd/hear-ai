@@ -38,9 +38,9 @@ async def fetch_track(track_id: str) -> TrackData:
         data = response.json()
 
     return TrackData(
-        track_id=data["id"],
-        audio_url=data["audio_url"],
-        name=data.get("name", ""),
+        track_id=data.get("id", track_id),
+        audio_url=data.get("audio_url") or "",
+        name=data.get("name") or "",
         volume=data.get("volume", 1.0),
         is_muted=data.get("is_muted", False),
         sort_order=data.get("sort_order", 0),

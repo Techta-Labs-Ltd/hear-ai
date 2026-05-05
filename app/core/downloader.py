@@ -26,6 +26,8 @@ _CONTENT_TYPE_TO_EXT = {
 
 
 def _ensure_https(url: str) -> str:
+    if not url or not isinstance(url, str):
+        raise ValueError("audio_url is missing or invalid")
     if url.startswith("http://"):
         return "https://" + url[7:]
     return url
