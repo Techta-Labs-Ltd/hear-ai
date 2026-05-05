@@ -91,9 +91,10 @@ async def test_backend_connectivity(client: httpx.AsyncClient):
         )
         if r.status_code == 200:
             data = r.json()
-            log("pass", f"Track fetched: '{data.get('name')}'")
-            log("pass", f"Track id: {data.get('id')}")
-            log("pass", f"is_enhanced={data.get('is_enhanced')} transcription={'set' if data.get('transcription') else 'null'}")
+            track = _extract_track_payload(data, TEST_TRACK_ID)
+            log("pass", f"Track fetched: '{track.get('name')}'")
+            log("pass", f"Track id: {track.get('id')}")
+            log("pass", f"audio_url={'set' if track.get('audio_url') else 'null'} is_enhanced={track.get('is_enhanced')} transcription={'set' if track.get('transcription') else 'null'}")
         elif r.status_code == 401:
             log("fail", "Backend auth rejected — check AI_SERVICE_SECRET matches backend")
         elif r.status_code == 404:
@@ -104,6 +105,21 @@ async def test_backend_connectivity(client: httpx.AsyncClient):
         log("fail", f"Cannot reach backend at {BACKEND_URL} — check HEAR_BACKEND_URL")
     except Exception as e:
         log("fail", "Backend connectivity", str(e))
+
+
+def _extract_track_payload(data: dict, requested_track_id: str) -> dict:
+    if isinstance(data.get("tracks"), list):
+        tracks = [t for t in data["tracks"] if isinstance(t, dict)]
+        for t in tracks:
+            if t.get("id") == requested_track_id:
+                return t
+        payload_track_id = data.get("track_id")
+        if isinstance(payload_track_id, str):
+            for t in tracks:
+                if t.get("id") == payload_track_id:
+                    return t
+        raise ValueError(f"Requested track_id {requested_track_id} missing in backend response")
+    return data
 
 
 async def test_pipeline_submit(client: httpx.AsyncClient):

@@ -37,21 +37,39 @@ async def fetch_track(track_id: str) -> TrackData:
         response.raise_for_status()
         data = response.json()
 
+    track_payload = _resolve_track_payload(data, track_id)
+
     return TrackData(
-        track_id=data.get("id", track_id),
-        audio_url=data.get("audio_url") or "",
-        name=data.get("name") or "",
-        volume=data.get("volume", 1.0),
-        is_muted=data.get("is_muted", False),
-        sort_order=data.get("sort_order", 0),
-        duration=data.get("duration", 0),
-        is_enhanced=data.get("is_enhanced", False),
-        has_transcription=data.get("transcription") is not None,
-        status=data.get("status", "pending"),
-        quality_score=data.get("quality_score"),
-        snr_db=data.get("snr_db"),
-        transcription=data.get("transcription"),
-        category=data.get("category"),
-        tags=data.get("tags", []),
-        flag=data.get("flag"),
+        track_id=track_payload.get("id", track_id),
+        audio_url=track_payload.get("audio_url") or "",
+        name=track_payload.get("name") or "",
+        volume=track_payload.get("volume", 1.0),
+        is_muted=track_payload.get("is_muted", False),
+        sort_order=track_payload.get("sort_order", 0),
+        duration=track_payload.get("duration", 0),
+        is_enhanced=track_payload.get("is_enhanced", False),
+        has_transcription=track_payload.get("transcription") is not None,
+        status=track_payload.get("status", "pending"),
+        quality_score=track_payload.get("quality_score"),
+        snr_db=track_payload.get("snr_db"),
+        transcription=track_payload.get("transcription"),
+        category=track_payload.get("category"),
+        tags=track_payload.get("tags", []),
+        flag=track_payload.get("flag"),
     )
+
+
+def _resolve_track_payload(data: dict, requested_track_id: str) -> dict:
+    if isinstance(data.get("tracks"), list):
+        tracks = [t for t in data["tracks"] if isinstance(t, dict)]
+        for track in tracks:
+            if track.get("id") == requested_track_id:
+                return track
+        if isinstance(data.get("track_id"), str):
+            for track in tracks:
+                if track.get("id") == data["track_id"]:
+                    return track
+        raise ValueError(
+            f"Requested track_id {requested_track_id} not found in backend payload tracks"
+        )
+    return data if isinstance(data, dict) else {}
