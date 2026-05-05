@@ -15,7 +15,13 @@ from app.services.registry import worker, synthesizer
 from app.services.callback import callback_service
 
 router = APIRouter(tags=["Pipeline"])
-ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "rebuild", "transcription", "categorization"}
+ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "magic_clean", "rebuild", "transcription", "categorization"}
+
+
+def _normalize_pipeline_job_type(job_type: str) -> str:
+    if job_type == "magic-clean":
+        return "magic_clean"
+    return job_type
 
 # 
 @router.post(
@@ -26,16 +32,17 @@ ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "rebuild", "transcription", "cat
     description="Enqueues a track-first job for transcription, moderation, and categorization.",
 )
 async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_service_key)):
+    normalized_job_type = _normalize_pipeline_job_type(body.job_type)
     if body.job_type not in ALLOWED_JOB_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported job_type: {body.job_type}")
-    if body.job_type == "rebuild" and not (body.edited_transcript or "").strip():
+    if normalized_job_type == "rebuild" and not (body.edited_transcript or "").strip():
         raise HTTPException(status_code=422, detail="edited_transcript is required for rebuild")
     run_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
         if existing:
-            if existing.status in ("queued", "running") and existing.job_type == body.job_type:
+            if existing.status in ("queued", "running") and existing.job_type == normalized_job_type:
                 return JobAccepted(job_id=body.job_id)
             existing.run_id = run_id
             existing.status = "queued"
@@ -46,7 +53,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
             existing.error = None
             existing.result_json = None
             existing.callback_delivered = False
-            existing.job_type = body.job_type
+            existing.job_type = normalized_job_type
             existing.max_tags = body.max_tags
             existing.track_id = body.track_id
             existing.edited_transcript = body.edited_transcript
@@ -57,7 +64,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
         job = AiJob(
             id=body.job_id,
             run_id=run_id,
-            job_type=body.job_type,
+            job_type=normalized_job_type,
             track_id=body.track_id,
             edited_transcript=body.edited_transcript,
             status="queued",
@@ -88,6 +95,7 @@ async def process_realtime(
     body: RealtimeRequest,
     _auth: bool = Security(verify_service_key),
 ):
+    normalized_job_type = _normalize_pipeline_job_type(body.job_type)
     if body.job_type not in ALLOWED_JOB_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported job_type: {body.job_type}")
     run_id = str(uuid.uuid4())
@@ -95,7 +103,7 @@ async def process_realtime(
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
         if existing:
-            if existing.status in ("queued", "running") and existing.job_type == body.job_type:
+            if existing.status in ("queued", "running") and existing.job_type == normalized_job_type:
                 return {
                     "job_id": body.job_id,
                     "run_id": existing.run_id,
@@ -112,7 +120,7 @@ async def process_realtime(
             existing.error = None
             existing.result_json = None
             existing.callback_delivered = False
-            existing.job_type = body.job_type
+            existing.job_type = normalized_job_type
             existing.max_tags = body.max_tags
             existing.track_id = body.track_id
             db.commit()
@@ -120,7 +128,7 @@ async def process_realtime(
             job = AiJob(
                 id=body.job_id,
                 run_id=run_id,
-                job_type=body.job_type,
+                job_type=normalized_job_type,
                 track_id=body.track_id,
                 status="queued",
                 callback_url=settings.HEAR_CALLBACK_URL or None,
