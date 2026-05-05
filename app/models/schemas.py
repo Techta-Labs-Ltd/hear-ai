@@ -5,37 +5,46 @@ from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
-    PENDING = "pending"
-    ENHANCING = "enhancing"
-    TRANSCRIBING = "transcribing"
-    CATEGORIZING = "categorizing"
-    MODERATING = "moderating"
+    QUEUED = "queued"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class PipelineRequest(BaseModel):
-    recording_id: str
     job_id: str
+    track_id: str
     job_type: str = "pipeline"
     max_tags: int = 8
+    edited_transcript: Optional[str] = None
+    grouped: bool = False
+    group_id: Optional[str] = None
+    kind: str = "track"
+    source: Optional[str] = None
+    track_count: int = 1
 
 
 class RealtimeRequest(BaseModel):
-    recording_id: str
     job_id: str
+    track_id: str
     job_type: str = "pipeline"
     max_tags: int = 8
+    grouped: bool = False
+    group_id: Optional[str] = None
+    kind: str = "track"
+    source: Optional[str] = None
+    track_count: int = 1
 
 
 class TranscribeRequest(BaseModel):
     job_id: str
-    recording_id: str
+    track_id: str
 
 
 class EnhanceRequest(BaseModel):
     job_id: str
-    recording_id: str
+    track_id: str
 
 
 class CategorizeRequest(BaseModel):
@@ -50,7 +59,7 @@ class ModerateRequest(BaseModel):
 
 class ReconstructRequest(BaseModel):
     audio_url: str
-    recording_id: str
+    track_id: str
     segment_start: float
     segment_end: float
     new_text: str

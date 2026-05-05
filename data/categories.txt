@@ -420,6 +420,9 @@ Archives
 Genealogy
 Folklore
 Mythology
+Women's Sports
+Baking
+Performing Arts
 
 [TAGS]
 #BreakingNews
@@ -1016,6 +1019,43 @@ Mythology
 #Scooter
 #Motorcycle
 #Truck
+#WomensSports
+#WomenFootball
+#WomenSoccer
+#WSL
+#NWSL
+#WNBA
+#Arsenal
+#Chelsea
+#Liverpool
+#Manchester
+#Tottenham
+#WestHam
+#Baking
+#Dessert
+#Cake
+#Bread
+#Pastry
+#Ingredients
+#Kitchen
+#Song
+#Artist
+#Band
+#Lyrics
+#Singer
+#LiveMusic
+#MusicVideo
+#Rap
+#Pop
+#Vocals
+#Instrument
+#Interview
+#Discussion
+#Opinion
+#Analysis
+#Review
+#Tutorial
+#Explainer
 
 [KEYWORDS]
 election|vote|voting|council|parliament|government|minister|MP|mayor|political|party|referendum|ballot|constituency|legislation|senator|congress|president|governor|primary|caucus|swing.state|gerrymandering|filibuster|bipartisan|lobby = #Politics
@@ -1060,3 +1100,7 @@ real.estate|property|house|condo|apartment|commercial|residential|REITs|mortgage
 lion|tiger|elephant|rhino|rhinoceros|giraffe|zebra|cheetah|leopard|gorilla|chimpanzee|orangutan|monkey|wolf|bear|grizzly|polar.bear|deer|fox|rabbit|hawk|eagle|owl|parrot|falcon|vulture|flamingo|pelican|crocodile|alligator|snake|python|lizard|chameleon|turtle|tortoise|frog|salamander|dolphin|whale|orca|shark|penguin|seal|walrus|koala|kangaroo|wallaby|wombat|panda|jaguar|cougar|lynx|bison|buffalo|moose|elk|antelope|gazelle|wildebeest|hyena|meerkat|mongoose|otter|beaver|badger|squirrel|chipmunk|hedgehog|bat|hummingbird|woodpecker|safari|savanna|jungle|rainforest|habitat|migration|predator|prey|endangered|extinction|poaching|sanctuary|reserve|national.park|wildlife = #Wildlife
 nature|wilderness|forest|woodland|meadow|wetland|marsh|swamp|tundra|prairie|grassland|countryside|flora|fauna|ecosystem|landscape|scenery|birdsong|natural.world|wild|outdoor|expedition = #Nature
 animal|pet|dog|cat|puppy|kitten|horse|sheep|cow|pig|chicken|goat|duck|rabbit|hamster|guinea.pig|parrot|goldfish|aquarium|zoo|farm.animal|livestock|breed|species|creature|mammal|reptile|bird|amphibian|insect|bug|butterfly|moth|bee|ant|spider = #Animals
+music|song|lyrics|melody|rhythm|singer|vocalist|band|artist|genre|beat|chorus|verse|hook|singing|sang|vocal|instrument|guitar|piano|drums|bass|violin|saxophone|trumpet|guitar.riff|music.video|single|EP|record.label|music.festival|live.performance = #Music
+baking|bake|pastry|marzipan|dough|knead|preheat|tablespoon|teaspoon|grease|tin|batter|whisk|simnel|sultana|currant|rolling.pin|cake.tin|self-raising|icing|frosting|ganache|crumble|sponge|tart|shortcrust = #Baking
+WSL|NWSL|WNBA|women's.super.league|women.super.league|women's.football|women's.soccer|women's.league|women.athletes|female.athletes|women.sports|ladies.football|ladies.soccer|women.champions.league = #WomensSports
+arsenal|chelsea|liverpool|manchester.united|manchester.city|tottenham|west.ham|everton|newcastle|aston.villa|brentford|crystal.palace|fulham|brighton|burnley|luton|sheffield.united|leicester|nottingham = #PremierLeague

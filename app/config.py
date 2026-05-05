@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     HEAR_CALLBACK_URL: str = ""
     WHISPER_MODEL_SIZE: str = "large-v3"
     MAX_CONCURRENT_GPU_JOBS: int = 2
+    MAX_CONCURRENT_JOBS: int = 8
+    MAX_CONCURRENT_PIPELINE_JOBS: int = 1
+    MAX_CONCURRENT_MAGIC_CLEAN_JOBS: int = 3
     SQLITE_DB_PATH: str = "./data/jobs.db"
 
     B2_KEY_ID: str = ""
@@ -23,6 +26,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-4o-mini"
+    HIGGS_AUDIO_ENABLED: bool = True
+    HIGGS_AUDIO_VOICE: str = "en_us_001"
 
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.3

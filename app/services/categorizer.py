@@ -131,14 +131,22 @@ class CategorizationService:
                 categories = llm_result["categories"]
                 llm_sentiment = llm_result["sentiment"]
 
-                # Persist any tags Llama returned that aren't in the loader yet
                 new_tags_added: list[str] = []
+                new_categories_added: list[str] = []
+
+                for tag in llm_result.get("new_tags", []):
+                    category_loader.add_tag(tag)
+                    new_tags_added.append(tag)
+
+                for cat in llm_result.get("new_categories", []):
+                    category_loader.add_category(cat)
+                    new_categories_added.append(cat)
+
                 for tag in tags:
-                    if tag not in data.tags:
+                    if tag not in data.tags and tag not in new_tags_added:
                         category_loader.add_tag(tag)
                         new_tags_added.append(tag)
 
-                # Block platform-restricted keywords
                 if platform.blocked_keywords:
                     tags = [
                         t for t in tags
@@ -151,7 +159,7 @@ class CategorizationService:
                     "confidence_scores": {},
                     "sentiment": llm_sentiment,
                     "new_tags_added": new_tags_added,
-                    "new_categories_added": [],
+                    "new_categories_added": new_categories_added,
                     "settings_applied": settings_applied,
                     "llm_used": True,
                 }

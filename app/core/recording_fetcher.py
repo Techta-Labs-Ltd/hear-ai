@@ -19,26 +19,16 @@ class TrackData:
     status: str = "pending"
     quality_score: float | None = None
     snr_db: float | None = None
-
-
-@dataclass
-class RecordingData:
-    recording_id: str
-    title: str
-    audio_url: str
-    tracks: list[TrackData]
-    flag: str | None = None
+    transcription: str | None = None
     category: str | None = None
-    status: str = "draft"
-    tags: list = None
+    tags: list | None = None
+    flag: dict | None = None
 
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
-
-
-async def fetch_recording(recording_id: str) -> RecordingData:
-    url = f"{settings.HEAR_BACKEND_URL}/api/v1/internal/recordings/{recording_id}"
+async def fetch_track(track_id: str) -> TrackData:
+    url = f"{settings.HEAR_BACKEND_URL}/api/v1/internal/tracks/{track_id}/for-ai"
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.get(
             url,
@@ -47,32 +37,21 @@ async def fetch_recording(recording_id: str) -> RecordingData:
         response.raise_for_status()
         data = response.json()
 
-    tracks = []
-    for t in data.get("tracks", []):
-        tracks.append(TrackData(
-            track_id=t["id"],
-            audio_url=t["audio_url"],
-            name=t.get("name", ""),
-            volume=t.get("volume", 1.0),
-            is_muted=t.get("is_muted", False),
-            sort_order=t.get("sort_order", 0),
-            duration=t.get("duration", 0),
-            is_enhanced=t.get("is_enhanced", False),
-            has_transcription=t.get("transcription") is not None,
-            status=t.get("status", "pending"),
-            quality_score=t.get("quality_score"),
-            snr_db=t.get("snr_db"),
-        ))
-
-    tracks.sort(key=lambda t: t.sort_order)
-
-    return RecordingData(
-        recording_id=data["id"],
-        title=data.get("title", ""),
-        audio_url=data.get("audio_url", ""),
-        tracks=tracks,
-        flag=data.get("flag"),
+    return TrackData(
+        track_id=data["id"],
+        audio_url=data["audio_url"],
+        name=data.get("name", ""),
+        volume=data.get("volume", 1.0),
+        is_muted=data.get("is_muted", False),
+        sort_order=data.get("sort_order", 0),
+        duration=data.get("duration", 0),
+        is_enhanced=data.get("is_enhanced", False),
+        has_transcription=data.get("transcription") is not None,
+        status=data.get("status", "pending"),
+        quality_score=data.get("quality_score"),
+        snr_db=data.get("snr_db"),
+        transcription=data.get("transcription"),
         category=data.get("category"),
-        status=data.get("status", "draft"),
         tags=data.get("tags", []),
+        flag=data.get("flag"),
     )

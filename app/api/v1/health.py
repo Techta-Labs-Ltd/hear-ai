@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+import importlib.util
 
 from app.api.auth import verify_service_key
 from app.core.gpu import gpu
@@ -24,6 +25,8 @@ async def health():
         models_loaded.append("categorizer")
     if moderator.is_loaded:
         models_loaded.append("moderator")
+    if importlib.util.find_spec("higgs_audio") is not None:
+        models_loaded.append("higgs_audio")
 
     return HealthResponse(
         status="healthy",

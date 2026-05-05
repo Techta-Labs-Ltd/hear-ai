@@ -16,8 +16,7 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-# Defaults — override at runtime via --recording-id / --track-id
-TEST_RECORDING_ID = "1a62143c-2fb3-4d8f-af4b-22f3e80306e1"
+# Defaults — override at runtime via --track-id
 TEST_TRACK_ID     = "bb2ef282-2e22-4406-bfb8-31a9921ed7ef"
 
 PASS = "\033[92m✓\033[0m"
@@ -84,23 +83,21 @@ async def test_auth(client: httpx.AsyncClient):
 
 
 async def test_backend_connectivity(client: httpx.AsyncClient):
-    print("\n[3/9] Backend Connectivity & Recording Fetch")
+    print("\n[3/9] Backend Connectivity & Track Fetch")
     try:
         r = await client.get(
-            f"{BACKEND_URL}/api/v1/internal/recordings/{TEST_RECORDING_ID}",
+            f"{BACKEND_URL}/api/v1/internal/tracks/{TEST_TRACK_ID}/for-ai",
             headers=HEADERS,
         )
         if r.status_code == 200:
             data = r.json()
-            log("pass", f"Recording fetched: '{data.get('title')}'")
-            tracks = data.get("tracks", [])
-            log("pass" if tracks else "warn", f"Tracks: {len(tracks)}")
-            for t in tracks:
-                log("pass", f"  track={t['id'][:8]} is_enhanced={t.get('is_enhanced')} transcription={'set' if t.get('transcription') else 'null'}")
+            log("pass", f"Track fetched: '{data.get('name')}'")
+            log("pass", f"Track id: {data.get('id')}")
+            log("pass", f"is_enhanced={data.get('is_enhanced')} transcription={'set' if data.get('transcription') else 'null'}")
         elif r.status_code == 401:
             log("fail", "Backend auth rejected — check AI_SERVICE_SECRET matches backend")
         elif r.status_code == 404:
-            log("fail", "Recording not found — check TEST_RECORDING_ID")
+            log("fail", "Track not found — check TEST_TRACK_ID")
         else:
             log("fail", f"Backend returned {r.status_code}: {r.text[:200]}")
     except httpx.ConnectError:
@@ -118,7 +115,7 @@ async def test_pipeline_submit(client: httpx.AsyncClient):
             headers=HEADERS,
             json={
                 "job_id": job_id,
-                "recording_id": TEST_RECORDING_ID,
+                "track_id": TEST_TRACK_ID,
                 "job_type": "pipeline",
                 "max_tags": 5,
             },
@@ -168,18 +165,13 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
 
                 transcript = None
                 if result:
-                    tracks = result.get("tracks", {})
-                    log("pass" if tracks else "warn", f"Tracks processed: {len(tracks)}")
-
-                    for track_id, track_data in tracks.items():
-                        t = track_data.get("transcription", {})
-                        if t and t.get("transcript"):
-                            transcript = t["transcript"]
-                            words = len(transcript.split())
-                            lang = t.get("language", "?")
-                            log("pass", f"Transcription — {words} words, lang={lang}")
-                            print(f"\n  --- TRANSCRIPT ---\n{transcript}\n  ------------------\n")
-                            break
+                    t = result.get("transcription", {})
+                    if t and t.get("transcript"):
+                        transcript = t["transcript"]
+                        words = len(transcript.split())
+                        lang = t.get("language", "?")
+                        log("pass", f"Transcription — {words} words, lang={lang}")
+                        print(f"\n  --- TRANSCRIPT ---\n{transcript}\n  ------------------\n")
 
                     if not transcript:
                         log("warn", "No transcription text found in result")
@@ -282,7 +274,7 @@ async def test_idempotency(client: httpx.AsyncClient, job_id: str):
         r = await client.post(
             f"{BASE_URL}/api/v1/process",
             headers=HEADERS,
-            json={"job_id": job_id, "recording_id": TEST_RECORDING_ID, "job_type": "pipeline", "max_tags": 5},
+            json={"job_id": job_id, "track_id": TEST_TRACK_ID, "job_type": "pipeline", "max_tags": 5},
         )
         assert r.status_code == 202, f"Expected 202, got {r.status_code}: {r.text}"
         log("pass", "Resubmitting same job_id returns 202 (idempotent)")
@@ -301,7 +293,7 @@ async def test_edge_cases(client: httpx.AsyncClient):
         assert r.status_code == 422
         log("pass", "Missing required fields returns 422")
 
-        r = await client.post(f"{BASE_URL}/api/v1/process", headers=HEADERS, json={"recording_id": TEST_RECORDING_ID})
+        r = await client.post(f"{BASE_URL}/api/v1/process", headers=HEADERS, json={"track_id": TEST_TRACK_ID})
         assert r.status_code == 422
         log("pass", "Missing job_id returns 422")
     except Exception as e:
@@ -309,7 +301,7 @@ async def test_edge_cases(client: httpx.AsyncClient):
 
 
 async def main():
-    global BASE_URL, SERVICE_KEY, BACKEND_URL, HEADERS, TEST_RECORDING_ID, TEST_TRACK_ID
+    global BASE_URL, SERVICE_KEY, BACKEND_URL, HEADERS, TEST_TRACK_ID
 
     parser = argparse.ArgumentParser(
         prog="python -m tests.test_api",
@@ -328,10 +320,6 @@ async def main():
         help=f"Backend base URL (default: {BACKEND_URL})",
     )
     parser.add_argument(
-        "--recording-id", default=TEST_RECORDING_ID,
-        help=f"Recording UUID to test against (default: {TEST_RECORDING_ID})",
-    )
-    parser.add_argument(
         "--track-id", default=TEST_TRACK_ID,
         help=f"Track UUID to test against (default: {TEST_TRACK_ID})",
     )
@@ -341,7 +329,6 @@ async def main():
     BASE_URL          = args.url.rstrip("/")
     SERVICE_KEY       = args.key
     BACKEND_URL       = args.backend.rstrip("/")
-    TEST_RECORDING_ID = args.recording_id
     TEST_TRACK_ID     = args.track_id
     HEADERS["X-Service-Key"] = SERVICE_KEY
 
@@ -349,7 +336,6 @@ async def main():
     print("  Hear AI Service — Integration Tests")
     print(f"  AI Service:   {BASE_URL}")
     print(f"  Backend:      {BACKEND_URL}")
-    print(f"  Recording ID: {TEST_RECORDING_ID}")
     print(f"  Track ID:     {TEST_TRACK_ID}")
     print("=" * 60)
 

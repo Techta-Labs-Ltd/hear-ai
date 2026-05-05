@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+import uuid
 
 from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
 from sqlalchemy.exc import IntegrityError
@@ -7,30 +8,38 @@ from sqlalchemy.exc import IntegrityError
 from app.api.auth import verify_service_key
 from app.config import settings
 from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, JobAccepted
-from app.models.database import SessionLocal, AiJob
+from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.core.downloader import download_audio, cleanup_temp
 from app.realtime.broadcaster import manager, make_sse_response
-from app.services.registry import worker, orchestrator, synthesizer
+from app.services.registry import worker, synthesizer
 from app.services.callback import callback_service
 
 router = APIRouter(tags=["Pipeline"])
+ALLOWED_JOB_TYPES = {"pipeline", "rebuild", "transcription", "categorization"}
 
 # 
 @router.post(
     "/api/v1/process",
     response_model=JobAccepted,
     status_code=202,
-    summary="Submit a full pipeline job",
-    description="Enqueues a recording for processing. Returns immediately with a job ID.",
+    summary="Submit a track pipeline job",
+    description="Enqueues a track-first job for transcription, moderation, and categorization.",
 )
 async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_service_key)):
+    if body.job_type not in ALLOWED_JOB_TYPES:
+        raise HTTPException(status_code=422, detail=f"Unsupported job_type: {body.job_type}")
+    if body.job_type == "rebuild" and not (body.edited_transcript or "").strip():
+        raise HTTPException(status_code=422, detail="edited_transcript is required for rebuild")
+    run_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
         if existing:
-            if existing.status in ("pending", "enhancing", "transcribing", "categorizing", "moderating"):
+            if existing.status in ("queued", "running") and existing.job_type == body.job_type:
                 return JobAccepted(job_id=body.job_id)
-            existing.status = "pending"
+            existing.run_id = run_id
+            existing.status = "queued"
+            existing.current_stage = None
             existing.attempts = 0
             existing.started_at = None
             existing.completed_at = None
@@ -39,15 +48,19 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
             existing.callback_delivered = False
             existing.job_type = body.job_type
             existing.max_tags = body.max_tags
+            existing.track_id = body.track_id
+            existing.edited_transcript = body.edited_transcript
             db.commit()
-            worker.enqueue(body.job_id)
+            worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
 
         job = AiJob(
             id=body.job_id,
+            run_id=run_id,
             job_type=body.job_type,
-            recording_id=body.recording_id,
-            status="pending",
+            track_id=body.track_id,
+            edited_transcript=body.edited_transcript,
+            status="queued",
             callback_url=settings.HEAR_CALLBACK_URL or None,
             max_tags=body.max_tags,
             created_at=datetime.utcnow(),
@@ -56,50 +69,60 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
         db.commit()
     except IntegrityError:
         db.rollback()
-        worker.enqueue(body.job_id)
+        worker.enqueue(body.job_id, run_id=run_id)
         return JobAccepted(job_id=body.job_id)
     finally:
         db.close()
 
-    worker.enqueue(body.job_id)
+    worker.enqueue(body.job_id, run_id=run_id)
     return JobAccepted(job_id=body.job_id)
 
 
 @router.post(
     "/api/v1/process-realtime",
     status_code=202,
-    summary="Process a recording with real-time streaming",
-    description="Fetches the recording and all its tracks from the backend, streams progress via SSE/WebSocket, and POSTs the final result to the callback URL.",
+    summary="Process a track with real-time streaming",
+    description="Fetches a track from backend, streams stage progress via SSE/WebSocket, and posts final result to callback.",
 )
 async def process_realtime(
     body: RealtimeRequest,
     _auth: bool = Security(verify_service_key),
 ):
+    if body.job_type not in ALLOWED_JOB_TYPES:
+        raise HTTPException(status_code=422, detail=f"Unsupported job_type: {body.job_type}")
+    run_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
         if existing:
-            if existing.status not in ("completed", "failed", "cancelled"):
+            if existing.status in ("queued", "running") and existing.job_type == body.job_type:
                 return {
                     "job_id": body.job_id,
-                    "recording_id": body.recording_id,
+                    "run_id": existing.run_id,
+                    "track_id": existing.track_id,
                     "sse_url": f"/api/v1/events/{body.job_id}",
                     "ws_url": f"/ws/{body.job_id}",
                 }
-            existing.status = "pending"
+            existing.run_id = run_id
+            existing.status = "queued"
+            existing.current_stage = None
             existing.attempts = 0
+            existing.started_at = None
+            existing.completed_at = None
             existing.error = None
             existing.result_json = None
             existing.callback_delivered = False
             existing.job_type = body.job_type
             existing.max_tags = body.max_tags
+            existing.track_id = body.track_id
             db.commit()
         else:
             job = AiJob(
                 id=body.job_id,
+                run_id=run_id,
                 job_type=body.job_type,
-                recording_id=body.recording_id,
-                status="pending",
+                track_id=body.track_id,
+                status="queued",
                 callback_url=settings.HEAR_CALLBACK_URL or None,
                 max_tags=body.max_tags,
                 created_at=datetime.utcnow(),
@@ -109,16 +132,12 @@ async def process_realtime(
     finally:
         db.close()
 
-    asyncio.create_task(
-        orchestrator.process_and_stream(
-            job_id=body.job_id,
-            recording_id=body.recording_id,
-        )
-    )
+    worker.enqueue(body.job_id, run_id=run_id)
 
     return {
         "job_id": body.job_id,
-        "recording_id": body.recording_id,
+        "run_id": run_id,
+        "track_id": body.track_id,
         "sse_url": f"/api/v1/events/{body.job_id}",
         "ws_url": f"/ws/{body.job_id}",
     }
@@ -127,7 +146,7 @@ async def process_realtime(
 @router.post(
     "/api/v1/reconstruct",
     summary="Reconstruct an audio segment",
-    description="Re-synthesises a segment of audio with new text using accent-aware Edge-TTS.",
+    description="Re-synthesises a segment of track audio with new text.",
 )
 async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(verify_service_key)):
     tmp_path = await download_audio(body.audio_url)
@@ -137,7 +156,7 @@ async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(v
             segment_start=body.segment_start,
             segment_end=body.segment_end,
             new_text=body.new_text,
-            recording_id=body.recording_id,
+            track_id=body.track_id,
         )
         return {
             "audio_url": result.audio_url,
@@ -179,9 +198,11 @@ async def get_job(job_id: str, _auth: bool = Security(verify_service_key)):
             )
         return {
             "job_id": job.id,
+            "run_id": job.run_id,
             "job_type": job.job_type or "pipeline",
             "status": job.status,
-            "recording_id": job.recording_id,
+            "current_stage": job.current_stage,
+            "track_id": job.track_id,
             "attempts": job.attempts,
             "result": job.result_json,
             "error": job.error,
@@ -189,6 +210,7 @@ async def get_job(job_id: str, _auth: bool = Security(verify_service_key)):
             "created_at": str(job.created_at),
             "started_at": str(job.started_at) if job.started_at else None,
             "completed_at": str(job.completed_at) if job.completed_at else None,
+            "track_state": _get_track_state(job.id, job.run_id),
         }
     finally:
         db.close()
@@ -210,7 +232,18 @@ async def cancel_job(job_id: str, _auth: bool = Security(verify_service_key)):
         if job.status in ("completed", "failed", "cancelled"):
             return {"job_id": job_id, "status": job.status, "cancelled": False}
         job.status = "cancelled"
+        job.current_stage = None
         job.completed_at = datetime.utcnow()
+        track = (
+            db.query(AiTrackJob)
+            .filter(AiTrackJob.job_id == job.id, AiTrackJob.run_id == job.run_id)
+            .first()
+        )
+        if track:
+            track.status = "cancelled"
+            track.current_stage = None
+            track.completed_at = datetime.utcnow()
+            track.updated_at = datetime.utcnow()
         db.commit()
         return {"job_id": job_id, "status": "cancelled", "cancelled": True}
     finally:
@@ -239,6 +272,8 @@ async def retry_callback(job_id: str, _auth: bool = Security(verify_service_key)
         if job.status == "completed":
             payload = {
                 "job_id": job.id,
+                "run_id": job.run_id,
+                "track_id": job.track_id,
                 "job_type": job.job_type or "pipeline",
                 "status": "completed",
                 "result": job.result_json or {},
@@ -247,6 +282,8 @@ async def retry_callback(job_id: str, _auth: bool = Security(verify_service_key)
         else:
             payload = {
                 "job_id": job.id,
+                "run_id": job.run_id,
+                "track_id": job.track_id,
                 "job_type": job.job_type or "pipeline",
                 "status": "failed",
                 "result": None,
@@ -272,3 +309,31 @@ async def websocket_stream(ws: WebSocket, job_id: str):
             await ws.receive_text()
     except WebSocketDisconnect:
         manager.disconnect_ws(job_id, ws)
+
+
+def _get_track_state(job_id: str, run_id: str | None):
+    if not run_id:
+        return None
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(AiTrackJob)
+            .filter(
+                AiTrackJob.job_id == job_id,
+                AiTrackJob.run_id == run_id,
+            )
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "track_id": row.track_id,
+            "status": row.status,
+            "current_stage": row.current_stage,
+            "attempts": row.attempts,
+            "error": row.error,
+            "started_at": str(row.started_at) if row.started_at else None,
+            "completed_at": str(row.completed_at) if row.completed_at else None,
+        }
+    finally:
+        db.close()

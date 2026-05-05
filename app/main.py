@@ -71,10 +71,11 @@ OPENAPI_DESCRIPTION = """
 
 Hear AI provides a complete audio processing pipeline including:
 
-- **Enhancement** – vocal isolation & noise removal via Demucs
-- **Transcription** – speech-to-text with Faster-Whisper (large-v3)
-- **Categorization** – LLM-powered topic tagging
-- **Moderation** – content safety analysis
+- **Pipeline** – transcription, moderation, categorization
+- **Magic Clean** – standalone vocal isolation & noise removal via Demucs
+- **Transcription** – standalone speech-to-text with Faster-Whisper (large-v3)
+- **Categorization** – standalone topic tagging
+- **Moderation** – standalone content safety analysis
 - **Reconstruction** – accent-aware speech synthesis (Edge-TTS)
 
 ### Authentication
@@ -85,7 +86,7 @@ All endpoints (except `/health`) require a service key via **either**:
 
 TAGS_METADATA = [
     {"name": "System", "description": "Health checks and system status"},
-    {"name": "Pipeline", "description": "Full audio processing pipeline (enhance → transcribe → categorize → moderate)"},
+    {"name": "Pipeline", "description": "Track-first pipeline (transcribe -> moderate -> categorize)"},
     {"name": "Transcription", "description": "Standalone speech-to-text jobs"},
     {"name": "Enhancement", "description": "Standalone audio enhancement / vocal isolation jobs"},
     {"name": "Categorization", "description": "Text-based topic categorization"},

@@ -19,6 +19,7 @@ from df.enhance import enhance as df_enhance, init_df
 from silero_vad import get_speech_timestamps, load_silero_vad
 
 from app.config import settings
+from app.core.audio_utils import save_as_mp3
 from app.core.storage import storage
 
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only=False.*")
@@ -515,7 +516,7 @@ class AudioEnhancer:
     async def enhance(
         self,
         input_path: str,
-        recording_id: str,
+        track_id: str,
         job_id: str,
         mode: ContentMode = ContentMode.AUTO,
     ) -> EnhancementResult:
@@ -618,11 +619,9 @@ class AudioEnhancer:
             peak_db = 20 * np.log10(enhanced.abs().max().item() + 1e-8)
             quality_score = self._compute_quality_score(snr, clipping_input, lufs)
 
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                out_path = tmp.name
-            torchaudio.save(out_path, enhanced.cpu(), self.TARGET_SR)
+            out_path = save_as_mp3(enhanced.cpu(), self.TARGET_SR)
 
-            b2_key = f"{settings.B2_ENHANCED_PREFIX}{recording_id}/{job_id}.wav"
+            b2_key = f"{settings.B2_ENHANCED_PREFIX}{track_id}/{job_id}.mp3"
             enhanced_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
 
             return EnhancementResult(

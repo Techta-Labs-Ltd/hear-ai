@@ -90,7 +90,6 @@ class TranscriptionService:
                 word_text = w.word.strip()
                 if not word_text:
                     continue
-                # Drop low-confidence words — hallucinated words score poorly
                 if w.probability < self._MIN_WORD_CONFIDENCE:
                     continue
                 words.append({"word": w.word, "start": w.start, "end": w.end, "prob": w.probability})

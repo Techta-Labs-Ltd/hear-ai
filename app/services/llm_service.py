@@ -216,10 +216,12 @@ class LLMService:
             f"{kw_hint}\n\n"
             f"Transcript:\n{transcript[:2000]}\n\n"
             "Return ONLY this JSON (no markdown, no extra text):\n"
-            '{"tags":["#Sports"],"categories":["Sports"],"sentiment":"neutral"}\n\n'
+            '{"tags":["#Sports"],"categories":["Sports"],"sentiment":"neutral","new_tags":[],"new_categories":[]}\n\n'
             "Rules:\n"
             "- tags: up to 5, must start with #, must come from the available list\n"
             f"- categories: up to {max_categories}, must come from the available list\n"
+            "- new_tags: up to 5 NEW tags you discovered that are NOT in the available list — must start with #\n"
+            "- new_categories: up to 2 NEW categories NOT in the available list\n"
             "- sentiment: positive | negative | neutral\n"
             "- Base on MAIN topics only — ignore passing mentions\n"
             "- If multiple distinct topics exist in this text, include a category for each\n"
@@ -241,13 +243,21 @@ class LLMService:
 
         tags_out = [t for t in parsed.get("tags", []) if t in valid_tags][:5]
         cats_out = [c for c in parsed.get("categories", []) if c in valid_cats][:max_categories]
+        new_tags = [
+            t for t in parsed.get("new_tags", [])
+            if isinstance(t, str) and t.startswith("#") and t not in valid_tags
+        ][:5]
+        new_cats = [
+            c for c in parsed.get("new_categories", [])
+            if isinstance(c, str) and c and c not in valid_cats
+        ][:2]
         sentiment = parsed.get("sentiment", "neutral")
         if sentiment not in ("positive", "negative", "neutral"):
             sentiment = "neutral"
 
-        logger.info("[LLM/CATEGORIZE] tags=%s categories=%s", tags_out, cats_out)
+        logger.info("[LLM/CATEGORIZE] tags=%s categories=%s new_tags=%s new_categories=%s", tags_out, cats_out, new_tags, new_cats)
 
-        return {"tags": tags_out, "categories": cats_out, "sentiment": sentiment}
+        return {"tags": tags_out, "categories": cats_out, "sentiment": sentiment, "new_tags": new_tags, "new_categories": new_cats}
 
 
 llm_service = LLMService()

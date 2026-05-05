@@ -5,6 +5,7 @@ import torch
 import torchaudio
 import torchaudio.functional as F_audio
 
+from app.core.audio_utils import save_as_mp3
 from app.core.storage import storage
 
 
@@ -40,18 +41,16 @@ class AudioMixer:
         if peak > 0.99:
             mixed = mixed * (0.99 / peak)
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            out_path = tmp.name
-        torchaudio.save(out_path, mixed, self.TARGET_SR)
+        out_path = save_as_mp3(mixed, self.TARGET_SR)
         return out_path
 
-    async def mix_and_upload(self, track_paths: list[dict], recording_id: str, job_id: str) -> dict:
+    async def mix_and_upload(self, track_paths: list[dict], track_id: str, job_id: str) -> dict:
         import asyncio
         mixed_path = self.mix(track_paths)
         if not mixed_path:
             return {}
 
-        b2_key = f"masters/{recording_id}/{job_id}.wav"
+        b2_key = f"masters/{track_id}/{job_id}.mp3"
         loop = asyncio.get_event_loop()
         url = await loop.run_in_executor(None, storage.upload_file, mixed_path, b2_key)
         os.unlink(mixed_path)
