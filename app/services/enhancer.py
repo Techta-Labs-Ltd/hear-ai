@@ -308,21 +308,29 @@ class AudioEnhancer:
             return w
 
     def _generate_vad_mask(self, w: torch.Tensor, sr: int) -> tuple[torch.Tensor, list[dict]]:
-        w_16k = self._resample(w.cpu(), sr, self.VAD_SR)
+        w_16k = self._resample(w.detach().cpu().float().contiguous(), sr, self.VAD_SR)
         if w_16k.dim() > 1:
             w_16k = w_16k.squeeze(0)
+        w_16k = w_16k.float().contiguous()
+        if torch.isnan(w_16k).any() or torch.isinf(w_16k).any():
+            w_16k = torch.nan_to_num(w_16k, nan=0.0, posinf=0.0, neginf=0.0)
 
-        with self._vad_lock:
-            with torch.no_grad():
-                timestamps = get_speech_timestamps(
-                    w_16k,
-                    self._vad_model,
-                    sampling_rate=self.VAD_SR,
-                    threshold=self._VAD_SPEECH_THRESHOLD,
-                    min_speech_duration_ms=self._VAD_MIN_SPEECH_MS,
-                    min_silence_duration_ms=self._VAD_MIN_SILENCE_MS,
-                    return_seconds=False,
-                )
+        try:
+            with self._vad_lock:
+                with torch.no_grad():
+                    timestamps = get_speech_timestamps(
+                        w_16k,
+                        self._vad_model,
+                        sampling_rate=self.VAD_SR,
+                        threshold=self._VAD_SPEECH_THRESHOLD,
+                        min_speech_duration_ms=self._VAD_MIN_SPEECH_MS,
+                        min_silence_duration_ms=self._VAD_MIN_SILENCE_MS,
+                        return_seconds=False,
+                    )
+        except Exception as exc:
+            logger.warning("Silero VAD failed; using full-speech fallback: %s", exc)
+            full_mask = torch.ones((1, w.shape[1]), dtype=torch.float32, device=self._device)
+            return full_mask, [{"start": 0, "end": int(w.shape[1])}]
 
         total_n = w.shape[1]
         mask_np = np.zeros(total_n, dtype=np.float32)

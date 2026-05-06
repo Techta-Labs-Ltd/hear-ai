@@ -234,7 +234,7 @@ class SpeechSynthesizer:
         module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
         higgs_audio = importlib.import_module(module_name)
 
-        if hasattr(higgs_audio, "synthesize"):
+        if module_name != "boson_multimodal" and hasattr(higgs_audio, "synthesize"):
             synth = higgs_audio.synthesize
             kwargs = {"text": text, "voice": settings.HIGGS_AUDIO_VOICE}
             try:
@@ -287,19 +287,37 @@ class SpeechSynthesizer:
             Message(role="system", content=settings.HIGGS_AUDIO_SYSTEM_PROMPT),
             Message(role="user", content=text),
         ]
-        response = self._higgs_engine.generate(
-            chat_ml_sample=ChatMLSample(messages=messages),
-            max_new_tokens=1024,
-            temperature=0.3,
-            top_p=0.95,
-            top_k=50,
-            stop_strings=["<|end_of_text|>", "<|eot_id|>"],
-        )
+        sample = ChatMLSample(messages=messages)
+        response = self._generate_with_compat(sample)
         audio = np.asarray(getattr(response, "audio", []), dtype=np.float32)
         if audio.size == 0:
             raise RuntimeError("Boson Higgs engine returned empty audio")
         sr = int(getattr(response, "sampling_rate", self.TARGET_SR))
         return self._wav_bytes_from_audio(audio, sr)
+
+    def _generate_with_compat(self, sample):
+        generate = self._higgs_engine.generate
+        kwargs = {
+            "chat_ml_sample": sample,
+            "max_new_tokens": 1024,
+            "temperature": 0.3,
+            "top_p": 0.95,
+            "top_k": 50,
+            "stop_strings": ["<|end_of_text|>", "<|eot_id|>"],
+        }
+        try:
+            sig = inspect.signature(generate)
+            allowed = set(sig.parameters.keys())
+            filtered = {k: v for k, v in kwargs.items() if k in allowed}
+            if "chat_ml_sample" not in filtered and allowed:
+                first_param = next(iter(allowed))
+                filtered[first_param] = sample
+            return generate(**filtered)
+        except Exception:
+            try:
+                return generate(chat_ml_sample=sample)
+            except Exception:
+                return generate(sample)
 
     def _load_boson_symbols(self):
         errors: list[str] = []
