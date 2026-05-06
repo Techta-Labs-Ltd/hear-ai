@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
+# 
 class Settings(BaseSettings):
     AI_SERVICE_SECRET: str = "change-me"
     HEAR_BACKEND_URL: str = "http://localhost:3000"
