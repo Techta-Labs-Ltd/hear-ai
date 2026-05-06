@@ -94,6 +94,8 @@ async def test_backend_connectivity(client: httpx.AsyncClient):
             track = _extract_track_payload(data, TEST_TRACK_ID)
             log("pass", f"Track fetched: '{track.get('name')}'")
             log("pass", f"Track id: {track.get('id')}")
+            if track.get("audio_url"):
+                log("pass", f"source_audio_url: {track.get('audio_url')}")
             log("pass", f"audio_url={'set' if track.get('audio_url') else 'null'} is_enhanced={track.get('is_enhanced')} transcription={'set' if track.get('transcription') else 'null'}")
         elif r.status_code == 401:
             log("fail", "Backend auth rejected — check AI_SERVICE_SECRET matches backend")
@@ -213,6 +215,7 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
 
                     if not transcript:
                         log("warn", "No transcription text found in result")
+                        log("warn", f"Raw result: {json.dumps(result)[:800]}")
                     audio_urls = _collect_audio_urls(result)
                     if audio_urls:
                         for label, url in audio_urls:
