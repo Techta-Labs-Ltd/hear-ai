@@ -3,10 +3,14 @@ import io
 import os
 import tempfile
 import inspect
+import wave
 from dataclasses import dataclass
 import importlib.util
+import importlib
+import subprocess
+import sys
+from pathlib import Path
 
-import edge_tts
 import numpy as np
 import torch
 import torchaudio
@@ -15,17 +19,6 @@ import torchaudio.functional as F_audio
 from app.config import settings
 from app.core.audio_utils import save_as_mp3
 from app.core.storage import storage
-
-VOICE_MAP = {
-    "male_us": "en-US-GuyNeural",
-    "female_us": "en-US-JennyNeural",
-    "male_uk": "en-GB-RyanNeural",
-    "female_uk": "en-GB-SoniaNeural",
-    "male_au": "en-AU-WilliamNeural",
-    "female_au": "en-AU-NatashaNeural",
-}
-
-DEFAULT_VOICE = "en-GB-RyanNeural"
 
 @dataclass
 class SynthesisResult:
@@ -39,65 +32,19 @@ class SpeechSynthesizer:
 
     def __init__(self):
         self._loaded = False
+        self._higgs_engine = None
 
     def load(self):
+        if settings.HIGGS_AUDIO_ENABLED:
+            try:
+                self._ensure_higgs_module_available(allow_install=True)
+            except Exception as exc:
+                print(f"[SYNTH] Higgs auto-install skipped: {exc}")
         self._loaded = True
 
     @property
     def is_loaded(self) -> bool:
         return self._loaded
-
-    def _detect_voice(self, waveform: torch.Tensor, sr: int, start: float, end: float) -> str:
-        start_sample = int(start * sr)
-        end_sample = min(int(end * sr), waveform.shape[1])
-        segment = waveform[:, start_sample:end_sample]
-
-        if segment.shape[1] < sr * 0.1:
-            return "male_us"
-
-        mono = segment.mean(dim=0) if segment.shape[0] > 1 else segment[0]
-
-        try:
-            pitch = F_audio.detect_pitch_frequency(
-                mono.unsqueeze(0), sr, freq_low=50, freq_high=600
-            )
-            voiced = pitch[pitch > 50]
-            if voiced.numel() < 5:
-                return "male_us"
-
-            median_f0 = voiced.median().item()
-            gender = "female" if median_f0 >= 165 else "male"
-
-            accent = self._detect_accent(voiced)
-
-            return f"{gender}_{accent}"
-        except Exception:
-            return "male_us"
-
-    def _detect_accent(self, voiced_pitch: torch.Tensor) -> str:
-        f0_mean = voiced_pitch.mean().item()
-        f0_std = voiced_pitch.std().item()
-        f0_range = voiced_pitch.max().item() - voiced_pitch.min().item()
-
-        pitch_variability = f0_std / (f0_mean + 1e-8)
-
-        n = voiced_pitch.numel()
-        if n > 10:
-            tail = voiced_pitch[int(n * 0.7):]
-            head = voiced_pitch[:int(n * 0.3)]
-            tail_mean = tail.mean().item()
-            head_mean = head.mean().item()
-            rising_ratio = tail_mean / (head_mean + 1e-8)
-        else:
-            rising_ratio = 1.0
-
-        if rising_ratio > 1.08:
-            return "au"
-
-        if pitch_variability > 0.25 or f0_range > 120:
-            return "uk"
-
-        return "us"
 
     async def reconstruct_segment(
         self,
@@ -109,9 +56,6 @@ class SpeechSynthesizer:
         same_speaker: bool = True,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
-
-        detected = self._detect_voice(original_waveform, orig_sr, segment_start, segment_end)
-        voice_id = VOICE_MAP.get(detected, DEFAULT_VOICE)
 
         if orig_sr != self.TARGET_SR:
             original_waveform = F_audio.resample(original_waveform, orig_sr, self.TARGET_SR)
@@ -174,13 +118,6 @@ class SpeechSynthesizer:
             end_sample = int(float(change["segment_end"]) * self.TARGET_SR)
             start_sample = max(0, min(start_sample, merged.shape[1] - 1 if merged.shape[1] else 0))
             end_sample = max(start_sample + 1, min(end_sample, merged.shape[1]))
-            detected = self._detect_voice(
-                merged,
-                self.TARGET_SR,
-                float(change["segment_start"]),
-                float(change["segment_end"]),
-            )
-            voice_id = VOICE_MAP.get(detected, DEFAULT_VOICE)
             reference_path = None
             if same_speaker:
                 reference_path = self._export_reference_clip(merged, start_sample, end_sample)
@@ -284,22 +221,12 @@ class SpeechSynthesizer:
             duration=round(duration, 3),
         )
 
-    async def _synthesize(self, text: str, voice_id: str) -> bytes:
-        communicate = edge_tts.Communicate(text, voice_id)
-        buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                buffer.write(chunk["data"])
-        return buffer.getvalue()
-
     async def _synthesize_higgs(self, text: str, reference_audio_path: str | None = None) -> bytes:
         if not text.strip():
-            return await self._synthesize(" ", DEFAULT_VOICE)
+            text = " "
         if not settings.HIGGS_AUDIO_ENABLED:
             raise RuntimeError("Higgs audio is disabled")
-        module_spec = importlib.util.find_spec("higgs_audio")
-        if module_spec is None:
-            raise RuntimeError("higgs_audio module is not installed for self-hosted rebuild")
+        module_name = self._ensure_higgs_module_available(allow_install=True)
         return await asyncio.get_event_loop().run_in_executor(
             None,
             self._run_local_higgs,
@@ -308,7 +235,8 @@ class SpeechSynthesizer:
         )
 
     def _run_local_higgs(self, text: str, reference_audio_path: str | None = None) -> bytes:
-        import higgs_audio
+        module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
+        higgs_audio = importlib.import_module(module_name)
 
         if hasattr(higgs_audio, "synthesize"):
             synth = higgs_audio.synthesize
@@ -343,7 +271,108 @@ class SpeechSynthesizer:
                 if isinstance(path, str) and os.path.exists(path):
                     with open(path, "rb") as f:
                         return f.read()
-        raise RuntimeError("Local higgs_audio module did not return audio bytes")
+        try:
+            return self._run_boson_engine(text, reference_audio_path)
+        except Exception as exc:
+            raise RuntimeError(f"Local {module_name} module did not return audio bytes ({exc})") from exc
+
+    def _run_boson_engine(self, text: str, reference_audio_path: str | None = None) -> bytes:
+        from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine
+        from boson_multimodal.data_types import ChatMLSample, Message
+
+        if self._higgs_engine is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._higgs_engine = HiggsAudioServeEngine(
+                settings.HIGGS_AUDIO_MODEL_PATH,
+                settings.HIGGS_AUDIO_TOKENIZER_PATH,
+                device=device,
+            )
+        messages = [
+            Message(role="system", content=settings.HIGGS_AUDIO_SYSTEM_PROMPT),
+            Message(role="user", content=text),
+        ]
+        response = self._higgs_engine.generate(
+            chat_ml_sample=ChatMLSample(messages=messages),
+            max_new_tokens=1024,
+            temperature=0.3,
+            top_p=0.95,
+            top_k=50,
+            stop_strings=["<|end_of_text|>", "<|eot_id|>"],
+        )
+        audio = np.asarray(getattr(response, "audio", []), dtype=np.float32)
+        if audio.size == 0:
+            raise RuntimeError("Boson Higgs engine returned empty audio")
+        sr = int(getattr(response, "sampling_rate", self.TARGET_SR))
+        return self._wav_bytes_from_audio(audio, sr)
+
+    def _wav_bytes_from_audio(self, audio: np.ndarray, sampling_rate: int) -> bytes:
+        pcm = np.clip(audio.astype(np.float32), -1.0, 1.0)
+        pcm_i16 = (pcm * 32767.0).astype(np.int16)
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(int(sampling_rate))
+            wf.writeframes(pcm_i16.tobytes())
+        return buffer.getvalue()
+
+    def _ensure_higgs_module_available(self, allow_install: bool) -> str:
+        module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
+        if importlib.util.find_spec(module_name) is not None:
+            return module_name
+        if allow_install:
+            self._install_higgs_repo()
+            if importlib.util.find_spec(module_name) is not None:
+                return module_name
+            install_spec = (settings.HIGGS_AUDIO_INSTALL_SPEC or "").strip()
+            if install_spec:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", install_spec],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                if importlib.util.find_spec(module_name) is not None:
+                    return module_name
+        raise RuntimeError(
+            f"{module_name} module is not installed for self-hosted rebuild. "
+            f"Set HIGGS_AUDIO_INSTALL_SPEC to a valid pip spec."
+        )
+
+    def _install_higgs_repo(self):
+        repo_url = (settings.HIGGS_AUDIO_REPO_URL or "").strip()
+        if not repo_url:
+            return
+        repo_dir = Path((settings.HIGGS_AUDIO_REPO_DIR or "/tmp/higgs-audio").strip())
+        repo_dir.parent.mkdir(parents=True, exist_ok=True)
+        if not repo_dir.exists():
+            subprocess.run(
+                ["git", "clone", repo_url, str(repo_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "pull", "--ff-only"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        req = repo_dir / "requirements.txt"
+        if req.exists():
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", str(req)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", str(repo_dir)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def _export_reference_clip(self, waveform: torch.Tensor, start_sample: int, end_sample: int) -> str:
         start_sample = max(0, start_sample)
