@@ -1,7 +1,6 @@
 import asyncio
 from datetime import datetime
 import uuid
-# todo: check if this is needed
 from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
 from sqlalchemy.exc import IntegrityError, OperationalError
 
@@ -11,6 +10,7 @@ from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequ
 from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.core.db_gate import db_write_lock
 from app.core.downloader import download_audio, cleanup_temp
+from app.core.gpu import gpu
 from app.realtime.broadcaster import manager, make_sse_response
 from app.services.registry import worker, synthesizer
 from app.services.callback import callback_service
@@ -233,12 +233,13 @@ async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(v
         ]
     tmp_path = await download_audio(body.audio_url, suffix=".wav")
     try:
-        result = await synthesizer.reconstruct_segments(
-            original_audio_path=tmp_path,
-            track_id=body.track_id,
-            changes=changes,
-            same_speaker=body.same_speaker,
-        )
+        async with gpu.exclusive():
+            result = await synthesizer.reconstruct_segments(
+                original_audio_path=tmp_path,
+                track_id=body.track_id,
+                changes=changes,
+                same_speaker=body.same_speaker,
+            )
         return {
             "audio_url": result.audio_url,
             "b2_key": result.b2_key,

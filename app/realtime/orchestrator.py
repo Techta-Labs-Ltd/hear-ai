@@ -3,6 +3,8 @@ import traceback
 from datetime import datetime
 
 from app.core.downloader import download_audio, cleanup_temp
+from app.core.gpu import gpu
+from app.core.gpu import gpu
 from app.core.platform_settings import fetch_platform_settings
 from app.core.recording_fetcher import fetch_track
 from app.models.database import SessionLocal, AiJob
@@ -63,49 +65,50 @@ class PipelineOrchestrator:
             tmp_paths.append(tmp_path)
             with open(tmp_path, "rb") as f:
                 audio_bytes = f.read()
-            transcript = await self.transcriber.transcribe(audio_bytes)
-            transcript_text = transcript.get("transcript", "").strip()
-            segments = transcript.get("segments", [])
-
-            await manager.broadcast(job_id, {
-                "event": "transcription_complete",
-                "job_id": job_id,
-                "run_id": run_id,
-                "track_id": track_id,
-                "timestamp": time.time(),
-            })
-
-            self._update_job(job_id, status="running", current_stage="moderating")
             platform = await fetch_platform_settings()
-            moderation_data = await self.moderator.moderate(transcript_text, platform.blocked_keywords)
-            await manager.broadcast(job_id, {
-                "event": "moderation_complete",
-                "job_id": job_id,
-                "run_id": run_id,
-                "track_id": track_id,
-                "flagged": moderation_data.get("flagged"),
-                "severity": moderation_data.get("severity"),
-                "timestamp": time.time(),
-            })
+            async with gpu.exclusive():
+                transcript = await self.transcriber.transcribe(audio_bytes)
+                transcript_text = transcript.get("transcript", "").strip()
+                segments = transcript.get("segments", [])
 
-            categorization_data = None
-            if transcript_text and not moderation_data.get("flagged"):
-                self._update_job(job_id, status="running", current_stage="categorizing")
-                categorization_data = await self.categorizer.categorize(
-                    transcript=transcript_text,
-                    segments=segments,
-                    per_track_transcripts={track_id: transcript_text},
-                )
                 await manager.broadcast(job_id, {
-                    "event": "categorization_complete",
+                    "event": "transcription_complete",
                     "job_id": job_id,
                     "run_id": run_id,
                     "track_id": track_id,
-                    "tags": categorization_data.get("tags", []),
-                    "categories": categorization_data.get("categories", []),
-                    "sentiment": categorization_data.get("sentiment"),
                     "timestamp": time.time(),
                 })
+
+                self._update_job(job_id, status="running", current_stage="moderating")
+                moderation_data = await self.moderator.moderate(transcript_text, platform.blocked_keywords)
+                await manager.broadcast(job_id, {
+                    "event": "moderation_complete",
+                    "job_id": job_id,
+                    "run_id": run_id,
+                    "track_id": track_id,
+                    "flagged": moderation_data.get("flagged"),
+                    "severity": moderation_data.get("severity"),
+                    "timestamp": time.time(),
+                })
+
+                categorization_data = None
+                if transcript_text and not moderation_data.get("flagged"):
+                    self._update_job(job_id, status="running", current_stage="categorizing")
+                    categorization_data = await self.categorizer.categorize(
+                        transcript=transcript_text,
+                        segments=segments,
+                        per_track_transcripts={track_id: transcript_text},
+                    )
+                    await manager.broadcast(job_id, {
+                        "event": "categorization_complete",
+                        "job_id": job_id,
+                        "run_id": run_id,
+                        "track_id": track_id,
+                        "tags": categorization_data.get("tags", []),
+                        "categories": categorization_data.get("categories", []),
+                        "sentiment": categorization_data.get("sentiment"),
+                        "timestamp": time.time(),
+                    })
 
             result = {
                 "track_id": track_id,

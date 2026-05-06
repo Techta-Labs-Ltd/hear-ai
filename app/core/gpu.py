@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import torch
 
@@ -42,6 +43,14 @@ class GPUManager:
     async def release(self):
         self._active_jobs -= 1
         self._semaphore.release()
+
+    @asynccontextmanager
+    async def exclusive(self):
+        await self.acquire()
+        try:
+            yield
+        finally:
+            await self.release()
 
 
 gpu = GPUManager()

@@ -39,6 +39,11 @@ class PipelineWorker:
 
     async def start(self):
         self._running = True
+        print(
+            f"[WORKER] single-queue execution; limits jobs={settings.MAX_CONCURRENT_JOBS} "
+            f"pipeline={settings.MAX_CONCURRENT_PIPELINE_JOBS} magic_clean={settings.MAX_CONCURRENT_MAGIC_CLEAN_JOBS} "
+            f"gpu={settings.MAX_CONCURRENT_GPU_JOBS}"
+        )
         self._recover_jobs()
         asyncio.create_task(self._retry_undelivered_callbacks())
         self._loop_task = asyncio.create_task(self._loop())
