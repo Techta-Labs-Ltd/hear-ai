@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.auth import verify_service_key
 from app.config import settings
-from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, JobAccepted
+from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, SegmentChange, JobAccepted
 from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.core.downloader import download_audio, cleanup_temp
 from app.realtime.broadcaster import manager, make_sse_response
@@ -42,7 +42,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
         if existing:
-            if existing.status in ("queued", "running") and existing.job_type == normalized_job_type:
+            if existing.status in ("queued", "running"):
                 return JobAccepted(job_id=body.job_id)
             existing.run_id = run_id
             existing.status = "queued"
@@ -103,7 +103,7 @@ async def process_realtime(
     try:
         existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
         if existing:
-            if existing.status in ("queued", "running") and existing.job_type == normalized_job_type:
+            if existing.status in ("queued", "running"):
                 return {
                     "job_id": body.job_id,
                     "run_id": existing.run_id,
@@ -157,19 +157,33 @@ async def process_realtime(
     description="Re-synthesises a segment of track audio with new text.",
 )
 async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(verify_service_key)):
+    changes: list[SegmentChange] = list(body.changes or [])
+    if not changes:
+        if body.segment_start is None or body.segment_end is None or not (body.new_text or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Provide either changes[] or segment_start, segment_end, and new_text",
+            )
+        changes = [
+            SegmentChange(
+                segment_start=body.segment_start,
+                segment_end=body.segment_end,
+                new_text=body.new_text or "",
+            )
+        ]
     tmp_path = await download_audio(body.audio_url)
     try:
-        result = await synthesizer.reconstruct_segment(
+        result = await synthesizer.reconstruct_segments(
             original_audio_path=tmp_path,
-            segment_start=body.segment_start,
-            segment_end=body.segment_end,
-            new_text=body.new_text,
             track_id=body.track_id,
+            changes=changes,
+            same_speaker=body.same_speaker,
         )
         return {
             "audio_url": result.audio_url,
             "b2_key": result.b2_key,
             "duration": result.duration,
+            "segments_applied": len(changes),
         }
     finally:
         cleanup_temp(tmp_path)

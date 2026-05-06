@@ -2,6 +2,7 @@ import asyncio
 import io
 import os
 import tempfile
+import inspect
 from dataclasses import dataclass
 import importlib.util
 
@@ -105,6 +106,7 @@ class SpeechSynthesizer:
         segment_end: float,
         new_text: str,
         track_id: str,
+        same_speaker: bool = True,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
 
@@ -117,7 +119,19 @@ class SpeechSynthesizer:
         start_sample = int(segment_start * self.TARGET_SR)
         end_sample = int(segment_end * self.TARGET_SR)
 
-        tts_bytes = await self._synthesize(new_text, voice_id)
+        tts_bytes = None
+        reference_path = None
+        if same_speaker:
+            reference_path = self._export_reference_clip(original_waveform, start_sample, end_sample)
+            try:
+                tts_bytes = await self._synthesize_higgs(new_text, reference_audio_path=reference_path)
+            except Exception:
+                tts_bytes = None
+            finally:
+                if reference_path and os.path.exists(reference_path):
+                    os.unlink(reference_path)
+        if tts_bytes is None:
+            tts_bytes = await self._synthesize(new_text, voice_id)
 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp.write(tts_bytes)
@@ -145,6 +159,66 @@ class SpeechSynthesizer:
             duration=round(duration, 3),
         )
 
+    async def reconstruct_segments(
+        self,
+        original_audio_path: str,
+        track_id: str,
+        changes: list,
+        same_speaker: bool = True,
+    ) -> SynthesisResult:
+        original_waveform, orig_sr = torchaudio.load(original_audio_path)
+        if orig_sr != self.TARGET_SR:
+            original_waveform = F_audio.resample(original_waveform, orig_sr, self.TARGET_SR)
+        merged = original_waveform
+        normalized = sorted(changes, key=lambda c: float(c.segment_start))
+        for change in normalized:
+            start_sample = int(float(change.segment_start) * self.TARGET_SR)
+            end_sample = int(float(change.segment_end) * self.TARGET_SR)
+            start_sample = max(0, min(start_sample, merged.shape[1] - 1 if merged.shape[1] else 0))
+            end_sample = max(start_sample + 1, min(end_sample, merged.shape[1]))
+            detected = self._detect_voice(
+                merged,
+                self.TARGET_SR,
+                float(change.segment_start),
+                float(change.segment_end),
+            )
+            voice_id = VOICE_MAP.get(detected, DEFAULT_VOICE)
+            tts_bytes = None
+            reference_path = None
+            if same_speaker:
+                reference_path = self._export_reference_clip(merged, start_sample, end_sample)
+                try:
+                    tts_bytes = await self._synthesize_higgs(change.new_text, reference_audio_path=reference_path)
+                except Exception:
+                    tts_bytes = None
+                finally:
+                    if reference_path and os.path.exists(reference_path):
+                        os.unlink(reference_path)
+            if tts_bytes is None:
+                tts_bytes = await self._synthesize(change.new_text, voice_id)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp.write(tts_bytes)
+                tts_path = tmp.name
+            tts_waveform, tts_sr = torchaudio.load(tts_path)
+            os.unlink(tts_path)
+            if tts_sr != self.TARGET_SR:
+                tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
+            merged = self._splice_segment(merged, tts_waveform, start_sample, end_sample)
+        peak = merged.abs().max().item()
+        if peak > 0.99:
+            merged = merged * (0.99 / peak)
+        out_path = save_as_mp3(merged, self.TARGET_SR)
+        duration = merged.shape[1] / self.TARGET_SR
+        b2_key = f"reconstructed/{track_id}/{os.urandom(8).hex()}.mp3"
+        loop = asyncio.get_event_loop()
+        audio_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
+        os.unlink(out_path)
+        return SynthesisResult(
+            b2_key=b2_key,
+            audio_url=audio_url,
+            duration=round(duration, 3),
+        )
+
     async def rebuild_track_audio(
         self,
         original_audio_path: str,
@@ -157,7 +231,10 @@ class SpeechSynthesizer:
         if orig_sr != self.TARGET_SR:
             original_waveform = F_audio.resample(original_waveform, orig_sr, self.TARGET_SR)
 
-        rebuilt_bytes = await self._synthesize_higgs(edited_transcript)
+        rebuilt_bytes = await self._synthesize_higgs(
+            edited_transcript,
+            reference_audio_path=original_audio_path,
+        )
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp.write(rebuilt_bytes)
             rebuilt_path = tmp.name
@@ -194,7 +271,7 @@ class SpeechSynthesizer:
                 buffer.write(chunk["data"])
         return buffer.getvalue()
 
-    async def _synthesize_higgs(self, text: str) -> bytes:
+    async def _synthesize_higgs(self, text: str, reference_audio_path: str | None = None) -> bytes:
         if not text.strip():
             return await self._synthesize(" ", DEFAULT_VOICE)
         if not settings.HIGGS_AUDIO_ENABLED:
@@ -202,19 +279,59 @@ class SpeechSynthesizer:
         module_spec = importlib.util.find_spec("higgs_audio")
         if module_spec is None:
             raise RuntimeError("higgs_audio module is not installed for self-hosted rebuild")
-        return await asyncio.get_event_loop().run_in_executor(None, self._run_local_higgs, text)
+        return await asyncio.get_event_loop().run_in_executor(
+            None,
+            self._run_local_higgs,
+            text,
+            reference_audio_path,
+        )
 
-    def _run_local_higgs(self, text: str) -> bytes:
+    def _run_local_higgs(self, text: str, reference_audio_path: str | None = None) -> bytes:
         import higgs_audio
 
         if hasattr(higgs_audio, "synthesize"):
-            out = higgs_audio.synthesize(text=text, voice=settings.HIGGS_AUDIO_VOICE)
+            synth = higgs_audio.synthesize
+            kwargs = {"text": text, "voice": settings.HIGGS_AUDIO_VOICE}
+            try:
+                params = inspect.signature(synth).parameters
+            except Exception:
+                params = {}
+            if reference_audio_path:
+                for key in (
+                    "reference_audio",
+                    "reference_audio_path",
+                    "speaker_audio",
+                    "prompt_audio",
+                    "audio_prompt",
+                    "source_audio",
+                ):
+                    if key in params:
+                        kwargs[key] = reference_audio_path
+                        break
+            out = synth(**kwargs)
             if isinstance(out, bytes):
                 return out
             if isinstance(out, str) and os.path.exists(out):
                 with open(out, "rb") as f:
                     return f.read()
+            if isinstance(out, dict):
+                audio = out.get("audio") or out.get("bytes")
+                if isinstance(audio, bytes):
+                    return audio
+                path = out.get("path") or out.get("audio_path") or out.get("output_path")
+                if isinstance(path, str) and os.path.exists(path):
+                    with open(path, "rb") as f:
+                        return f.read()
         raise RuntimeError("Local higgs_audio module did not return audio bytes")
+
+    def _export_reference_clip(self, waveform: torch.Tensor, start_sample: int, end_sample: int) -> str:
+        start_sample = max(0, start_sample)
+        end_sample = max(start_sample + 1, min(end_sample, waveform.shape[1]))
+        clip = waveform[:, start_sample:end_sample].detach().cpu()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            ref_path = tmp.name
+        torchaudio.save(ref_path, clip, self.TARGET_SR)
+        return ref_path
 
     def _detect_speech_bounds(self, waveform: torch.Tensor, sr: int, original_transcript: str) -> tuple[int, int]:
         mono = waveform.mean(dim=0).cpu().numpy()

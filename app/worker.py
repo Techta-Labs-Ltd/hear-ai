@@ -213,7 +213,13 @@ class PipelineWorker:
             return value
         return []
 
-    async def _set_stage(self, db, job: AiJob, track_job: AiTrackJob, stage: str):
+    def _run_is_current(self, db, job_id: str, run_id: str) -> bool:
+        current = db.query(AiJob.run_id).filter(AiJob.id == job_id).scalar()
+        return current == run_id
+
+    async def _set_stage(self, db, job: AiJob, track_job: AiTrackJob, stage: str) -> bool:
+        if not self._run_is_current(db, job.id, job.run_id):
+            return False
         now = datetime.utcnow()
         job.status = "running"
         job.current_stage = stage
@@ -234,8 +240,11 @@ class PipelineWorker:
             "status": job.status,
             "current_stage": stage,
         })
+        return True
 
-    async def _complete(self, db, job: AiJob, track_job: AiTrackJob, result: dict):
+    async def _complete(self, db, job: AiJob, track_job: AiTrackJob, result: dict) -> bool:
+        if not self._run_is_current(db, job.id, job.run_id):
+            return False
         now = datetime.utcnow()
         job.status = "completed"
         job.current_stage = None
@@ -256,6 +265,7 @@ class PipelineWorker:
             "status": "completed",
             "current_stage": None,
         })
+        return True
 
     async def _process_magic_clean(self, job: AiJob, track_job: AiTrackJob, db):
         if not job.track_id:
@@ -271,7 +281,8 @@ class PipelineWorker:
         else:
             local_path = await download_audio(track.audio_url)
             try:
-                await self._set_stage(db, job, track_job, "enhancing")
+                if not await self._set_stage(db, job, track_job, "enhancing"):
+                    return
                 out = await self._enhancer.enhance(
                     input_path=local_path,
                     track_id=track.track_id,
@@ -292,7 +303,9 @@ class PipelineWorker:
             "track_id": track.track_id,
             "enhancement": enhanced.get(track.track_id, {}),
         }
-        await self._complete(db, job, track_job, result)
+        completed = await self._complete(db, job, track_job, result)
+        if not completed:
+            return
 
     async def _process(self, job_id: str, run_id: str):
         use_gpu = False
@@ -331,7 +344,8 @@ class PipelineWorker:
             if job.job_type == "rebuild":
                 if not job.edited_transcript:
                     raise ValueError("edited_transcript is required for rebuild")
-                await self._set_stage(db, job, track_job, "rebuilding_audio")
+                if not await self._set_stage(db, job, track_job, "rebuilding_audio"):
+                    return
                 original_path = await download_audio(track.audio_url)
                 try:
                     rebuilt_audio = await self._synthesizer.rebuild_track_audio(
@@ -361,7 +375,8 @@ class PipelineWorker:
                     "edited": bool(job.edited_transcript),
                 }
             else:
-                await self._set_stage(db, job, track_job, "transcribing")
+                if not await self._set_stage(db, job, track_job, "transcribing"):
+                    return
                 if track.transcription and job.job_type != "transcription":
                     transcript_data = {
                         "transcript": self._coerce_transcript_text(track.transcription),
@@ -389,7 +404,9 @@ class PipelineWorker:
                     "track_id": track.track_id,
                     "transcription": transcript_data,
                 }
-                await self._complete(db, job, track_job, result)
+                completed = await self._complete(db, job, track_job, result)
+                if not completed:
+                    return
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
@@ -397,7 +414,8 @@ class PipelineWorker:
                 return
 
             if not transcript_text:
-                await self._set_stage(db, job, track_job, "moderating")
+                if not await self._set_stage(db, job, track_job, "moderating"):
+                    return
                 moderation = {
                     "flagged": True,
                     "severity": "high",
@@ -419,14 +437,17 @@ class PipelineWorker:
                     "categorization": None,
                     "edited_transcript": job.edited_transcript,
                 }
-                await self._complete(db, job, track_job, result)
+                completed = await self._complete(db, job, track_job, result)
+                if not completed:
+                    return
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
                     db.commit()
                 return
 
-            await self._set_stage(db, job, track_job, "moderating")
+            if not await self._set_stage(db, job, track_job, "moderating"):
+                return
             moderation = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
             track_job.moderation_json = moderation
             track_job.updated_at = datetime.utcnow()
@@ -434,7 +455,8 @@ class PipelineWorker:
 
             categorization = None
             if not moderation.get("flagged"):
-                await self._set_stage(db, job, track_job, "categorizing")
+                if not await self._set_stage(db, job, track_job, "categorizing"):
+                    return
                 categorization = await self._categorizer.categorize(
                     transcript=transcript_text,
                     segments=segments,
@@ -461,7 +483,9 @@ class PipelineWorker:
                     "duration": rebuilt_audio.duration,
                 } if job.job_type == "rebuild" else None,
             }
-            await self._complete(db, job, track_job, result)
+            completed = await self._complete(db, job, track_job, result)
+            if not completed:
+                return
 
             if job.callback_url:
                 delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))

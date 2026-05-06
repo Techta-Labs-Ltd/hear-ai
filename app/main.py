@@ -76,7 +76,7 @@ Hear AI provides a complete audio processing pipeline including:
 - **Transcription** – standalone speech-to-text with Faster-Whisper (large-v3)
 - **Categorization** – standalone topic tagging
 - **Moderation** – standalone content safety analysis
-- **Reconstruction** – accent-aware speech synthesis (Edge-TTS)
+- **Reconstruction** – same-speaker segment reconstruction (Higgs + fallback TTS)
 
 ### Authentication
 All endpoints (except `/health`) require a service key via **either**:

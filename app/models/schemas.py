@@ -57,12 +57,20 @@ class ModerateRequest(BaseModel):
     text: str
 
 
-class ReconstructRequest(BaseModel):
-    audio_url: str
-    track_id: str
+class SegmentChange(BaseModel):
     segment_start: float
     segment_end: float
     new_text: str
+
+
+class ReconstructRequest(BaseModel):
+    audio_url: str
+    track_id: str
+    changes: list[SegmentChange] = Field(default_factory=list)
+    segment_start: Optional[float] = None
+    segment_end: Optional[float] = None
+    new_text: Optional[str] = None
+    same_speaker: bool = True
 
 
 class JobAccepted(BaseModel):
