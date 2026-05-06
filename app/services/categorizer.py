@@ -152,6 +152,7 @@ class CategorizationService:
                 if platform.blocked_keywords:
                     tags = self._filter_blocked_tags(tags, platform.blocked_keywords)
                 tags = self._ensure_non_empty_tags(tags, categories, transcript, max_tags)
+                tags, categories = self._apply_editorial_rules(transcript, tags, categories, max_tags)
 
                 confidence_scores = {t: 0.85 for t in tags}
 
@@ -199,6 +200,12 @@ class CategorizationService:
         if platform.blocked_keywords:
             merged["tags"] = self._filter_blocked_tags(merged["tags"], platform.blocked_keywords)
         merged["tags"] = self._ensure_non_empty_tags(merged["tags"], merged["categories"], transcript, max_tags)
+        merged["tags"], merged["categories"] = self._apply_editorial_rules(
+            transcript,
+            merged["tags"],
+            merged["categories"],
+            max_tags,
+        )
 
         return {
             "tags": merged["tags"],
@@ -382,6 +389,46 @@ class CategorizationService:
         if words:
             return self._normalize_tags([words[0]])[:max_tags]
         return []
+
+    def _apply_editorial_rules(
+        self,
+        transcript: str,
+        tags: list[str],
+        categories: list[str],
+        max_tags: int,
+    ) -> tuple[list[str], list[str]]:
+        text = (transcript or "").lower()
+        normalized_tags = self._normalize_tags(tags)
+        normalized_categories = [c.strip() for c in (categories or []) if c and c.strip()]
+        sports_terms = (
+            "football", "soccer", "rugby", "tennis", "cricket", "match", "league",
+            "goal", "championship", "tournament", "athlete", "golf",
+        )
+        obituary_terms = (
+            "obituary", "obituaries", "died", "died peacefully", "funeral",
+            "celebration of her life", "celebration of his life", "flowers welcome",
+            "donations may be made", "in memory", "passed away", "aged ",
+        )
+        religion_terms = ("church", "faith", "worship", "catholic", "prayer")
+        obituary_hits = sum(1 for term in obituary_terms if term in text)
+        sports_hits = sum(1 for term in sports_terms if term in text)
+        if obituary_hits >= 2:
+            boosts = ["#obituary", "#localnews", "#community"]
+            if any(term in text for term in religion_terms):
+                boosts.append("#religion")
+            for tag in boosts:
+                t = self._normalize_tag(tag)
+                if t and t not in normalized_tags:
+                    normalized_tags.insert(0, t)
+            if "Obituaries" not in normalized_categories:
+                normalized_categories.insert(0, "Obituaries")
+            if "News" not in normalized_categories:
+                normalized_categories.append("News")
+            if "Community" not in normalized_categories:
+                normalized_categories.append("Community")
+            if sports_hits < 3:
+                normalized_tags = [t for t in normalized_tags if t != "#sports"]
+        return self._normalize_tags(normalized_tags)[:max_tags], normalized_categories[:3]
 
     # ------------------------------------------------------------------
 

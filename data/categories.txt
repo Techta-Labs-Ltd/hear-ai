@@ -423,6 +423,7 @@ Mythology
 Women's Sports
 Baking
 Performing Arts
+Obituaries
 
 [TAGS]
 #BreakingNews
@@ -559,6 +560,7 @@ Performing Arts
 #Album
 #Playlist
 #Podcast
+#Obituary
 #Radio
 #Comedy
 #StandUp
@@ -1090,6 +1092,7 @@ space|NASA|SpaceX|rocket|satellite|astronaut|orbit|Mars|Moon|telescope|cosmos|ga
 ocean|sea|marine|fishing|coast|beach|reef|whale|dolphin|shark|submarine|naval|maritime|port|coral|deep.sea|tidal|mangrove|aquaculture|overfishing|ocean.current|seabed = #Marine
 bitcoin|crypto|blockchain|ethereum|NFT|DeFi|token|mining|wallet|exchange|decentralized|stablecoin|altcoin|smart.contract|DAO|yield|staking|Web3|gas.fee|airdrop|whitepaper = #Cryptocurrency
 podcast|radio|broadcast|listener|episode|host|guest|streaming|audio|recording|interview|series|season|RSS|download|subscribe|microphone|studio|sound|narration|voiceover = #Podcast
+obituary|obituaries|funeral|passed.away|died.peacefully|in.memory|flowers.welcome|celebration.of.her.life|celebration.of.his.life = #Obituary
 documentary|investigation|expose|journalism|reporter|undercover|whistleblower|source|leak|cover.up|scandal|corruption|accountability|transparency|freedom.of.press|censorship = #Investigation
 bank|banking|loan|mortgage|credit|debit|savings|interest|rate|APR|fintech|payment|transaction|ATM|branch|deposit|withdrawal|overdraft|credit.score|debt|refinance = #Finance
 startup|founder|venture|seed|series.A|pivot|scale|unicorn|accelerator|incubator|pitch|MVP|product.market.fit|runway|burn.rate|bootstrapping|co-founder|exit|valuation = #Startup
