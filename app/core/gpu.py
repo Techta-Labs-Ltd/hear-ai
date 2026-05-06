@@ -5,6 +5,8 @@ import torch
 
 from app.config import settings
 
+ml_job_lock = asyncio.Lock()
+
 
 class GPUManager:
     def __init__(self):
@@ -44,13 +46,23 @@ class GPUManager:
         self._active_jobs -= 1
         self._semaphore.release()
 
+    def idle_sync(self) -> None:
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
     @asynccontextmanager
     async def exclusive(self):
-        await self.acquire()
-        try:
-            yield
-        finally:
-            await self.release()
+        async with ml_job_lock:
+            await self.acquire()
+            try:
+                yield
+            finally:
+                self.idle_sync()
+                await self.release()
 
 
 gpu = GPUManager()

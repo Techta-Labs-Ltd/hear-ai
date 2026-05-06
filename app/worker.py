@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.core.db_gate import db_write_lock
-from app.core.gpu import gpu
+from app.core.gpu import gpu, ml_job_lock
 from app.core.downloader import download_audio, cleanup_temp
 from app.core.recording_fetcher import fetch_track
 from app.core.platform_settings import fetch_platform_settings
@@ -95,11 +95,12 @@ class PipelineWorker:
                 .all()
             )
             for job in jobs:
-                payload = self._build_result_payload(job)
-                delivered = await callback_service.send(job.callback_url, payload)
-                if delivered:
-                    job.callback_delivered = True
-                    await self._commit_with_retry(db)
+                async with ml_job_lock:
+                    payload = self._build_result_payload(job)
+                    delivered = await callback_service.send(job.callback_url, payload)
+                    if delivered:
+                        job.callback_delivered = True
+                        await self._commit_with_retry(db)
         finally:
             db.close()
 
@@ -138,6 +139,18 @@ class PipelineWorker:
             "result": None,
             "error": job.error or "unknown",
         }
+
+    async def _deliver_job_callback(self, job_id: str) -> None:
+        db = SessionLocal()
+        try:
+            job = db.query(AiJob).filter(AiJob.id == job_id).first()
+            if not job or not job.callback_url:
+                return
+            delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
+            job.callback_delivered = delivered
+            await self._commit_with_retry(db)
+        finally:
+            db.close()
 
     async def _commit_with_retry(self, db, retries: int = 5):
         for attempt in range(retries):
@@ -185,7 +198,8 @@ class PipelineWorker:
                 gate = self._magic_clean_limit
             if gate:
                 await gate.acquire()
-            await self._process(job_id, actual_run_id)
+            async with ml_job_lock:
+                await self._process(job_id, actual_run_id)
         finally:
             if gate:
                 gate.release()
@@ -381,6 +395,7 @@ class PipelineWorker:
             return
 
     async def _process(self, job_id: str, run_id: str):
+        callback_job_id = None
         use_gpu = False
         db = SessionLocal()
         tmp_path = None
@@ -395,10 +410,8 @@ class PipelineWorker:
             track_job = self._get_or_create_track_run(db, job)
             if job.job_type == "magic_clean":
                 await self._process_magic_clean(job, track_job, db)
-                if job.callback_url:
-                    delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
-                    job.callback_delivered = delivered
-                    await self._commit_with_retry(db)
+                if job.callback_url and job.status == "completed":
+                    callback_job_id = job.id
                 return
             if job.job_type == "reconstruct":
                 if not await self._set_stage(db, job, track_job, "reconstructing"):
@@ -445,9 +458,7 @@ class PipelineWorker:
                 if not completed:
                     return
                 if job.callback_url:
-                    delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
-                    job.callback_delivered = delivered
-                    await self._commit_with_retry(db)
+                    callback_job_id = job.id
                 return
 
             track_id = job.track_id or ""
@@ -531,9 +542,7 @@ class PipelineWorker:
                 if not completed:
                     return
                 if job.callback_url:
-                    delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
-                    job.callback_delivered = delivered
-                    await self._commit_with_retry(db)
+                    callback_job_id = job.id
                 return
 
             if not transcript_text:
@@ -564,9 +573,7 @@ class PipelineWorker:
                 if not completed:
                     return
                 if job.callback_url:
-                    delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
-                    job.callback_delivered = delivered
-                    await self._commit_with_retry(db)
+                    callback_job_id = job.id
                 return
 
             if not await self._set_stage(db, job, track_job, "moderating"):
@@ -612,9 +619,7 @@ class PipelineWorker:
                 return
 
             if job.callback_url:
-                delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
-                job.callback_delivered = delivered
-                await self._commit_with_retry(db)
+                callback_job_id = job.id
 
         except Exception as e:
             sentry_sdk.capture_exception(e)
@@ -664,9 +669,7 @@ class PipelineWorker:
                     track_job.updated_at = now
                 await self._commit_with_retry(fail_db)
                 if job.callback_url:
-                    delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
-                    job.callback_delivered = delivered
-                    await self._commit_with_retry(fail_db)
+                    callback_job_id = job.id
                 await manager.broadcast(job.id, {
                     "event": "job_failed",
                     "job_id": job.id,
@@ -680,11 +683,17 @@ class PipelineWorker:
             finally:
                 fail_db.close()
         finally:
-            db.close()
             if tmp_path:
                 cleanup_temp(tmp_path)
             if use_gpu:
                 try:
+                    gpu.idle_sync()
                     await gpu.release()
                 except Exception:
                     pass
+            db.close()
+            if callback_job_id:
+                try:
+                    await self._deliver_job_callback(callback_job_id)
+                except Exception as exc:
+                    print(f"[WORKER] Callback delivery failed for {callback_job_id}: {exc}")
