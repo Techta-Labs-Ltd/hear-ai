@@ -4,8 +4,10 @@ from datetime import datetime
 
 import httpx
 import sentry_sdk
+from sqlalchemy.exc import OperationalError
 
 from app.config import settings
+from app.core.db_gate import db_write_lock
 from app.core.gpu import gpu
 from app.core.downloader import download_audio, cleanup_temp
 from app.core.recording_fetcher import fetch_track
@@ -91,7 +93,7 @@ class PipelineWorker:
                 delivered = await callback_service.send(job.callback_url, payload)
                 if delivered:
                     job.callback_delivered = True
-                    db.commit()
+                    await self._commit_with_retry(db)
         finally:
             db.close()
 
@@ -115,6 +117,19 @@ class PipelineWorker:
             "result": None,
             "error": job.error or "unknown",
         }
+
+    async def _commit_with_retry(self, db, retries: int = 5):
+        for attempt in range(retries):
+            try:
+                async with db_write_lock:
+                    db.commit()
+                return
+            except OperationalError as exc:
+                db.rollback()
+                if "database is locked" in str(exc).lower() and attempt < retries - 1:
+                    await asyncio.sleep(0.15 * (2 ** attempt))
+                    continue
+                raise
 
     async def _loop(self):
         while self._running:
@@ -258,7 +273,7 @@ class PipelineWorker:
         if not track_job.started_at:
             track_job.started_at = now
         track_job.updated_at = now
-        db.commit()
+        await self._commit_with_retry(db)
         await manager.broadcast(job.id, {
             "event": "stage_changed",
             "job_id": job.id,
@@ -283,7 +298,7 @@ class PipelineWorker:
         track_job.completed_at = now
         track_job.updated_at = now
         track_job.result_json = result
-        db.commit()
+        await self._commit_with_retry(db)
         await manager.broadcast(job.id, {
             "event": "job_completed",
             "job_id": job.id,
@@ -353,7 +368,7 @@ class PipelineWorker:
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
-                    db.commit()
+                    await self._commit_with_retry(db)
                 return
             if job.job_type == "reconstruct":
                 if not await self._set_stage(db, job, track_job, "reconstructing"):
@@ -402,7 +417,7 @@ class PipelineWorker:
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
-                    db.commit()
+                    await self._commit_with_retry(db)
                 return
 
             track_id = job.track_id or ""
@@ -471,7 +486,7 @@ class PipelineWorker:
 
             track_job.transcript = transcript_text or None
             track_job.updated_at = datetime.utcnow()
-            db.commit()
+            await self._commit_with_retry(db)
 
             if job.job_type == "transcription":
                 result = {
@@ -487,7 +502,7 @@ class PipelineWorker:
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
-                    db.commit()
+                    await self._commit_with_retry(db)
                 return
 
             if not transcript_text:
@@ -503,7 +518,7 @@ class PipelineWorker:
                 }
                 track_job.moderation_json = moderation
                 track_job.updated_at = datetime.utcnow()
-                db.commit()
+                await self._commit_with_retry(db)
                 result = {
                     "job_id": job.id,
                     "run_id": job.run_id,
@@ -520,7 +535,7 @@ class PipelineWorker:
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
-                    db.commit()
+                    await self._commit_with_retry(db)
                 return
 
             if not await self._set_stage(db, job, track_job, "moderating"):
@@ -528,7 +543,7 @@ class PipelineWorker:
             moderation = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
             track_job.moderation_json = moderation
             track_job.updated_at = datetime.utcnow()
-            db.commit()
+            await self._commit_with_retry(db)
 
             categorization = None
             if not moderation.get("flagged"):
@@ -543,7 +558,7 @@ class PipelineWorker:
                 )
                 track_job.categorization_json = categorization
                 track_job.updated_at = datetime.utcnow()
-                db.commit()
+                await self._commit_with_retry(db)
 
             result = {
                 "job_id": job.id,
@@ -567,7 +582,7 @@ class PipelineWorker:
             if job.callback_url:
                 delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                 job.callback_delivered = delivered
-                db.commit()
+                await self._commit_with_retry(db)
 
         except Exception as e:
             sentry_sdk.capture_exception(e)
@@ -601,7 +616,7 @@ class PipelineWorker:
                         track_job.error = str(e)[:500]
                         track_job.attempts += 1
                         track_job.updated_at = datetime.utcnow()
-                    fail_db.commit()
+                    await self._commit_with_retry(fail_db)
                     self.enqueue(job.id, job.run_id)
                     return
                 now = datetime.utcnow()
@@ -615,11 +630,11 @@ class PipelineWorker:
                     track_job.error = str(e)[:500]
                     track_job.completed_at = now
                     track_job.updated_at = now
-                fail_db.commit()
+                await self._commit_with_retry(fail_db)
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered
-                    fail_db.commit()
+                    await self._commit_with_retry(fail_db)
                 await manager.broadcast(job.id, {
                     "event": "job_failed",
                     "job_id": job.id,

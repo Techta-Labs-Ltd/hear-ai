@@ -3,12 +3,13 @@ from datetime import datetime
 import uuid
 # todo: check if this is needed
 from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.api.auth import verify_service_key
 from app.config import settings
 from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, SegmentChange, JobAccepted
 from app.models.database import SessionLocal, AiJob, AiTrackJob
+from app.core.db_gate import db_write_lock
 from app.core.downloader import download_audio, cleanup_temp
 from app.realtime.broadcaster import manager, make_sse_response
 from app.services.registry import worker, synthesizer
@@ -43,6 +44,24 @@ def _resolve_reconstruct_payload(body: PipelineRequest | RealtimeRequest) -> dic
         "same_speaker": bool(body.same_speaker),
     }
 
+
+def _is_locked_error(exc: Exception) -> bool:
+    return "database is locked" in str(exc).lower()
+
+
+async def _commit_with_retry(db, retries: int = 5):
+    for attempt in range(retries):
+        try:
+            async with db_write_lock:
+                db.commit()
+            return
+        except OperationalError as exc:
+            db.rollback()
+            if _is_locked_error(exc) and attempt < retries - 1:
+                await asyncio.sleep(0.15 * (2 ** attempt))
+                continue
+            raise
+
 # todo: check if this is needed
 @router.post(
     "/api/v1/process",
@@ -61,55 +80,62 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
     if normalized_job_type == "reconstruct":
         reconstruct_payload = _resolve_reconstruct_payload(body)
     run_id = str(uuid.uuid4())
-    db = SessionLocal()
-    try:
-        existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
-        if existing:
-            if existing.status in ("queued", "running"):
+    for attempt in range(5):
+        db = SessionLocal()
+        try:
+            existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
+            if existing:
+                if existing.status in ("queued", "running"):
+                    return JobAccepted(job_id=body.job_id)
+                existing.run_id = run_id
+                existing.status = "queued"
+                existing.current_stage = None
+                existing.attempts = 0
+                existing.started_at = None
+                existing.completed_at = None
+                existing.error = None
+                existing.result_json = None
+                existing.callback_delivered = False
+                existing.job_type = normalized_job_type
+                existing.max_tags = body.max_tags
+                existing.track_id = body.track_id
+                existing.edited_transcript = body.edited_transcript
+                existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
+                existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
+                await _commit_with_retry(db)
+                worker.enqueue(body.job_id, run_id=run_id)
                 return JobAccepted(job_id=body.job_id)
-            existing.run_id = run_id
-            existing.status = "queued"
-            existing.current_stage = None
-            existing.attempts = 0
-            existing.started_at = None
-            existing.completed_at = None
-            existing.error = None
-            existing.result_json = None
-            existing.callback_delivered = False
-            existing.job_type = normalized_job_type
-            existing.max_tags = body.max_tags
-            existing.track_id = body.track_id
-            existing.edited_transcript = body.edited_transcript
-            existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
-            existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
-            db.commit()
+
+            job = AiJob(
+                id=body.job_id,
+                run_id=run_id,
+                job_type=normalized_job_type,
+                track_id=body.track_id,
+                edited_transcript=body.edited_transcript,
+                status="queued",
+                callback_url=settings.HEAR_CALLBACK_URL or None,
+                max_tags=body.max_tags,
+                input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
+                custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
+                created_at=datetime.utcnow(),
+            )
+            db.add(job)
+            await _commit_with_retry(db)
             worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
-
-        job = AiJob(
-            id=body.job_id,
-            run_id=run_id,
-            job_type=normalized_job_type,
-            track_id=body.track_id,
-            edited_transcript=body.edited_transcript,
-            status="queued",
-            callback_url=settings.HEAR_CALLBACK_URL or None,
-            max_tags=body.max_tags,
-            input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
-            custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
-            created_at=datetime.utcnow(),
-        )
-        db.add(job)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        worker.enqueue(body.job_id, run_id=run_id)
-        return JobAccepted(job_id=body.job_id)
-    finally:
-        db.close()
-
-    worker.enqueue(body.job_id, run_id=run_id)
-    return JobAccepted(job_id=body.job_id)
+        except IntegrityError:
+            db.rollback()
+            worker.enqueue(body.job_id, run_id=run_id)
+            return JobAccepted(job_id=body.job_id)
+        except OperationalError as exc:
+            db.rollback()
+            if _is_locked_error(exc) and attempt < 4:
+                await asyncio.sleep(0.15 * (2 ** attempt))
+                continue
+            raise HTTPException(status_code=503, detail="database_busy_try_again")
+        finally:
+            db.close()
+    raise HTTPException(status_code=503, detail="database_busy_try_again")
 
 
 @router.post(
@@ -129,50 +155,60 @@ async def process_realtime(
     if normalized_job_type == "reconstruct":
         reconstruct_payload = _resolve_reconstruct_payload(body)
     run_id = str(uuid.uuid4())
-    db = SessionLocal()
-    try:
-        existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
-        if existing:
-            if existing.status in ("queued", "running"):
-                return {
-                    "job_id": body.job_id,
-                    "run_id": existing.run_id,
-                    "track_id": existing.track_id,
-                    "sse_url": f"/api/v1/events/{body.job_id}",
-                    "ws_url": f"/ws/{body.job_id}",
-                }
-            existing.run_id = run_id
-            existing.status = "queued"
-            existing.current_stage = None
-            existing.attempts = 0
-            existing.started_at = None
-            existing.completed_at = None
-            existing.error = None
-            existing.result_json = None
-            existing.callback_delivered = False
-            existing.job_type = normalized_job_type
-            existing.max_tags = body.max_tags
-            existing.track_id = body.track_id
-            existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
-            existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
-            db.commit()
-        else:
-            job = AiJob(
-                id=body.job_id,
-                run_id=run_id,
-                job_type=normalized_job_type,
-                track_id=body.track_id,
-                status="queued",
-                callback_url=settings.HEAR_CALLBACK_URL or None,
-                max_tags=body.max_tags,
-                input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
-                custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
-                created_at=datetime.utcnow(),
-            )
-            db.add(job)
-            db.commit()
-    finally:
-        db.close()
+    for attempt in range(5):
+        db = SessionLocal()
+        try:
+            existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
+            if existing:
+                if existing.status in ("queued", "running"):
+                    return {
+                        "job_id": body.job_id,
+                        "run_id": existing.run_id,
+                        "track_id": existing.track_id,
+                        "sse_url": f"/api/v1/events/{body.job_id}",
+                        "ws_url": f"/ws/{body.job_id}",
+                    }
+                existing.run_id = run_id
+                existing.status = "queued"
+                existing.current_stage = None
+                existing.attempts = 0
+                existing.started_at = None
+                existing.completed_at = None
+                existing.error = None
+                existing.result_json = None
+                existing.callback_delivered = False
+                existing.job_type = normalized_job_type
+                existing.max_tags = body.max_tags
+                existing.track_id = body.track_id
+                existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
+                existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
+                await _commit_with_retry(db)
+            else:
+                job = AiJob(
+                    id=body.job_id,
+                    run_id=run_id,
+                    job_type=normalized_job_type,
+                    track_id=body.track_id,
+                    status="queued",
+                    callback_url=settings.HEAR_CALLBACK_URL or None,
+                    max_tags=body.max_tags,
+                    input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
+                    custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
+                    created_at=datetime.utcnow(),
+                )
+                db.add(job)
+                await _commit_with_retry(db)
+            break
+        except OperationalError as exc:
+            db.rollback()
+            if _is_locked_error(exc) and attempt < 4:
+                await asyncio.sleep(0.15 * (2 ** attempt))
+                continue
+            raise HTTPException(status_code=503, detail="database_busy_try_again")
+        finally:
+            db.close()
+    else:
+        raise HTTPException(status_code=503, detail="database_busy_try_again")
 
     worker.enqueue(body.job_id, run_id=run_id)
 
