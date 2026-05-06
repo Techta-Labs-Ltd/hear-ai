@@ -1,4 +1,5 @@
 import asyncio
+import json
 import traceback
 from datetime import datetime
 
@@ -211,15 +212,26 @@ class PipelineWorker:
         if value is None:
             return ""
         if isinstance(value, str):
-            return value.strip()
+            stripped = value.strip()
+            if not stripped:
+                return ""
+            if stripped.startswith("{") or stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                    return self._coerce_transcript_text(parsed)
+                except Exception:
+                    pass
+            return stripped
         if isinstance(value, dict):
-            for key in ("transcript", "text", "content"):
+            for key in ("transcript", "text", "content", "full_text", "value", "result"):
                 nested = value.get(key)
-                if isinstance(nested, str):
-                    return nested.strip()
+                coerced = self._coerce_transcript_text(nested)
+                if coerced:
+                    return coerced
             return ""
         if isinstance(value, list):
-            parts = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+            parts = [self._coerce_transcript_text(v) for v in value]
+            parts = [p for p in parts if p]
             return " ".join(parts).strip()
         return str(value).strip()
 
@@ -469,9 +481,10 @@ class PipelineWorker:
             else:
                 if not await self._set_stage(db, job, track_job, "transcribing"):
                     return
-                if track.transcription and job.job_type != "transcription":
+                reused_transcript = self._coerce_transcript_text(track.transcription) if track.transcription else ""
+                if reused_transcript and job.job_type != "transcription":
                     transcript_data = {
-                        "transcript": self._coerce_transcript_text(track.transcription),
+                        "transcript": reused_transcript,
                         "segments": [],
                         "language": "en",
                         "confidence": 1.0,
