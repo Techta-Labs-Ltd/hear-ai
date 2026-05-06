@@ -17,12 +17,16 @@ class Settings(BaseSettings):
     JOB_MAX_RETRIES: int = 8
     CALLBACK_RETRY_POLL_SECONDS: int = 45
     SQLITE_DB_PATH: str = "./data/jobs.db"
+    HEAR_TMP_DIR: str = ""
+    HEAR_TEMP_RETENTION_SECONDS: int = 172800
+    HEAR_TEMP_SWEEP_INTERVAL_SECONDS: int = 3600
 
     B2_KEY_ID: str = ""
     B2_APPLICATION_KEY: str = ""
     B2_BUCKET_NAME: str = "hear-audio-assets"
     B2_ENDPOINT_URL: str = "https://s3.eu-central-003.backblazeb2.com"
     B2_ENHANCED_PREFIX: str = "enhanced/"
+    B2_PIPELINE_MP3_PREFIX: str = "pipeline-source-mp3/"
 
     CATEGORIES_FILE: str = "./data/categories.txt"
     HARM_KEYWORDS_FILE: str = "./data/harm_keywords.txt"

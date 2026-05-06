@@ -1,8 +1,14 @@
+import asyncio
+import os
 import time
 import traceback
 from datetime import datetime
+from functools import partial
 
+from app.config import settings
+from app.core.audio_utils import convert_wav_file_to_mp3
 from app.core.downloader import download_audio, cleanup_temp
+from app.core.storage import storage
 from app.core.gpu import gpu
 from app.core.platform_settings import fetch_platform_settings
 from app.core.recording_fetcher import effective_transcript_text, fetch_track
@@ -122,12 +128,43 @@ class PipelineOrchestrator:
                         "timestamp": time.time(),
                     })
 
+            compressed_audio = None
+            wav_for_mp3 = None
+            own_wav = False
+            if tmp_path and os.path.isfile(tmp_path):
+                wav_for_mp3 = tmp_path
+            else:
+                wav_for_mp3 = await download_audio(track.audio_url, suffix=".wav")
+                own_wav = True
+            try:
+                loop = asyncio.get_event_loop()
+                mp3_local = await loop.run_in_executor(None, convert_wav_file_to_mp3, wav_for_mp3)
+                try:
+                    b2_key = f"{settings.B2_PIPELINE_MP3_PREFIX}{track_id}/{job_id}-{run_id}.mp3"
+                    url = await loop.run_in_executor(
+                        None,
+                        partial(storage.upload_file, mp3_local, b2_key, "audio/mpeg"),
+                    )
+                    compressed_audio = {
+                        "audio_url": url,
+                        "b2_key": b2_key,
+                        "audio_format": "mp3",
+                    }
+                finally:
+                    cleanup_temp(mp3_local)
+            except Exception as exc:
+                print(f"[REALTIME] Pipeline compressed audio upload skipped: {exc}")
+            finally:
+                if own_wav and wav_for_mp3:
+                    cleanup_temp(wav_for_mp3)
+
             result = {
                 "track_id": track_id,
                 "run_id": run_id,
                 "transcription": transcript,
                 "moderation": moderation_data,
                 "categorization": categorization_data,
+                "compressed_audio": compressed_audio,
             }
 
             self._update_job(

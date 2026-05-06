@@ -7,8 +7,9 @@ import torch
 from faster_whisper import WhisperModel
 
 from app.config import settings
+from app.core.hear_temp import hear_temp_directory
 
-# 
+
 class TranscriptionService:
     def __init__(self):
         self._model = None
@@ -27,7 +28,7 @@ class TranscriptionService:
         return self._model is not None
 
     async def transcribe(self, audio_bytes: bytes) -> dict:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
         try:
@@ -156,7 +157,7 @@ class TranscriptionService:
         }
 
     async def stream(self, audio_bytes: bytes) -> AsyncGenerator[dict, None]:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 

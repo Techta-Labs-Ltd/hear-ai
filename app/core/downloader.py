@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 import httpx
 import torchaudio
 
+from app.core.hear_temp import hear_temp_directory
+
 AUDIO_CONTENT_TYPES = {
     "audio/wav", "audio/wave", "audio/x-wav",
     "audio/mpeg", "audio/mp3", "audio/mp4",
@@ -45,7 +47,7 @@ def _detect_suffix(url: str, content_type: str) -> str:
 
 async def download_audio(url: str, suffix: str | None = None) -> str:
     url = _ensure_https(url)
-    os.makedirs(tempfile.gettempdir(), exist_ok=True)
+    tmp_root = hear_temp_directory()
 
     async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
         response = await client.get(url)
@@ -62,7 +64,7 @@ async def download_audio(url: str, suffix: str | None = None) -> str:
 
         resolved_suffix = suffix or _detect_suffix(url, content_type)
 
-        tmp = tempfile.NamedTemporaryFile(suffix=resolved_suffix, delete=False)
+        tmp = tempfile.NamedTemporaryFile(suffix=resolved_suffix, delete=False, dir=tmp_root)
         tmp.write(response.content)
         tmp.flush()
         tmp.close()
@@ -85,7 +87,7 @@ def cleanup_temp(path: str):
 
 
 def _convert_to_wav(path: str) -> str:
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp_wav:
         wav_path = tmp_wav.name
     try:
         subprocess.run(
@@ -96,7 +98,7 @@ def _convert_to_wav(path: str) -> str:
     except Exception:
         if os.path.exists(wav_path):
             os.unlink(wav_path)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fallback_wav:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as fallback_wav:
             wav_path = fallback_wav.name
         try:
             waveform, sr = torchaudio.load(path)

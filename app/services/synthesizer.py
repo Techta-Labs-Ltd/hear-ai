@@ -17,6 +17,7 @@ import torchaudio.functional as F_audio
 
 from app.config import settings
 from app.core.audio_utils import save_as_mp3
+from app.core.hear_temp import hear_temp_directory
 from app.core.storage import storage
 
 @dataclass
@@ -68,7 +69,7 @@ class SpeechSynthesizer:
             if reference_path and os.path.exists(reference_path):
                 os.unlink(reference_path)
 
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(tts_bytes)
             tts_path = tmp.name
 
@@ -122,7 +123,7 @@ class SpeechSynthesizer:
             finally:
                 if reference_path and os.path.exists(reference_path):
                     os.unlink(reference_path)
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
                 tmp.write(tts_bytes)
                 tts_path = tmp.name
             tts_waveform, tts_sr = torchaudio.load(tts_path)
@@ -189,7 +190,7 @@ class SpeechSynthesizer:
             edited_transcript,
             reference_audio_path=original_audio_path,
         )
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(rebuilt_bytes)
             rebuilt_path = tmp.name
 
@@ -382,7 +383,7 @@ class SpeechSynthesizer:
         start_sample = max(0, start_sample)
         end_sample = max(start_sample + 1, min(end_sample, waveform.shape[1]))
         clip = waveform[:, start_sample:end_sample].detach().cpu()
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp:
             ref_path = tmp.name
         torchaudio.save(ref_path, clip, self.TARGET_SR)
         return ref_path
