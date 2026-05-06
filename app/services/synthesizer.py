@@ -119,19 +119,14 @@ class SpeechSynthesizer:
         start_sample = int(segment_start * self.TARGET_SR)
         end_sample = int(segment_end * self.TARGET_SR)
 
-        tts_bytes = None
         reference_path = None
         if same_speaker:
             reference_path = self._export_reference_clip(original_waveform, start_sample, end_sample)
-            try:
-                tts_bytes = await self._synthesize_higgs(new_text, reference_audio_path=reference_path)
-            except Exception:
-                tts_bytes = None
-            finally:
-                if reference_path and os.path.exists(reference_path):
-                    os.unlink(reference_path)
-        if tts_bytes is None:
-            tts_bytes = await self._synthesize(new_text, voice_id)
+        try:
+            tts_bytes = await self._synthesize_higgs(new_text, reference_audio_path=reference_path)
+        finally:
+            if reference_path and os.path.exists(reference_path):
+                os.unlink(reference_path)
 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp.write(tts_bytes)
@@ -186,19 +181,14 @@ class SpeechSynthesizer:
                 float(change["segment_end"]),
             )
             voice_id = VOICE_MAP.get(detected, DEFAULT_VOICE)
-            tts_bytes = None
             reference_path = None
             if same_speaker:
                 reference_path = self._export_reference_clip(merged, start_sample, end_sample)
-                try:
-                    tts_bytes = await self._synthesize_higgs(change["new_text"], reference_audio_path=reference_path)
-                except Exception:
-                    tts_bytes = None
-                finally:
-                    if reference_path and os.path.exists(reference_path):
-                        os.unlink(reference_path)
-            if tts_bytes is None:
-                tts_bytes = await self._synthesize(change["new_text"], voice_id)
+            try:
+                tts_bytes = await self._synthesize_higgs(change["new_text"], reference_audio_path=reference_path)
+            finally:
+                if reference_path and os.path.exists(reference_path):
+                    os.unlink(reference_path)
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 tmp.write(tts_bytes)
                 tts_path = tmp.name
