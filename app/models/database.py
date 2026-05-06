@@ -1,9 +1,10 @@
 import os
+import sqlite3
 
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Column, String, Integer, DateTime, JSON, Boolean, create_engine, inspect, text, Index
+from sqlalchemy import Column, String, Integer, DateTime, JSON, Boolean, create_engine, inspect, text, Index, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -65,8 +66,27 @@ class AiTrackJob(Base):
     )
 
 
-engine = create_engine(f"sqlite:///{settings.SQLITE_DB_PATH}", echo=False)
+engine = create_engine(
+    f"sqlite:///{settings.SQLITE_DB_PATH}",
+    echo=False,
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 30,
+    },
+)
 SessionLocal = sessionmaker(bind=engine)
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.close()
 
 
 MIGRATIONS = [

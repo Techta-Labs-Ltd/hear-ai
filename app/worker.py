@@ -213,6 +213,34 @@ class PipelineWorker:
             return value
         return []
 
+    def _coerce_reconstruct_payload(self, value) -> tuple[list[dict], bool]:
+        if not isinstance(value, dict):
+            return [], True
+        raw_changes = value.get("changes")
+        same_speaker = bool(value.get("same_speaker", True))
+        if not isinstance(raw_changes, list):
+            return [], same_speaker
+        changes: list[dict] = []
+        for item in raw_changes:
+            if not isinstance(item, dict):
+                continue
+            try:
+                start = float(item.get("segment_start", 0))
+                end = float(item.get("segment_end", 0))
+            except Exception:
+                continue
+            text = self._coerce_transcript_text(item.get("new_text", ""))
+            if end <= start or not text:
+                continue
+            changes.append(
+                {
+                    "segment_start": start,
+                    "segment_end": end,
+                    "new_text": text,
+                }
+            )
+        return changes, same_speaker
+
     def _run_is_current(self, db, job_id: str, run_id: str) -> bool:
         current = db.query(AiJob.run_id).filter(AiJob.id == job_id).scalar()
         return current == run_id
@@ -322,6 +350,55 @@ class PipelineWorker:
             track_job = self._get_or_create_track_run(db, job)
             if job.job_type == "magic_clean":
                 await self._process_magic_clean(job, track_job, db)
+                if job.callback_url:
+                    delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
+                    job.callback_delivered = delivered
+                    db.commit()
+                return
+            if job.job_type == "reconstruct":
+                if not await self._set_stage(db, job, track_job, "reconstructing"):
+                    return
+                changes, same_speaker = self._coerce_reconstruct_payload(job.custom_tags)
+                if not changes:
+                    raise ValueError("reconstruct requires non-empty segment changes")
+                audio_url = self._coerce_transcript_text(job.input_url or "")
+                track_id = self._coerce_transcript_text(job.track_id or "")
+                if not audio_url:
+                    if not track_id:
+                        raise ValueError("reconstruct requires audio_url or track_id")
+                    track = await self._fetch_track_with_retry(track_id)
+                    audio_url = track.audio_url
+                if not audio_url:
+                    raise ValueError("reconstruct source audio_url not found")
+                source_path = await download_audio(audio_url)
+                try:
+                    rebuilt_audio = await self._synthesizer.reconstruct_segments(
+                        original_audio_path=source_path,
+                        track_id=track_id or "unknown-track",
+                        changes=changes,
+                        same_speaker=same_speaker,
+                    )
+                finally:
+                    cleanup_temp(source_path)
+                result = {
+                    "job_id": job.id,
+                    "run_id": job.run_id,
+                    "job_type": "reconstruct",
+                    "track_id": track_id or None,
+                    "source_audio_url": audio_url,
+                    "same_speaker": same_speaker,
+                    "segments_applied": len(changes),
+                    "changes": changes,
+                    "reconstructed_audio": {
+                        "audio_url": rebuilt_audio.audio_url,
+                        "b2_key": rebuilt_audio.b2_key,
+                        "duration": rebuilt_audio.duration,
+                        "audio_format": "mp3",
+                    },
+                }
+                completed = await self._complete(db, job, track_job, result)
+                if not completed:
+                    return
                 if job.callback_url:
                     delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
                     job.callback_delivered = delivered

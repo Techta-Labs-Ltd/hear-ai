@@ -15,13 +15,33 @@ from app.services.registry import worker, synthesizer
 from app.services.callback import callback_service
 
 router = APIRouter(tags=["Pipeline"])
-ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "magic_clean", "rebuild", "transcription", "categorization"}
+ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "magic_clean", "rebuild", "reconstruct", "transcription", "categorization"}
 
 
 def _normalize_pipeline_job_type(job_type: str) -> str:
     if job_type == "magic-clean":
         return "magic_clean"
     return job_type
+
+
+def _resolve_reconstruct_payload(body: PipelineRequest | RealtimeRequest) -> dict:
+    changes: list[SegmentChange] = list(body.changes or [])
+    if not changes:
+        raise HTTPException(
+            status_code=422,
+            detail="reconstruct submitted via /api/v1/process requires changes[] (array of segments)",
+        )
+    return {
+        "changes": [
+            {
+                "segment_start": c.segment_start,
+                "segment_end": c.segment_end,
+                "new_text": c.new_text,
+            }
+            for c in changes
+        ],
+        "same_speaker": bool(body.same_speaker),
+    }
 
 # todo: check if this is needed
 @router.post(
@@ -37,6 +57,9 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
         raise HTTPException(status_code=422, detail=f"Unsupported job_type: {body.job_type}")
     if normalized_job_type == "rebuild" and not (body.edited_transcript or "").strip():
         raise HTTPException(status_code=422, detail="edited_transcript is required for rebuild")
+    reconstruct_payload = None
+    if normalized_job_type == "reconstruct":
+        reconstruct_payload = _resolve_reconstruct_payload(body)
     run_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
@@ -57,6 +80,8 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
             existing.max_tags = body.max_tags
             existing.track_id = body.track_id
             existing.edited_transcript = body.edited_transcript
+            existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
+            existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
             db.commit()
             worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
@@ -70,6 +95,8 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
             status="queued",
             callback_url=settings.HEAR_CALLBACK_URL or None,
             max_tags=body.max_tags,
+            input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
+            custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
             created_at=datetime.utcnow(),
         )
         db.add(job)
@@ -98,6 +125,9 @@ async def process_realtime(
     normalized_job_type = _normalize_pipeline_job_type(body.job_type)
     if body.job_type not in ALLOWED_JOB_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported job_type: {body.job_type}")
+    reconstruct_payload = None
+    if normalized_job_type == "reconstruct":
+        reconstruct_payload = _resolve_reconstruct_payload(body)
     run_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
@@ -123,6 +153,8 @@ async def process_realtime(
             existing.job_type = normalized_job_type
             existing.max_tags = body.max_tags
             existing.track_id = body.track_id
+            existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
+            existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
             db.commit()
         else:
             job = AiJob(
@@ -133,6 +165,8 @@ async def process_realtime(
                 status="queued",
                 callback_url=settings.HEAR_CALLBACK_URL or None,
                 max_tags=body.max_tags,
+                input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
+                custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
                 created_at=datetime.utcnow(),
             )
             db.add(job)

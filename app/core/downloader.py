@@ -4,6 +4,7 @@ import tempfile
 from urllib.parse import urlparse
 
 import httpx
+import torchaudio
 
 AUDIO_CONTENT_TYPES = {
     "audio/wav", "audio/wave", "audio/x-wav",
@@ -94,10 +95,22 @@ def _convert_to_wav(path: str) -> str:
             check=True,
             capture_output=True,
         )
-    except Exception as exc:
+    except Exception:
         if os.path.exists(wav_path):
             os.unlink(wav_path)
-        raise ValueError(f"Failed to normalize audio to wav: {exc}") from exc
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fallback_wav:
+            wav_path = fallback_wav.name
+        try:
+            waveform, sr = torchaudio.load(path)
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            if sr != 44100:
+                waveform = torchaudio.functional.resample(waveform, sr, 44100)
+            torchaudio.save(wav_path, waveform, 44100)
+        except Exception as exc:
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)
+            raise ValueError(f"Failed to normalize audio to wav: {exc}") from exc
     if not os.path.exists(wav_path) or os.path.getsize(wav_path) == 0:
         if os.path.exists(wav_path):
             os.unlink(wav_path)

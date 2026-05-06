@@ -12,12 +12,24 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class SegmentChange(BaseModel):
+    segment_start: float
+    segment_end: float
+    new_text: str
+
+
 class PipelineRequest(BaseModel):
     job_id: str
     track_id: str
     job_type: str = "pipeline"
     max_tags: int = 8
     edited_transcript: Optional[str] = None
+    audio_url: Optional[str] = None
+    changes: list[SegmentChange] = Field(default_factory=list)
+    segment_start: Optional[float] = None
+    segment_end: Optional[float] = None
+    new_text: Optional[str] = None
+    same_speaker: bool = True
     grouped: bool = False
     group_id: Optional[str] = None
     kind: str = "track"
@@ -30,6 +42,12 @@ class RealtimeRequest(BaseModel):
     track_id: str
     job_type: str = "pipeline"
     max_tags: int = 8
+    audio_url: Optional[str] = None
+    changes: list[SegmentChange] = Field(default_factory=list)
+    segment_start: Optional[float] = None
+    segment_end: Optional[float] = None
+    new_text: Optional[str] = None
+    same_speaker: bool = True
     grouped: bool = False
     group_id: Optional[str] = None
     kind: str = "track"
@@ -55,12 +73,6 @@ class CategorizeRequest(BaseModel):
 
 class ModerateRequest(BaseModel):
     text: str
-
-
-class SegmentChange(BaseModel):
-    segment_start: float
-    segment_end: float
-    new_text: str
 
 
 class ReconstructRequest(BaseModel):
