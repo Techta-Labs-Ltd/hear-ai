@@ -200,21 +200,21 @@ class AudioEnhancer:
     def _deepfilter_denoise(self, w: torch.Tensor) -> torch.Tensor:
         original_len = w.shape[1]
         try:
-            w_cpu = w.cpu()
-            w_48k = self._resample(w_cpu, self.TARGET_SR, self.DFN_SR)
+            w_cpu = w.detach().to("cpu").contiguous()
+            w_48k = self._resample(w_cpu, self.TARGET_SR, self.DFN_SR).contiguous()
             with self._dfn_lock:
                 _, fresh_state, _ = init_df()
                 with torch.no_grad():
-                    clean = df_enhance(self._dfn_model, fresh_state, w_48k)
+                    clean = df_enhance(self._dfn_model, fresh_state, w_48k.contiguous())
             if isinstance(clean, np.ndarray):
                 clean = torch.from_numpy(clean.copy())
             if clean.dim() == 1:
                 clean = clean.unsqueeze(0)
-            clean = self._resample(clean.float(), self.DFN_SR, self.TARGET_SR).to(self._device)
+            clean = self._resample(clean.float().contiguous(), self.DFN_SR, self.TARGET_SR).contiguous().to(self._device)
             if clean.shape[1] < original_len:
                 pad = torch.zeros((1, original_len - clean.shape[1]), device=clean.device)
                 clean = torch.cat([clean, pad], dim=1)
-            return clean[:, :original_len]
+            return clean[:, :original_len].contiguous()
         except Exception as e:
             logger.error("DeepFilterNet failed: %s", e)
             return w
