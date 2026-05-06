@@ -143,6 +143,8 @@ def _collect_audio_urls(result: dict) -> list[tuple[str, str]]:
                 urls.append((f"enhanced_audio_url[{track_id}]", entry["enhanced_url"]))
     if isinstance(result.get("audio_url"), str):
         urls.append(("audio_url", result["audio_url"]))
+    if isinstance(result.get("source_audio_url"), str):
+        urls.append(("source_audio_url", result["source_audio_url"]))
     return urls
 
 
@@ -221,7 +223,10 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
                         for label, url in audio_urls:
                             log("pass", f"{label}: {url}")
                     else:
-                        log("warn", "No audio URLs found in result payload")
+                        if (result.get("job_type") or "") == "pipeline":
+                            log("pass", "No output audio URL expected for pipeline job")
+                        else:
+                            log("warn", "No audio URLs found in result payload")
 
                 return transcript
 

@@ -578,6 +578,7 @@ class PipelineWorker:
                 "run_id": job.run_id,
                 "job_type": job.job_type,
                 "track_id": track.track_id,
+                "source_audio_url": track.audio_url,
                 "transcription": transcript_data,
                 "moderation": moderation,
                 "categorization": categorization,
