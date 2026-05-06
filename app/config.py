@@ -29,9 +29,7 @@ class Settings(BaseSettings):
     MODERATION_AUTO_LEARN: bool = False
     HIGGS_AUDIO_ENABLED: bool = True
     HIGGS_AUDIO_MODULE: str = "boson_multimodal"
-    HIGGS_AUDIO_INSTALL_SPEC: str = "git+https://github.com/boson-ai/higgs-audio.git"
-    HIGGS_AUDIO_REPO_URL: str = "https://github.com/boson-ai/higgs-audio.git"
-    HIGGS_AUDIO_REPO_DIR: str = "/tmp/higgs-audio"
+    HIGGS_AUDIO_REPO_DIR: str = "/workspace/higgs-audio"
     HIGGS_AUDIO_VOICE: str = "en_us_001"
     HIGGS_AUDIO_MODEL_PATH: str = "bosonai/higgs-audio-v2-generation-3B-base"
     HIGGS_AUDIO_TOKENIZER_PATH: str = "bosonai/higgs-audio-v2-tokenizer"

@@ -7,7 +7,6 @@ import wave
 from dataclasses import dataclass
 import importlib.util
 import importlib
-import subprocess
 import sys
 from pathlib import Path
 
@@ -36,10 +35,7 @@ class SpeechSynthesizer:
 
     def load(self):
         if settings.HIGGS_AUDIO_ENABLED:
-            try:
-                self._ensure_higgs_module_available(allow_install=True)
-            except Exception as exc:
-                print(f"[SYNTH] Higgs auto-install skipped: {exc}")
+            self._ensure_higgs_module_available()
         self._loaded = True
 
     @property
@@ -226,7 +222,7 @@ class SpeechSynthesizer:
             text = " "
         if not settings.HIGGS_AUDIO_ENABLED:
             raise RuntimeError("Higgs audio is disabled")
-        module_name = self._ensure_higgs_module_available(allow_install=True)
+        module_name = self._ensure_higgs_module_available()
         return await asyncio.get_event_loop().run_in_executor(
             None,
             self._run_local_higgs,
@@ -277,18 +273,8 @@ class SpeechSynthesizer:
             raise RuntimeError(f"Local {module_name} module did not return audio bytes ({exc})") from exc
 
     def _run_boson_engine(self, text: str, reference_audio_path: str | None = None) -> bytes:
-        repo_dir = Path((settings.HIGGS_AUDIO_REPO_DIR or "/tmp/higgs-audio").strip())
-        if repo_dir.exists():
-            repo_path = str(repo_dir)
-            if repo_path not in sys.path:
-                sys.path.insert(0, repo_path)
-            importlib.invalidate_caches()
-        try:
-            HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
-        except Exception:
-            self._install_higgs_repo()
-            importlib.invalidate_caches()
-            HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
+        self._inject_higgs_repo_path()
+        HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
 
         if self._higgs_engine is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -353,27 +339,14 @@ class SpeechSynthesizer:
             wf.writeframes(pcm_i16.tobytes())
         return buffer.getvalue()
 
-    def _ensure_higgs_module_available(self, allow_install: bool) -> str:
+    def _ensure_higgs_module_available(self) -> str:
         module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
+        self._inject_higgs_repo_path()
         if self._is_higgs_module_ready(module_name):
             return module_name
-        if allow_install:
-            self._install_higgs_repo()
-            if self._is_higgs_module_ready(module_name):
-                return module_name
-            install_spec = (settings.HIGGS_AUDIO_INSTALL_SPEC or "").strip()
-            if install_spec:
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", install_spec],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                if self._is_higgs_module_ready(module_name):
-                    return module_name
         raise RuntimeError(
-            f"{module_name} module is not installed for self-hosted rebuild. "
-            f"Set HIGGS_AUDIO_INSTALL_SPEC to a valid pip spec."
+            f"{module_name} module is not available from HIGGS_AUDIO_REPO_DIR="
+            f"{settings.HIGGS_AUDIO_REPO_DIR}. Install Higgs in that path and restart."
         )
 
     def _is_higgs_module_ready(self, module_name: str) -> bool:
@@ -392,46 +365,13 @@ class SpeechSynthesizer:
         except Exception:
             return None
 
-    def _install_higgs_repo(self):
-        repo_url = (settings.HIGGS_AUDIO_REPO_URL or "").strip()
-        if not repo_url:
-            return
-        repo_dir = Path((settings.HIGGS_AUDIO_REPO_DIR or "/tmp/higgs-audio").strip())
-        subprocess.run(
-            [sys.executable, "-m", "pip", "uninstall", "-y", "boson-multimodal", "boson_multimodal"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        repo_dir.parent.mkdir(parents=True, exist_ok=True)
-        if not repo_dir.exists():
-            subprocess.run(
-                ["git", "clone", repo_url, str(repo_dir)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        else:
-            subprocess.run(
-                ["git", "-C", str(repo_dir), "pull", "--ff-only"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        req = repo_dir / "requirements.txt"
-        if req.exists():
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", str(req)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-e", str(repo_dir)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+    def _inject_higgs_repo_path(self):
+        repo_dir = Path((settings.HIGGS_AUDIO_REPO_DIR or "/workspace/higgs-audio").strip())
+        if repo_dir.exists():
+            repo_path = str(repo_dir)
+            if repo_path not in sys.path:
+                sys.path.insert(0, repo_path)
+            importlib.invalidate_caches()
 
     def _export_reference_clip(self, waveform: torch.Tensor, start_sample: int, end_sample: int) -> str:
         start_sample = max(0, start_sample)
