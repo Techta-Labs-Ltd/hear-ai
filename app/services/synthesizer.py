@@ -277,6 +277,12 @@ class SpeechSynthesizer:
             raise RuntimeError(f"Local {module_name} module did not return audio bytes ({exc})") from exc
 
     def _run_boson_engine(self, text: str, reference_audio_path: str | None = None) -> bytes:
+        repo_dir = Path((settings.HIGGS_AUDIO_REPO_DIR or "/tmp/higgs-audio").strip())
+        if repo_dir.exists():
+            repo_path = str(repo_dir)
+            if repo_path not in sys.path:
+                sys.path.insert(0, repo_path)
+            importlib.invalidate_caches()
         from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine
         from boson_multimodal.data_types import ChatMLSample, Message
 
@@ -318,11 +324,11 @@ class SpeechSynthesizer:
 
     def _ensure_higgs_module_available(self, allow_install: bool) -> str:
         module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
-        if importlib.util.find_spec(module_name) is not None:
+        if self._is_higgs_module_ready(module_name):
             return module_name
         if allow_install:
             self._install_higgs_repo()
-            if importlib.util.find_spec(module_name) is not None:
+            if self._is_higgs_module_ready(module_name):
                 return module_name
             install_spec = (settings.HIGGS_AUDIO_INSTALL_SPEC or "").strip()
             if install_spec:
@@ -332,12 +338,19 @@ class SpeechSynthesizer:
                     capture_output=True,
                     text=True,
                 )
-                if importlib.util.find_spec(module_name) is not None:
+                if self._is_higgs_module_ready(module_name):
                     return module_name
         raise RuntimeError(
             f"{module_name} module is not installed for self-hosted rebuild. "
             f"Set HIGGS_AUDIO_INSTALL_SPEC to a valid pip spec."
         )
+
+    def _is_higgs_module_ready(self, module_name: str) -> bool:
+        if importlib.util.find_spec(module_name) is None:
+            return False
+        if module_name == "boson_multimodal":
+            return importlib.util.find_spec("boson_multimodal.serve.serve_engine") is not None
+        return True
 
     def _install_higgs_repo(self):
         repo_url = (settings.HIGGS_AUDIO_REPO_URL or "").strip()
