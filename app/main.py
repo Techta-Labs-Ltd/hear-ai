@@ -52,13 +52,12 @@ async def lifespan(application: FastAPI):
     categorizer.load()
     moderator.load()
     synthesizer.load()
-    # Qwen loads last — needs the most VRAM and only activates on GPU machines
-    print("[STARTUP] Loading Qwen2.5-7B (GPU only, no token needed)...")
+    print("[STARTUP] Loading optional Qwen LLM...")
     llm_service.load()
     if llm_service.is_available:
-        print("[STARTUP] Qwen2.5-7B ready — moderation + tagging will use LLM path")
+        print("[STARTUP] Qwen2.5-7B ready — moderation + categorization use LLM")
     else:
-        print("[STARTUP] Qwen not available — using toxic-bert + NLI fallback pipeline")
+        print("[STARTUP] Qwen off or unavailable — toxic-bert + NLI (fast path for single-GPU production)")
     print("[STARTUP] Models loaded. Starting worker...")
     await worker.start()
     print("[STARTUP] Ready.")
@@ -73,7 +72,7 @@ Hear AI provides a complete audio processing pipeline including:
 
 - **Pipeline** – transcription, moderation, categorization
 - **Magic Clean** – standalone vocal isolation & noise removal via Demucs
-- **Transcription** – standalone speech-to-text with Faster-Whisper (large-v3)
+- **Transcription** – standalone speech-to-text with Faster-Whisper (default distil-large-v3, tunable)
 - **Categorization** – standalone topic tagging
 - **Moderation** – standalone content safety analysis
 - **Reconstruction** – same-speaker segment reconstruction (Higgs + fallback TTS)

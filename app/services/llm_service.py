@@ -6,6 +6,8 @@ import threading
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from app.config import settings as app_settings
+
 try:
     from transformers import BitsAndBytesConfig
     _BNB_AVAILABLE = True
@@ -27,6 +29,9 @@ class LLMService:
         self._available = False
 
     def load(self):
+        if not app_settings.QWEN_LLM_ENABLED:
+            logger.info("[LLM] Qwen disabled (QWEN_LLM_ENABLED=false) — toxic-bert + NLI path")
+            return
         if not self._has_enough_gpu():
             logger.info("[LLM] No GPU with ≥%.1f GB VRAM — LLM disabled", MIN_VRAM_GB)
             return

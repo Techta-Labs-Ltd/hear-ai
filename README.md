@@ -128,7 +128,13 @@ Key variables from `.env.example`:
 | `MAX_CONCURRENT_JOBS` | Global concurrency |
 | `MAX_CONCURRENT_PIPELINE_JOBS` | Pipeline/rebuild concurrency |
 | `MAX_CONCURRENT_MAGIC_CLEAN_JOBS` | Magic clean concurrency |
-| `WHISPER_MODEL_SIZE` | Whisper size |
+| `JOB_MAX_RETRIES` | Re-queue processing after transient errors (before terminal `failed`) |
+| `CALLBACK_RETRY_POLL_SECONDS` | Background interval to POST undelivered completed/failed callbacks |
+| `WHISPER_MODEL_SIZE` | Whisper model id (default `distil-large-v3` for speed on one GPU) |
+| `WHISPER_DUAL_PASS` | Second relaxed pass when first pass is empty (`false` = faster) |
+| `WHISPER_BEAM_SIZE` | Decoder beam width (`1` = fastest) |
+| `WHISPER_WORD_TIMESTAMPS` | Word-level timestamps (`false` = faster) |
+| `QWEN_LLM_ENABLED` | Load Qwen for moderation/categorization (`false` = faster, BERT+NLI only) |
 | `DEMUCS_MODEL` | Enhancement model |
 | `MODERATION_AUTO_LEARN` | Enable/disable phrase auto-learning in moderation |
 | `HIGGS_AUDIO_ENABLED` | Enable self-hosted Higgs rebuild path |

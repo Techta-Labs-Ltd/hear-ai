@@ -3,7 +3,6 @@ import json
 import traceback
 from datetime import datetime
 
-import httpx
 import sentry_sdk
 from sqlalchemy.exc import OperationalError
 
@@ -17,7 +16,6 @@ from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
 
-MAX_RETRIES = 3
 FETCH_RETRIES = 5
 FETCH_BASE_DELAY = 3
 
@@ -33,9 +31,9 @@ class PipelineWorker:
         self._running = False
         self._loop_task = None
         self._inflight: set[asyncio.Task] = set()
-        self._global_limit = asyncio.Semaphore(settings.MAX_CONCURRENT_JOBS)
-        self._pipeline_limit = asyncio.Semaphore(settings.MAX_CONCURRENT_PIPELINE_JOBS)
-        self._magic_clean_limit = asyncio.Semaphore(settings.MAX_CONCURRENT_MAGIC_CLEAN_JOBS)
+        self._global_limit = asyncio.Semaphore(max(1, settings.MAX_CONCURRENT_JOBS))
+        self._pipeline_limit = asyncio.Semaphore(max(1, settings.MAX_CONCURRENT_PIPELINE_JOBS))
+        self._magic_clean_limit = asyncio.Semaphore(max(1, settings.MAX_CONCURRENT_MAGIC_CLEAN_JOBS))
 
     async def start(self):
         self._running = True
@@ -65,12 +63,11 @@ class PipelineWorker:
                 db.query(AiJob)
                 .filter(
                     AiJob.status.in_(["queued", "running"]),
-                    AiJob.attempts < MAX_RETRIES,
+                    AiJob.attempts < settings.JOB_MAX_RETRIES,
                 )
                 .all()
             )
             for job in jobs:
-                job.attempts += 1
                 job.status = "queued"
                 job.current_stage = None
             db.commit()
@@ -83,28 +80,40 @@ class PipelineWorker:
 
     async def _retry_undelivered_callbacks(self):
         await asyncio.sleep(10)
-        db = SessionLocal()
-        try:
-            jobs = (
-                db.query(AiJob)
-                .filter(
-                    AiJob.status.in_(["completed", "failed"]),
-                    AiJob.callback_url.isnot(None),
-                    AiJob.callback_delivered == False,
-                )
-                .all()
-            )
-            for job in jobs:
+        while self._running:
+            db = SessionLocal()
+            try:
+                pending_ids = [
+                    row[0]
+                    for row in db.query(AiJob.id).filter(
+                        AiJob.status.in_(["completed", "failed"]),
+                        AiJob.callback_url.isnot(None),
+                        AiJob.callback_delivered == False,
+                    ).all()
+                ]
+            finally:
+                db.close()
+            for jid in pending_ids:
                 async with ml_job_lock:
-                    payload = self._build_result_payload(job)
-                    delivered = await callback_service.send(job.callback_url, payload)
-                    if delivered:
-                        job.callback_delivered = True
-                        await self._commit_with_retry(db)
-        finally:
-            db.close()
+                    rdb = SessionLocal()
+                    try:
+                        job = rdb.query(AiJob).filter(AiJob.id == jid).first()
+                        if not job or job.callback_delivered or job.status not in ("completed", "failed"):
+                            continue
+                        payload = self._build_result_payload(job)
+                        if not payload:
+                            continue
+                        delivered = await callback_service.send(job.callback_url, payload)
+                        if delivered:
+                            job.callback_delivered = True
+                            await self._commit_with_retry(rdb)
+                    finally:
+                        rdb.close()
+            await asyncio.sleep(max(15, settings.CALLBACK_RETRY_POLL_SECONDS))
 
-    def _build_result_payload(self, job: AiJob) -> dict:
+    def _build_result_payload(self, job: AiJob) -> dict | None:
+        if job.status not in ("completed", "failed"):
+            return None
         if job.status == "completed":
             result_obj = job.result_json
             if isinstance(result_obj, str):
@@ -130,15 +139,17 @@ class PipelineWorker:
                 "result": result_obj,
                 "error": None,
             }
-        return {
-            "job_id": job.id,
-            "run_id": job.run_id,
-            "track_id": job.track_id,
-            "job_type": job.job_type,
-            "status": "failed",
-            "result": None,
-            "error": job.error or "unknown",
-        }
+        if job.status == "failed":
+            return {
+                "job_id": job.id,
+                "run_id": job.run_id,
+                "track_id": job.track_id,
+                "job_type": job.job_type,
+                "status": "failed",
+                "result": None,
+                "error": job.error or "unknown",
+            }
+        return None
 
     async def _deliver_job_callback(self, job_id: str) -> None:
         db = SessionLocal()
@@ -146,7 +157,10 @@ class PipelineWorker:
             job = db.query(AiJob).filter(AiJob.id == job_id).first()
             if not job or not job.callback_url:
                 return
-            delivered = await callback_service.send(job.callback_url, self._build_result_payload(job))
+            payload = self._build_result_payload(job)
+            if not payload:
+                return
+            delivered = await callback_service.send(job.callback_url, payload)
             job.callback_delivered = delivered
             await self._commit_with_retry(db)
         finally:
@@ -396,6 +410,7 @@ class PipelineWorker:
 
     async def _process(self, job_id: str, run_id: str):
         callback_job_id = None
+        failed_sse: dict | None = None
         use_gpu = False
         db = SessionLocal()
         tmp_path = None
@@ -642,8 +657,8 @@ class PipelineWorker:
                     )
                     .first()
                 )
-                non_retryable = isinstance(e, (ValueError, TypeError, AttributeError, httpx.HTTPStatusError))
-                if not non_retryable and job.attempts < MAX_RETRIES:
+                non_retryable = isinstance(e, (ValueError, TypeError, AttributeError))
+                if not non_retryable and job.attempts < settings.JOB_MAX_RETRIES:
                     job.status = "queued"
                     job.current_stage = None
                     job.attempts += 1
@@ -670,7 +685,7 @@ class PipelineWorker:
                 await self._commit_with_retry(fail_db)
                 if job.callback_url:
                     callback_job_id = job.id
-                await manager.broadcast(job.id, {
+                failed_sse = {
                     "event": "job_failed",
                     "job_id": job.id,
                     "run_id": job.run_id,
@@ -679,7 +694,7 @@ class PipelineWorker:
                     "status": "failed",
                     "current_stage": None,
                     "error": job.error,
-                })
+                }
             finally:
                 fail_db.close()
         finally:
@@ -697,3 +712,8 @@ class PipelineWorker:
                     await self._deliver_job_callback(callback_job_id)
                 except Exception as exc:
                     print(f"[WORKER] Callback delivery failed for {callback_job_id}: {exc}")
+            if failed_sse:
+                try:
+                    await manager.broadcast(failed_sse["job_id"], failed_sse)
+                except Exception:
+                    pass

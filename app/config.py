@@ -1,15 +1,21 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 
+
 class Settings(BaseSettings):
     AI_SERVICE_SECRET: str = "change-me"
     HEAR_BACKEND_URL: str = "http://localhost:3000"
     HEAR_CALLBACK_URL: str = ""
-    WHISPER_MODEL_SIZE: str = "large-v3"
+    WHISPER_MODEL_SIZE: str = "distil-large-v3"
+    WHISPER_DUAL_PASS: bool = False
+    WHISPER_BEAM_SIZE: int = 1
+    WHISPER_WORD_TIMESTAMPS: bool = False
+    QWEN_LLM_ENABLED: bool = False
     MAX_CONCURRENT_GPU_JOBS: int = 1
     MAX_CONCURRENT_JOBS: int = 1
     MAX_CONCURRENT_PIPELINE_JOBS: int = 1
     MAX_CONCURRENT_MAGIC_CLEAN_JOBS: int = 1
+    JOB_MAX_RETRIES: int = 8
+    CALLBACK_RETRY_POLL_SECONDS: int = 45
     SQLITE_DB_PATH: str = "./data/jobs.db"
 
     B2_KEY_ID: str = ""
@@ -38,7 +44,7 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.3
     ENVIRONMENT: str = "production"
-    ENABLE_DOCS: bool = True
+    ENABLE_DOCS: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

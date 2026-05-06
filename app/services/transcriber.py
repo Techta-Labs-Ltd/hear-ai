@@ -59,6 +59,8 @@ class TranscriptionService:
             "confidence": 0.0, "silent": True,
         }
         strict = self._run_pass(path, relaxed=False)
+        if not strict.get("silent") and not settings.WHISPER_DUAL_PASS:
+            return strict
         if not strict.get("silent"):
             word_count = len(strict.get("transcript", "").split())
             if word_count >= 40:
@@ -80,9 +82,9 @@ class TranscriptionService:
         }
         try:
             kwargs = {
-                "beam_size": 5,
+                "beam_size": max(1, settings.WHISPER_BEAM_SIZE),
                 "language": None,
-                "word_timestamps": True,
+                "word_timestamps": settings.WHISPER_WORD_TIMESTAMPS,
                 "condition_on_previous_text": False,
             }
             if relaxed:
@@ -165,9 +167,9 @@ class TranscriptionService:
             try:
                 segments_gen, info = self._model.transcribe(
                     tmp_path,
-                    beam_size=5,
+                    beam_size=max(1, settings.WHISPER_BEAM_SIZE),
                     vad_filter=True,
-                    word_timestamps=True,
+                    word_timestamps=settings.WHISPER_WORD_TIMESTAMPS,
                     condition_on_previous_text=False,
                 )
                 for seg in segments_gen:
