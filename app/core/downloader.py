@@ -85,8 +85,6 @@ def cleanup_temp(path: str):
 
 
 def _convert_to_wav(path: str) -> str:
-    if os.path.splitext(path)[1].lower() == ".wav":
-        return path
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
         wav_path = tmp_wav.name
     try:

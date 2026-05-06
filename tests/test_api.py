@@ -122,6 +122,28 @@ def _extract_track_payload(data: dict, requested_track_id: str) -> dict:
     return data
 
 
+def _collect_audio_urls(result: dict) -> list[tuple[str, str]]:
+    urls: list[tuple[str, str]] = []
+    if not isinstance(result, dict):
+        return urls
+    rebuilt = result.get("rebuilt_audio")
+    if isinstance(rebuilt, dict) and isinstance(rebuilt.get("audio_url"), str):
+        urls.append(("rebuilt_audio_url", rebuilt["audio_url"]))
+    reconstructed = result.get("reconstructed_audio")
+    if isinstance(reconstructed, dict) and isinstance(reconstructed.get("audio_url"), str):
+        urls.append(("reconstructed_audio_url", reconstructed["audio_url"]))
+    enhancement = result.get("enhancement")
+    if isinstance(enhancement, dict):
+        if isinstance(enhancement.get("enhanced_url"), str):
+            urls.append(("enhanced_audio_url", enhancement["enhanced_url"]))
+        for track_id, entry in enhancement.items():
+            if isinstance(entry, dict) and isinstance(entry.get("enhanced_url"), str):
+                urls.append((f"enhanced_audio_url[{track_id}]", entry["enhanced_url"]))
+    if isinstance(result.get("audio_url"), str):
+        urls.append(("audio_url", result["audio_url"]))
+    return urls
+
+
 async def test_pipeline_submit(client: httpx.AsyncClient):
     print("\n[4/9] Pipeline Job Submission")
     job_id = str(uuid.uuid4())
@@ -191,6 +213,12 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
 
                     if not transcript:
                         log("warn", "No transcription text found in result")
+                    audio_urls = _collect_audio_urls(result)
+                    if audio_urls:
+                        for label, url in audio_urls:
+                            log("pass", f"{label}: {url}")
+                    else:
+                        log("warn", "No audio URLs found in result payload")
 
                 return transcript
 
