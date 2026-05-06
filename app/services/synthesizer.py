@@ -397,6 +397,12 @@ class SpeechSynthesizer:
         if not repo_url:
             return
         repo_dir = Path((settings.HIGGS_AUDIO_REPO_DIR or "/tmp/higgs-audio").strip())
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "boson-multimodal", "boson_multimodal"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         repo_dir.parent.mkdir(parents=True, exist_ok=True)
         if not repo_dir.exists():
             subprocess.run(
