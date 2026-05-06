@@ -297,26 +297,19 @@ class SpeechSynthesizer:
 
     def _generate_with_compat(self, sample):
         generate = self._higgs_engine.generate
-        kwargs = {
-            "chat_ml_sample": sample,
-            "max_new_tokens": 1024,
-            "temperature": 0.3,
-            "top_p": 0.95,
-            "top_k": 50,
-            "stop_strings": ["<|end_of_text|>", "<|eot_id|>"],
-        }
         try:
-            sig = inspect.signature(generate)
-            allowed = set(sig.parameters.keys())
-            filtered = {k: v for k, v in kwargs.items() if k in allowed}
-            if "chat_ml_sample" not in filtered and allowed:
-                first_param = next(iter(allowed))
-                filtered[first_param] = sample
-            return generate(**filtered)
-        except Exception:
+            return generate(
+                chat_ml_sample=sample,
+                max_new_tokens=1024,
+                temperature=0.3,
+                top_p=0.95,
+                top_k=50,
+                stop_strings=["<|end_of_text|>", "<|eot_id|>"],
+            )
+        except TypeError:
             try:
                 return generate(chat_ml_sample=sample)
-            except Exception:
+            except TypeError:
                 return generate(sample)
 
     def _load_boson_symbols(self):
