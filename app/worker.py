@@ -151,9 +151,7 @@ class PipelineWorker:
         while self._running:
             try:
                 job_id, run_id = await asyncio.wait_for(self._queue.get(), timeout=2.0)
-                task = asyncio.create_task(self._process_with_limits(job_id, run_id))
-                self._inflight.add(task)
-                task.add_done_callback(self._inflight.discard)
+                await self._process_with_limits(job_id, run_id)
             except asyncio.TimeoutError:
                 continue
             except Exception as e:

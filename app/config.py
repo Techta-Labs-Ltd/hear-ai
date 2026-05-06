@@ -6,10 +6,10 @@ class Settings(BaseSettings):
     HEAR_BACKEND_URL: str = "http://localhost:3000"
     HEAR_CALLBACK_URL: str = ""
     WHISPER_MODEL_SIZE: str = "large-v3"
-    MAX_CONCURRENT_GPU_JOBS: int = 2
-    MAX_CONCURRENT_JOBS: int = 8
+    MAX_CONCURRENT_GPU_JOBS: int = 1
+    MAX_CONCURRENT_JOBS: int = 1
     MAX_CONCURRENT_PIPELINE_JOBS: int = 1
-    MAX_CONCURRENT_MAGIC_CLEAN_JOBS: int = 3
+    MAX_CONCURRENT_MAGIC_CLEAN_JOBS: int = 1
     SQLITE_DB_PATH: str = "./data/jobs.db"
 
     B2_KEY_ID: str = ""
