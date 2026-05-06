@@ -192,6 +192,27 @@ class PipelineWorker:
         db.flush()
         return entry
 
+    def _coerce_transcript_text(self, value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ("transcript", "text", "content"):
+                nested = value.get(key)
+                if isinstance(nested, str):
+                    return nested.strip()
+            return ""
+        if isinstance(value, list):
+            parts = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+            return " ".join(parts).strip()
+        return str(value).strip()
+
+    def _coerce_segments(self, value) -> list:
+        if isinstance(value, list):
+            return value
+        return []
+
     async def _set_stage(self, db, job: AiJob, track_job: AiTrackJob, stage: str):
         now = datetime.utcnow()
         job.status = "running"
@@ -318,7 +339,7 @@ class PipelineWorker:
                         edited_transcript=job.edited_transcript,
                         track_id=track.track_id,
                         job_id=f"{job.id}-{job.run_id}",
-                        original_transcript=track.transcription or "",
+                        original_transcript=self._coerce_transcript_text(track.transcription),
                     )
                 finally:
                     cleanup_temp(original_path)
@@ -331,7 +352,7 @@ class PipelineWorker:
                     "edited": True,
                 }
             elif job.job_type == "categorization":
-                transcript_text = (job.edited_transcript or track.transcription or "").strip()
+                transcript_text = self._coerce_transcript_text(job.edited_transcript or track.transcription or "")
                 transcript_data = {
                     "transcript": transcript_text,
                     "segments": [],
@@ -343,7 +364,7 @@ class PipelineWorker:
                 await self._set_stage(db, job, track_job, "transcribing")
                 if track.transcription and job.job_type != "transcription":
                     transcript_data = {
-                        "transcript": track.transcription,
+                        "transcript": self._coerce_transcript_text(track.transcription),
                         "segments": [],
                         "language": "en",
                         "confidence": 1.0,
@@ -353,8 +374,8 @@ class PipelineWorker:
                     with open(tmp_path, "rb") as f:
                         audio_bytes = f.read()
                     transcript_data = await self._transcriber.transcribe(audio_bytes)
-                transcript_text = (transcript_data or {}).get("transcript", "").strip()
-                segments = (transcript_data or {}).get("segments", [])
+                transcript_text = self._coerce_transcript_text((transcript_data or {}).get("transcript", ""))
+                segments = self._coerce_segments((transcript_data or {}).get("segments", []))
 
             track_job.transcript = transcript_text or None
             track_job.updated_at = datetime.utcnow()
