@@ -59,7 +59,7 @@ class PipelineOrchestrator:
                 "timestamp": time.time(),
             })
 
-            tmp_path = await download_audio(track.audio_url)
+            tmp_path = await download_audio(track.audio_url, suffix=".wav")
             tmp_paths.append(tmp_path)
             with open(tmp_path, "rb") as f:
                 audio_bytes = f.read()

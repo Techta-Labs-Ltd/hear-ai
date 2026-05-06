@@ -322,7 +322,7 @@ class PipelineWorker:
                 "snr_db": track.snr_db,
             }
         else:
-            local_path = await download_audio(track.audio_url)
+            local_path = await download_audio(track.audio_url, suffix=".wav")
             try:
                 if not await self._set_stage(db, job, track_job, "enhancing"):
                     return
@@ -385,7 +385,7 @@ class PipelineWorker:
                     audio_url = track.audio_url
                 if not audio_url:
                     raise ValueError("reconstruct source audio_url not found")
-                source_path = await download_audio(audio_url)
+                source_path = await download_audio(audio_url, suffix=".wav")
                 try:
                     rebuilt_audio = await self._synthesizer.reconstruct_segments(
                         original_audio_path=source_path,
@@ -438,7 +438,7 @@ class PipelineWorker:
                     raise ValueError("edited_transcript is required for rebuild")
                 if not await self._set_stage(db, job, track_job, "rebuilding_audio"):
                     return
-                original_path = await download_audio(track.audio_url)
+                original_path = await download_audio(track.audio_url, suffix=".wav")
                 try:
                     rebuilt_audio = await self._synthesizer.rebuild_track_audio(
                         original_audio_path=original_path,
@@ -477,7 +477,7 @@ class PipelineWorker:
                         "confidence": 1.0,
                     }
                 else:
-                    tmp_path = await download_audio(track.audio_url)
+                    tmp_path = await download_audio(track.audio_url, suffix=".wav")
                     with open(tmp_path, "rb") as f:
                         audio_bytes = f.read()
                     transcript_data = await self._transcriber.transcribe(audio_bytes)

@@ -231,7 +231,7 @@ async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(v
                 new_text=body.new_text or "",
             )
         ]
-    tmp_path = await download_audio(body.audio_url)
+    tmp_path = await download_audio(body.audio_url, suffix=".wav")
     try:
         result = await synthesizer.reconstruct_segments(
             original_audio_path=tmp_path,
