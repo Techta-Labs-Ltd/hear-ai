@@ -85,8 +85,6 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
         try:
             existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
             if existing:
-                if existing.status in ("queued", "running"):
-                    return JobAccepted(job_id=body.job_id)
                 existing.run_id = run_id
                 existing.status = "queued"
                 existing.current_stage = None
@@ -160,14 +158,6 @@ async def process_realtime(
         try:
             existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
             if existing:
-                if existing.status in ("queued", "running"):
-                    return {
-                        "job_id": body.job_id,
-                        "run_id": existing.run_id,
-                        "track_id": existing.track_id,
-                        "sse_url": f"/api/v1/events/{body.job_id}",
-                        "ws_url": f"/ws/{body.job_id}",
-                    }
                 existing.run_id = run_id
                 existing.status = "queued"
                 existing.current_stage = None

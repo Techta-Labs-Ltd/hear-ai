@@ -47,8 +47,6 @@ async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_serv
         try:
             existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
             if existing:
-                if existing.status in ("queued", "running") and existing.job_type == "transcription":
-                    return JobAccepted(job_id=body.job_id)
                 existing.run_id = run_id
                 existing.status = "queued"
                 existing.current_stage = None

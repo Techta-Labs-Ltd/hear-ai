@@ -47,8 +47,6 @@ async def enhance(body: EnhanceRequest, _auth: bool = Security(verify_service_ke
         try:
             existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
             if existing:
-                if existing.status in ("queued", "running") and existing.job_type == "magic_clean":
-                    return JobAccepted(job_id=body.job_id)
                 existing.run_id = run_id
                 existing.status = "queued"
                 existing.current_stage = None
