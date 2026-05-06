@@ -377,14 +377,20 @@ class SpeechSynthesizer:
         )
 
     def _is_higgs_module_ready(self, module_name: str) -> bool:
-        if importlib.util.find_spec(module_name) is None:
+        if self._safe_find_spec(module_name) is None:
             return False
         if module_name == "boson_multimodal":
-            serve_nested = importlib.util.find_spec("boson_multimodal.serve.serve_engine") is not None
-            serve_flat = importlib.util.find_spec("boson_multimodal.serve_engine") is not None
-            types_ok = importlib.util.find_spec("boson_multimodal.data_types") is not None
+            serve_nested = self._safe_find_spec("boson_multimodal.serve.serve_engine") is not None
+            serve_flat = self._safe_find_spec("boson_multimodal.serve_engine") is not None
+            types_ok = self._safe_find_spec("boson_multimodal.data_types") is not None
             return (serve_nested or serve_flat) and types_ok
         return True
+
+    def _safe_find_spec(self, module_name: str):
+        try:
+            return importlib.util.find_spec(module_name)
+        except Exception:
+            return None
 
     def _install_higgs_repo(self):
         repo_url = (settings.HIGGS_AUDIO_REPO_URL or "").strip()
