@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 from urllib.parse import urlparse
 
@@ -68,10 +69,37 @@ async def download_audio(url: str, suffix: str | None = None) -> str:
         if os.path.getsize(tmp.name) == 0:
             os.unlink(tmp.name)
             raise ValueError(f"Written temp file is empty for {url}")
-
-        return tmp.name
+        target_suffix = (suffix or ".wav").lower()
+        if target_suffix != ".wav":
+            return tmp.name
+        wav_path = _convert_to_wav(tmp.name)
+        if wav_path != tmp.name and os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+        return wav_path
 
 
 def cleanup_temp(path: str):
     if path and os.path.exists(path):
         os.unlink(path)
+
+
+def _convert_to_wav(path: str) -> str:
+    if os.path.splitext(path)[1].lower() == ".wav":
+        return path
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
+        wav_path = tmp_wav.name
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", path, "-vn", "-ac", "1", "-ar", "44100", wav_path],
+            check=True,
+            capture_output=True,
+        )
+    except Exception as exc:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+        raise ValueError(f"Failed to normalize audio to wav: {exc}") from exc
+    if not os.path.exists(wav_path) or os.path.getsize(wav_path) == 0:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+        raise ValueError("Failed to normalize audio to wav: empty output")
+    return wav_path
