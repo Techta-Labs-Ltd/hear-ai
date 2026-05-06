@@ -283,7 +283,12 @@ class SpeechSynthesizer:
             if repo_path not in sys.path:
                 sys.path.insert(0, repo_path)
             importlib.invalidate_caches()
-        HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
+        try:
+            HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
+        except Exception:
+            self._install_higgs_repo()
+            importlib.invalidate_caches()
+            HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
 
         if self._higgs_engine is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
