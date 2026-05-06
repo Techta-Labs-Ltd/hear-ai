@@ -1,8 +1,47 @@
+import json
 from dataclasses import dataclass
 
 import httpx
 
 from app.config import settings
+
+
+def effective_transcript_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                return effective_transcript_text(json.loads(stripped))
+            except Exception:
+                pass
+        return stripped
+    if isinstance(value, dict):
+        for key in ("transcript", "text", "content", "full_text", "value", "result"):
+            nested = value.get(key)
+            coerced = effective_transcript_text(nested)
+            if coerced:
+                return coerced
+        return ""
+    if isinstance(value, list):
+        parts = [effective_transcript_text(v) for v in value]
+        parts = [p for p in parts if p]
+        return " ".join(parts).strip()
+    return str(value).strip()
+
+
+def track_payload_is_enhanced(track_payload: dict) -> bool:
+    v = track_payload.get("is_enhanced")
+    if v is True:
+        return True
+    if isinstance(v, str) and v.strip().lower() in ("true", "1", "yes"):
+        return True
+    if track_payload.get("enhanced_audio_url") or track_payload.get("enhanced_url"):
+        return True
+    return False
 
 
 @dataclass
@@ -27,6 +66,8 @@ class TrackData:
     def __post_init__(self):
         if self.tags is None:
             self.tags = []
+
+
 async def fetch_track(track_id: str) -> TrackData:
     url = f"{settings.HEAR_BACKEND_URL}/api/v1/internal/tracks/{track_id}/for-ai"
     async with httpx.AsyncClient(timeout=30) as client:
@@ -38,6 +79,7 @@ async def fetch_track(track_id: str) -> TrackData:
         data = response.json()
 
     track_payload = _resolve_track_payload(data, track_id)
+    tx_effective = effective_transcript_text(track_payload.get("transcription"))
 
     return TrackData(
         track_id=track_payload.get("id", track_id),
@@ -47,8 +89,8 @@ async def fetch_track(track_id: str) -> TrackData:
         is_muted=track_payload.get("is_muted", False),
         sort_order=track_payload.get("sort_order", 0),
         duration=track_payload.get("duration", 0),
-        is_enhanced=track_payload.get("is_enhanced", False),
-        has_transcription=track_payload.get("transcription") is not None,
+        is_enhanced=track_payload_is_enhanced(track_payload),
+        has_transcription=bool(tx_effective),
         status=track_payload.get("status", "pending"),
         quality_score=track_payload.get("quality_score"),
         snr_db=track_payload.get("snr_db"),

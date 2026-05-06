@@ -4,13 +4,11 @@ import traceback
 from datetime import datetime
 
 import sentry_sdk
-from sqlalchemy.exc import OperationalError
-
 from app.config import settings
-from app.core.db_gate import db_write_lock
+from app.core.db_gate import commit_with_retry
 from app.core.gpu import gpu, ml_job_lock
 from app.core.downloader import download_audio, cleanup_temp
-from app.core.recording_fetcher import fetch_track
+from app.core.recording_fetcher import effective_transcript_text, fetch_track
 from app.core.platform_settings import fetch_platform_settings
 from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.realtime.broadcaster import manager
@@ -42,7 +40,7 @@ class PipelineWorker:
             f"pipeline={settings.MAX_CONCURRENT_PIPELINE_JOBS} magic_clean={settings.MAX_CONCURRENT_MAGIC_CLEAN_JOBS} "
             f"gpu={settings.MAX_CONCURRENT_GPU_JOBS}"
         )
-        self._recover_jobs()
+        await self._recover_jobs()
         asyncio.create_task(self._retry_undelivered_callbacks())
         self._loop_task = asyncio.create_task(self._loop())
 
@@ -56,7 +54,7 @@ class PipelineWorker:
     def enqueue(self, job_id: str, run_id: str | None = None):
         self._queue.put_nowait((job_id, run_id))
 
-    def _recover_jobs(self):
+    async def _recover_jobs(self):
         db = SessionLocal()
         try:
             jobs = (
@@ -70,7 +68,7 @@ class PipelineWorker:
             for job in jobs:
                 job.status = "queued"
                 job.current_stage = None
-            db.commit()
+            await commit_with_retry(db)
             for job in jobs:
                 self.enqueue(job.id, job.run_id)
             if jobs:
@@ -106,7 +104,7 @@ class PipelineWorker:
                         delivered = await callback_service.send(job.callback_url, payload)
                         if delivered:
                             job.callback_delivered = True
-                            await self._commit_with_retry(rdb)
+                            await commit_with_retry(rdb)
                     finally:
                         rdb.close()
             await asyncio.sleep(max(15, settings.CALLBACK_RETRY_POLL_SECONDS))
@@ -162,22 +160,9 @@ class PipelineWorker:
                 return
             delivered = await callback_service.send(job.callback_url, payload)
             job.callback_delivered = delivered
-            await self._commit_with_retry(db)
+            await commit_with_retry(db)
         finally:
             db.close()
-
-    async def _commit_with_retry(self, db, retries: int = 5):
-        for attempt in range(retries):
-            try:
-                async with db_write_lock:
-                    db.commit()
-                return
-            except OperationalError as exc:
-                db.rollback()
-                if "database is locked" in str(exc).lower() and attempt < retries - 1:
-                    await asyncio.sleep(0.15 * (2 ** attempt))
-                    continue
-                raise
 
     async def _loop(self):
         while self._running:
@@ -255,31 +240,7 @@ class PipelineWorker:
         return entry
 
     def _coerce_transcript_text(self, value) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return ""
-            if stripped.startswith("{") or stripped.startswith("["):
-                try:
-                    parsed = json.loads(stripped)
-                    return self._coerce_transcript_text(parsed)
-                except Exception:
-                    pass
-            return stripped
-        if isinstance(value, dict):
-            for key in ("transcript", "text", "content", "full_text", "value", "result"):
-                nested = value.get(key)
-                coerced = self._coerce_transcript_text(nested)
-                if coerced:
-                    return coerced
-            return ""
-        if isinstance(value, list):
-            parts = [self._coerce_transcript_text(v) for v in value]
-            parts = [p for p in parts if p]
-            return " ".join(parts).strip()
-        return str(value).strip()
+        return effective_transcript_text(value)
 
     def _coerce_segments(self, value) -> list:
         if isinstance(value, list):
@@ -331,7 +292,7 @@ class PipelineWorker:
         if not track_job.started_at:
             track_job.started_at = now
         track_job.updated_at = now
-        await self._commit_with_retry(db)
+        await commit_with_retry(db)
         await manager.broadcast(job.id, {
             "event": "stage_changed",
             "job_id": job.id,
@@ -356,7 +317,7 @@ class PipelineWorker:
         track_job.completed_at = now
         track_job.updated_at = now
         track_job.result_json = result
-        await self._commit_with_retry(db)
+        await commit_with_retry(db)
         await manager.broadcast(job.id, {
             "event": "job_completed",
             "job_id": job.id,
@@ -523,9 +484,9 @@ class PipelineWorker:
                     "edited": bool(job.edited_transcript),
                 }
             else:
-                if not await self._set_stage(db, job, track_job, "transcribing"):
-                    return
-                reused_transcript = self._coerce_transcript_text(track.transcription) if track.transcription else ""
+                reused_transcript = (
+                    effective_transcript_text(track.transcription) if track.transcription else ""
+                )
                 if reused_transcript and job.job_type != "transcription":
                     transcript_data = {
                         "transcript": reused_transcript,
@@ -533,17 +494,21 @@ class PipelineWorker:
                         "language": "en",
                         "confidence": 1.0,
                     }
+                    transcript_text = reused_transcript
+                    segments = []
                 else:
+                    if not await self._set_stage(db, job, track_job, "transcribing"):
+                        return
                     tmp_path = await download_audio(track.audio_url, suffix=".wav")
                     with open(tmp_path, "rb") as f:
                         audio_bytes = f.read()
                     transcript_data = await self._transcriber.transcribe(audio_bytes)
-                transcript_text = self._coerce_transcript_text((transcript_data or {}).get("transcript", ""))
-                segments = self._coerce_segments((transcript_data or {}).get("segments", []))
+                    transcript_text = self._coerce_transcript_text((transcript_data or {}).get("transcript", ""))
+                    segments = self._coerce_segments((transcript_data or {}).get("segments", []))
 
             track_job.transcript = transcript_text or None
             track_job.updated_at = datetime.utcnow()
-            await self._commit_with_retry(db)
+            await commit_with_retry(db)
 
             if job.job_type == "transcription":
                 result = {
@@ -573,7 +538,7 @@ class PipelineWorker:
                 }
                 track_job.moderation_json = moderation
                 track_job.updated_at = datetime.utcnow()
-                await self._commit_with_retry(db)
+                await commit_with_retry(db)
                 result = {
                     "job_id": job.id,
                     "run_id": job.run_id,
@@ -596,7 +561,7 @@ class PipelineWorker:
             moderation = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
             track_job.moderation_json = moderation
             track_job.updated_at = datetime.utcnow()
-            await self._commit_with_retry(db)
+            await commit_with_retry(db)
 
             categorization = None
             if not moderation.get("flagged"):
@@ -611,7 +576,7 @@ class PipelineWorker:
                 )
                 track_job.categorization_json = categorization
                 track_job.updated_at = datetime.utcnow()
-                await self._commit_with_retry(db)
+                await commit_with_retry(db)
 
             result = {
                 "job_id": job.id,
@@ -668,7 +633,7 @@ class PipelineWorker:
                         track_job.error = str(e)[:500]
                         track_job.attempts += 1
                         track_job.updated_at = datetime.utcnow()
-                    await self._commit_with_retry(fail_db)
+                    await commit_with_retry(fail_db)
                     self.enqueue(job.id, job.run_id)
                     return
                 now = datetime.utcnow()
@@ -682,7 +647,7 @@ class PipelineWorker:
                     track_job.error = str(e)[:500]
                     track_job.completed_at = now
                     track_job.updated_at = now
-                await self._commit_with_retry(fail_db)
+                await commit_with_retry(fail_db)
                 if job.callback_url:
                     callback_job_id = job.id
                 failed_sse = {

@@ -71,7 +71,7 @@ engine = create_engine(
     echo=False,
     connect_args={
         "check_same_thread": False,
-        "timeout": 30,
+        "timeout": 90,
     },
 )
 SessionLocal = sessionmaker(bind=engine)
@@ -84,7 +84,7 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.execute("PRAGMA busy_timeout=60000")
     cursor.execute("PRAGMA temp_store=MEMORY")
     cursor.close()
 

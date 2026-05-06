@@ -4,9 +4,8 @@ from datetime import datetime
 
 from app.core.downloader import download_audio, cleanup_temp
 from app.core.gpu import gpu
-from app.core.gpu import gpu
 from app.core.platform_settings import fetch_platform_settings
-from app.core.recording_fetcher import fetch_track
+from app.core.recording_fetcher import effective_transcript_text, fetch_track
 from app.models.database import SessionLocal, AiJob
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
@@ -61,15 +60,28 @@ class PipelineOrchestrator:
                 "timestamp": time.time(),
             })
 
-            tmp_path = await download_audio(track.audio_url, suffix=".wav")
-            tmp_paths.append(tmp_path)
-            with open(tmp_path, "rb") as f:
-                audio_bytes = f.read()
+            existing_tx = effective_transcript_text(track.transcription) if track.transcription else ""
             platform = await fetch_platform_settings()
+            tmp_path = None
+
             async with gpu.exclusive():
-                transcript = await self.transcriber.transcribe(audio_bytes)
-                transcript_text = transcript.get("transcript", "").strip()
-                segments = transcript.get("segments", [])
+                if existing_tx:
+                    transcript = {
+                        "transcript": existing_tx,
+                        "segments": [],
+                        "language": "en",
+                        "confidence": 1.0,
+                    }
+                    transcript_text = existing_tx
+                    segments = []
+                else:
+                    tmp_path = await download_audio(track.audio_url, suffix=".wav")
+                    tmp_paths.append(tmp_path)
+                    with open(tmp_path, "rb") as f:
+                        audio_bytes = f.read()
+                    transcript = await self.transcriber.transcribe(audio_bytes)
+                    transcript_text = (transcript.get("transcript") or "").strip()
+                    segments = transcript.get("segments", []) or []
 
                 await manager.broadcast(job_id, {
                     "event": "transcription_complete",

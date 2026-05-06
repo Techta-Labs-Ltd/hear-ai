@@ -8,7 +8,7 @@ from app.api.auth import verify_service_key
 from app.config import settings
 from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, SegmentChange, JobAccepted
 from app.models.database import SessionLocal, AiJob, AiTrackJob
-from app.core.db_gate import db_write_lock
+from app.core.db_gate import commit_with_retry
 from app.core.downloader import download_audio, cleanup_temp
 from app.core.gpu import gpu
 from app.realtime.broadcaster import manager, make_sse_response
@@ -49,20 +49,6 @@ def _is_locked_error(exc: Exception) -> bool:
     return "database is locked" in str(exc).lower()
 
 
-async def _commit_with_retry(db, retries: int = 5):
-    for attempt in range(retries):
-        try:
-            async with db_write_lock:
-                db.commit()
-            return
-        except OperationalError as exc:
-            db.rollback()
-            if _is_locked_error(exc) and attempt < retries - 1:
-                await asyncio.sleep(0.15 * (2 ** attempt))
-                continue
-            raise
-
-# todo: check if this is needed
 @router.post(
     "/api/v1/process",
     response_model=JobAccepted,
@@ -100,7 +86,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
                 existing.edited_transcript = body.edited_transcript
                 existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
                 existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
-                await _commit_with_retry(db)
+                await commit_with_retry(db)
                 worker.enqueue(body.job_id, run_id=run_id)
                 return JobAccepted(job_id=body.job_id)
 
@@ -118,7 +104,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
                 created_at=datetime.utcnow(),
             )
             db.add(job)
-            await _commit_with_retry(db)
+            await commit_with_retry(db)
             worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
         except IntegrityError:
@@ -172,7 +158,7 @@ async def process_realtime(
                 existing.track_id = body.track_id
                 existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
                 existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
-                await _commit_with_retry(db)
+                await commit_with_retry(db)
             else:
                 job = AiJob(
                     id=body.job_id,
@@ -187,7 +173,7 @@ async def process_realtime(
                     created_at=datetime.utcnow(),
                 )
                 db.add(job)
-                await _commit_with_retry(db)
+                await commit_with_retry(db)
             break
         except OperationalError as exc:
             db.rollback()
@@ -327,7 +313,7 @@ async def cancel_job(job_id: str, _auth: bool = Security(verify_service_key)):
             track.current_stage = None
             track.completed_at = datetime.utcnow()
             track.updated_at = datetime.utcnow()
-        db.commit()
+        await commit_with_retry(db)
         return {"job_id": job_id, "status": "cancelled", "cancelled": True}
     finally:
         db.close()
@@ -375,7 +361,7 @@ async def retry_callback(job_id: str, _auth: bool = Security(verify_service_key)
 
         delivered = await callback_service.send(effective_url, payload)
         job.callback_delivered = delivered
-        db.commit()
+        await commit_with_retry(db)
 
         if delivered:
             return {"status": "delivered", "job_id": job.id}

@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.api.auth import verify_service_key
 from app.config import settings
-from app.core.db_gate import db_write_lock
+from app.core.db_gate import commit_with_retry
 from app.models.schemas import TranscribeRequest, JobAccepted
 from app.models.database import SessionLocal, AiJob
 from app.services.registry import worker
@@ -17,20 +17,6 @@ router = APIRouter(prefix="/api/v1", tags=["Transcription"])
 
 def _is_locked_error(exc: Exception) -> bool:
     return "database is locked" in str(exc).lower()
-
-
-async def _commit_with_retry(db, retries: int = 5):
-    for attempt in range(retries):
-        try:
-            async with db_write_lock:
-                db.commit()
-            return
-        except OperationalError as exc:
-            db.rollback()
-            if _is_locked_error(exc) and attempt < retries - 1:
-                await asyncio.sleep(0.15 * (2 ** attempt))
-                continue
-            raise
 
 
 @router.post(
@@ -58,7 +44,7 @@ async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_serv
                 existing.callback_delivered = False
                 existing.job_type = "transcription"
                 existing.track_id = body.track_id
-                await _commit_with_retry(db)
+                await commit_with_retry(db)
                 worker.enqueue(body.job_id, run_id=run_id)
                 return JobAccepted(job_id=body.job_id)
 
@@ -73,7 +59,7 @@ async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_serv
                 created_at=datetime.utcnow(),
             )
             db.add(job)
-            await _commit_with_retry(db)
+            await commit_with_retry(db)
             worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
         except IntegrityError:
