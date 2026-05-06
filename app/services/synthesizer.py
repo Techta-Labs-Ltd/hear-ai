@@ -170,17 +170,20 @@ class SpeechSynthesizer:
         if orig_sr != self.TARGET_SR:
             original_waveform = F_audio.resample(original_waveform, orig_sr, self.TARGET_SR)
         merged = original_waveform
-        normalized = sorted(changes, key=lambda c: float(c.segment_start))
+        normalized = self._normalize_changes(changes)
+        if not normalized:
+            raise ValueError("reconstruct requires non-empty segment changes")
+        normalized = sorted(normalized, key=lambda c: float(c["segment_start"]))
         for change in normalized:
-            start_sample = int(float(change.segment_start) * self.TARGET_SR)
-            end_sample = int(float(change.segment_end) * self.TARGET_SR)
+            start_sample = int(float(change["segment_start"]) * self.TARGET_SR)
+            end_sample = int(float(change["segment_end"]) * self.TARGET_SR)
             start_sample = max(0, min(start_sample, merged.shape[1] - 1 if merged.shape[1] else 0))
             end_sample = max(start_sample + 1, min(end_sample, merged.shape[1]))
             detected = self._detect_voice(
                 merged,
                 self.TARGET_SR,
-                float(change.segment_start),
-                float(change.segment_end),
+                float(change["segment_start"]),
+                float(change["segment_end"]),
             )
             voice_id = VOICE_MAP.get(detected, DEFAULT_VOICE)
             tts_bytes = None
@@ -188,14 +191,14 @@ class SpeechSynthesizer:
             if same_speaker:
                 reference_path = self._export_reference_clip(merged, start_sample, end_sample)
                 try:
-                    tts_bytes = await self._synthesize_higgs(change.new_text, reference_audio_path=reference_path)
+                    tts_bytes = await self._synthesize_higgs(change["new_text"], reference_audio_path=reference_path)
                 except Exception:
                     tts_bytes = None
                 finally:
                     if reference_path and os.path.exists(reference_path):
                         os.unlink(reference_path)
             if tts_bytes is None:
-                tts_bytes = await self._synthesize(change.new_text, voice_id)
+                tts_bytes = await self._synthesize(change["new_text"], voice_id)
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 tmp.write(tts_bytes)
                 tts_path = tmp.name
@@ -218,6 +221,34 @@ class SpeechSynthesizer:
             audio_url=audio_url,
             duration=round(duration, 3),
         )
+
+    def _normalize_changes(self, changes: list) -> list[dict]:
+        normalized: list[dict] = []
+        for item in changes or []:
+            if isinstance(item, dict):
+                start_raw = item.get("segment_start", item.get("start"))
+                end_raw = item.get("segment_end", item.get("end"))
+                text_raw = item.get("new_text", item.get("text"))
+            else:
+                start_raw = getattr(item, "segment_start", getattr(item, "start", None))
+                end_raw = getattr(item, "segment_end", getattr(item, "end", None))
+                text_raw = getattr(item, "new_text", getattr(item, "text", None))
+            try:
+                start = float(start_raw)
+                end = float(end_raw)
+            except Exception:
+                continue
+            text = str(text_raw or "").strip()
+            if end <= start or not text:
+                continue
+            normalized.append(
+                {
+                    "segment_start": start,
+                    "segment_end": end,
+                    "new_text": text,
+                }
+            )
+        return normalized
 
     async def rebuild_track_audio(
         self,
