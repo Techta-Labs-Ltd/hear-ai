@@ -100,13 +100,28 @@ class PipelineWorker:
 
     def _build_result_payload(self, job: AiJob) -> dict:
         if job.status == "completed":
+            result_obj = job.result_json
+            if isinstance(result_obj, str):
+                try:
+                    result_obj = json.loads(result_obj)
+                except Exception:
+                    result_obj = None
+            if not isinstance(result_obj, dict) or not result_obj:
+                result_obj = {
+                    "job_id": job.id,
+                    "run_id": job.run_id,
+                    "job_type": job.job_type,
+                    "track_id": job.track_id,
+                    "status": "completed",
+                    "result_missing": True,
+                }
             return {
                 "job_id": job.id,
                 "run_id": job.run_id,
                 "track_id": job.track_id,
                 "job_type": job.job_type,
                 "status": "completed",
-                "result": job.result_json or {},
+                "result": result_obj,
                 "error": None,
             }
         return {
