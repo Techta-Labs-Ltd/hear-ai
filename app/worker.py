@@ -10,8 +10,13 @@ from app.config import settings
 from app.core.db_gate import commit_with_retry
 from app.core.gpu import gpu, ml_job_lock
 from app.core.audio_utils import convert_wav_file_to_mp3
-from app.core.downloader import download_audio, cleanup_temp
-from app.core.hear_temp import hear_temp_directory, sweep_orphan_hear_temp_files
+from app.core.downloader import download_audio
+from app.core.hear_temp import (
+    cleanup_job_temp,
+    drop_temp_standalone,
+    hear_temp_directory,
+    sweep_tracked_temp_files,
+)
 from app.core.storage import storage
 from app.core.recording_fetcher import effective_transcript_text, fetch_track
 from app.core.platform_settings import fetch_platform_settings
@@ -47,9 +52,15 @@ class PipelineWorker:
         )
         await self._recover_jobs()
         try:
-            n = sweep_orphan_hear_temp_files()
-            if n:
-                print(f"[TEMP] Startup removed {n} stale file(s) under {hear_temp_directory()}")
+            summary = sweep_tracked_temp_files()
+            total = summary["by_job"] + summary["by_age"] + summary["orphan_fs"]
+            if total:
+                print(
+                    f"[TEMP] Startup removed {total} file(s) "
+                    f"(by_job={summary['by_job']}, by_age={summary['by_age']}, "
+                    f"orphan_fs={summary['orphan_fs']}, "
+                    f"bytes_freed={summary['bytes_freed']}) under {hear_temp_directory()}"
+                )
         except Exception as exc:
             print(f"[TEMP] Startup sweep failed: {exc}")
         asyncio.create_task(self._retry_undelivered_callbacks())
@@ -69,22 +80,25 @@ class PipelineWorker:
     async def _recover_jobs(self):
         db = SessionLocal()
         try:
-            jobs = (
-                db.query(AiJob)
+            rows = (
+                db.query(AiJob.id, AiJob.run_id)
                 .filter(
                     AiJob.status.in_(["queued", "running"]),
                     AiJob.attempts < settings.JOB_MAX_RETRIES,
                 )
                 .all()
             )
-            for job in jobs:
-                job.status = "queued"
-                job.current_stage = None
-            await commit_with_retry(db)
-            for job in jobs:
-                self.enqueue(job.id, job.run_id)
-            if jobs:
-                print(f"[WORKER] Recovered {len(jobs)} jobs")
+            if rows:
+                db.query(AiJob).filter(
+                    AiJob.id.in_([r[0] for r in rows])
+                ).update(
+                    {AiJob.status: "queued", AiJob.current_stage: None},
+                    synchronize_session=False,
+                )
+                await commit_with_retry(db)
+                for r in rows:
+                    self.enqueue(r[0], r[1])
+                print(f"[WORKER] Recovered {len(rows)} jobs")
         finally:
             db.close()
 
@@ -94,8 +108,8 @@ class PipelineWorker:
             db = SessionLocal()
             try:
                 pending_ids = [
-                    row[0]
-                    for row in db.query(AiJob.id).filter(
+                    r[0]
+                    for r in db.query(AiJob.id).filter(
                         AiJob.status.in_(["completed", "failed"]),
                         AiJob.callback_url.isnot(None),
                         AiJob.callback_delivered == False,
@@ -107,16 +121,25 @@ class PipelineWorker:
                 async with ml_job_lock:
                     rdb = SessionLocal()
                     try:
-                        job = rdb.query(AiJob).filter(AiJob.id == jid).first()
+                        job = (
+                            rdb.query(AiJob)
+                            .filter(AiJob.id == jid)
+                            .with_for_update(skip_locked=True)
+                            .first()
+                        )
                         if not job or job.callback_delivered or job.status not in ("completed", "failed"):
+                            rdb.rollback()
                             continue
                         payload = self._build_result_payload(job)
                         if not payload:
+                            rdb.rollback()
                             continue
                         delivered = await callback_service.send(job.callback_url, payload)
                         if delivered:
                             job.callback_delivered = True
                             await commit_with_retry(rdb)
+                        else:
+                            rdb.rollback()
                     finally:
                         rdb.close()
             await asyncio.sleep(max(15, settings.CALLBACK_RETRY_POLL_SECONDS))
@@ -126,9 +149,15 @@ class PipelineWorker:
         interval = max(300, int(settings.HEAR_TEMP_SWEEP_INTERVAL_SECONDS))
         while self._running:
             try:
-                n = sweep_orphan_hear_temp_files()
-                if n:
-                    print(f"[TEMP] Removed {n} stale file(s)")
+                summary = await asyncio.to_thread(sweep_tracked_temp_files)
+                total = summary["by_job"] + summary["by_age"] + summary["orphan_fs"]
+                if total:
+                    print(
+                        f"[TEMP] Removed {total} file(s) "
+                        f"(by_job={summary['by_job']}, by_age={summary['by_age']}, "
+                        f"orphan_fs={summary['orphan_fs']}, "
+                        f"bytes_freed={summary['bytes_freed']})"
+                    )
             except Exception as exc:
                 print(f"[TEMP] Sweep failed: {exc}")
             await asyncio.sleep(interval)
@@ -332,6 +361,8 @@ class PipelineWorker:
         if not self._run_is_current(db, job.id, job.run_id):
             return False
         now = datetime.utcnow()
+        job_id = job.id
+        run_id = job.run_id
         job.status = "completed"
         job.current_stage = None
         job.completed_at = now
@@ -342,6 +373,11 @@ class PipelineWorker:
         track_job.updated_at = now
         track_job.result_json = result
         await commit_with_retry(db)
+        try:
+            cleanup_job_temp(db, job_id, run_id)
+            await commit_with_retry(db)
+        except Exception as exc:
+            print(f"[TEMP] cleanup_job_temp on complete failed for {job_id}: {exc}")
         await manager.broadcast(job.id, {
             "event": "job_completed",
             "job_id": job.id,
@@ -365,7 +401,15 @@ class PipelineWorker:
                 "snr_db": track.snr_db,
             }
         else:
-            local_path = await download_audio(track.audio_url, suffix=".wav")
+            local_path = await download_audio(
+                track.audio_url,
+                suffix=".wav",
+                db=db,
+                job_id=job.id,
+                run_id=job.run_id,
+                track_id=track.track_id,
+                purpose="magic_clean_input",
+            )
             try:
                 if not await self._set_stage(db, job, track_job, "enhancing"):
                     return
@@ -373,6 +417,8 @@ class PipelineWorker:
                     input_path=local_path,
                     track_id=track.track_id,
                     job_id=f"{job.id}-{track.track_id}",
+                    ai_job_id=job.id,
+                    ai_run_id=job.run_id,
                 )
                 enhanced[track.track_id] = {
                     "enhanced_url": out.enhanced_url,
@@ -381,7 +427,7 @@ class PipelineWorker:
                     "snr_db": out.snr_db,
                 }
             finally:
-                cleanup_temp(local_path)
+                drop_temp_standalone(local_path)
         result = {
             "job_id": job.id,
             "run_id": job.run_id,
@@ -428,7 +474,15 @@ class PipelineWorker:
                     audio_url = track.audio_url
                 if not audio_url:
                     raise ValueError("reconstruct source audio_url not found")
-                source_path = await download_audio(audio_url, suffix=".wav")
+                source_path = await download_audio(
+                    audio_url,
+                    suffix=".wav",
+                    db=db,
+                    job_id=job.id,
+                    run_id=job.run_id,
+                    track_id=track_id or None,
+                    purpose="reconstruct_source",
+                )
                 try:
                     rebuilt_audio = await self._synthesizer.reconstruct_segments(
                         original_audio_path=source_path,
@@ -437,7 +491,7 @@ class PipelineWorker:
                         same_speaker=same_speaker,
                     )
                 finally:
-                    cleanup_temp(source_path)
+                    drop_temp_standalone(source_path)
                 result = {
                     "job_id": job.id,
                     "run_id": job.run_id,
@@ -479,7 +533,15 @@ class PipelineWorker:
                     raise ValueError("edited_transcript is required for rebuild")
                 if not await self._set_stage(db, job, track_job, "rebuilding_audio"):
                     return
-                original_path = await download_audio(track.audio_url, suffix=".wav")
+                original_path = await download_audio(
+                    track.audio_url,
+                    suffix=".wav",
+                    db=db,
+                    job_id=job.id,
+                    run_id=job.run_id,
+                    track_id=track.track_id,
+                    purpose="rebuild_source",
+                )
                 try:
                     rebuilt_audio = await self._synthesizer.rebuild_track_audio(
                         original_audio_path=original_path,
@@ -489,7 +551,7 @@ class PipelineWorker:
                         original_transcript=self._coerce_transcript_text(track.transcription),
                     )
                 finally:
-                    cleanup_temp(original_path)
+                    drop_temp_standalone(original_path)
                 transcript_text = job.edited_transcript.strip()
                 transcript_data = {
                     "transcript": transcript_text,
@@ -523,10 +585,23 @@ class PipelineWorker:
                 else:
                     if not await self._set_stage(db, job, track_job, "transcribing"):
                         return
-                    tmp_path = await download_audio(track.audio_url, suffix=".wav")
+                    tmp_path = await download_audio(
+                        track.audio_url,
+                        suffix=".wav",
+                        db=db,
+                        job_id=job.id,
+                        run_id=job.run_id,
+                        track_id=track.track_id,
+                        purpose="pipeline_source",
+                    )
                     with open(tmp_path, "rb") as f:
                         audio_bytes = f.read()
-                    transcript_data = await self._transcriber.transcribe(audio_bytes)
+                    transcript_data = await self._transcriber.transcribe(
+                        audio_bytes,
+                        job_id=job.id,
+                        run_id=job.run_id,
+                        track_id=track.track_id,
+                    )
                     transcript_text = self._coerce_transcript_text((transcript_data or {}).get("transcript", ""))
                     segments = self._coerce_segments((transcript_data or {}).get("segments", []))
 
@@ -609,11 +684,29 @@ class PipelineWorker:
                 if tmp_path and os.path.isfile(tmp_path):
                     wav_for_mp3 = tmp_path
                 else:
-                    wav_for_mp3 = await download_audio(track.audio_url, suffix=".wav")
+                    wav_for_mp3 = await download_audio(
+                        track.audio_url,
+                        suffix=".wav",
+                        db=db,
+                        job_id=job.id,
+                        run_id=job.run_id,
+                        track_id=track.track_id,
+                        purpose="compress_source",
+                    )
                     own_wav = True
                 try:
                     loop = asyncio.get_event_loop()
-                    mp3_local = await loop.run_in_executor(None, convert_wav_file_to_mp3, wav_for_mp3)
+                    mp3_local = await loop.run_in_executor(
+                        None,
+                        partial(
+                            convert_wav_file_to_mp3,
+                            wav_for_mp3,
+                            job_id=job.id,
+                            run_id=job.run_id,
+                            track_id=track.track_id,
+                            purpose="pipeline_mp3",
+                        ),
+                    )
                     try:
                         b2_key = f"{settings.B2_PIPELINE_MP3_PREFIX}{track.track_id}/{job.id}-{job.run_id}.mp3"
                         url = await loop.run_in_executor(
@@ -626,12 +719,12 @@ class PipelineWorker:
                             "audio_format": "mp3",
                         }
                     finally:
-                        cleanup_temp(mp3_local)
+                        drop_temp_standalone(mp3_local)
                 except Exception as exc:
                     print(f"[WORKER] Pipeline compressed audio upload skipped: {exc}")
                 finally:
                     if own_wav and wav_for_mp3:
-                        cleanup_temp(wav_for_mp3)
+                        drop_temp_standalone(wav_for_mp3)
 
             result = {
                 "job_id": job.id,
@@ -704,6 +797,11 @@ class PipelineWorker:
                     track_job.completed_at = now
                     track_job.updated_at = now
                 await commit_with_retry(fail_db)
+                try:
+                    cleanup_job_temp(fail_db, job.id, job.run_id)
+                    await commit_with_retry(fail_db)
+                except Exception as exc:
+                    print(f"[TEMP] cleanup_job_temp on failure failed for {job.id}: {exc}")
                 if job.callback_url:
                     callback_job_id = job.id
                 failed_sse = {
@@ -720,7 +818,7 @@ class PipelineWorker:
                 fail_db.close()
         finally:
             if tmp_path:
-                cleanup_temp(tmp_path)
+                drop_temp_standalone(tmp_path)
             if use_gpu:
                 try:
                     gpu.idle_sync()

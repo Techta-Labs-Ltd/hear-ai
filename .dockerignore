@@ -10,9 +10,6 @@ __pycache__/
 .git
 .gitignore
 
-data/jobs.db
-data/jobs.db-journal
-
 local_translate.txt
 Hear_AI_Engineering_Specification.docx
 implementation_plan.md

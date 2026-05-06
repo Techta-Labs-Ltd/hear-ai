@@ -1,12 +1,19 @@
 import os
 import subprocess
 import tempfile
+from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
 import torchaudio
 
-from app.core.hear_temp import hear_temp_directory
+from app.core.hear_temp import (
+    drop_temp_standalone,
+    hear_temp_directory,
+    hear_temp_job_dir,
+    register_temp,
+    register_temp_standalone,
+)
 
 AUDIO_CONTENT_TYPES = {
     "audio/wav", "audio/wave", "audio/x-wav",
@@ -45,9 +52,43 @@ def _detect_suffix(url: str, content_type: str) -> str:
     return _CONTENT_TYPE_TO_EXT.get(content_type, ".wav")
 
 
-async def download_audio(url: str, suffix: str | None = None) -> str:
+def _temp_dir_for(job_id: Optional[str], run_id: Optional[str]) -> str:
+    if job_id and run_id:
+        return hear_temp_job_dir(job_id, run_id)
+    return hear_temp_directory()
+
+
+def _register(
+    db,
+    path: str,
+    *,
+    purpose: str,
+    job_id: Optional[str],
+    run_id: Optional[str],
+    track_id: Optional[str],
+) -> None:
+    if db is not None:
+        register_temp(
+            db, path, purpose=purpose, job_id=job_id, run_id=run_id, track_id=track_id
+        )
+    else:
+        register_temp_standalone(
+            path, purpose=purpose, job_id=job_id, run_id=run_id, track_id=track_id
+        )
+
+
+async def download_audio(
+    url: str,
+    suffix: Optional[str] = None,
+    *,
+    db=None,
+    job_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    track_id: Optional[str] = None,
+    purpose: str = "download",
+) -> str:
     url = _ensure_https(url)
-    tmp_root = hear_temp_directory()
+    tmp_root = _temp_dir_for(job_id, run_id)
 
     async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
         response = await client.get(url)
@@ -72,22 +113,53 @@ async def download_audio(url: str, suffix: str | None = None) -> str:
         if os.path.getsize(tmp.name) == 0:
             os.unlink(tmp.name)
             raise ValueError(f"Written temp file is empty for {url}")
+
         target_suffix = (suffix or ".wav").lower()
         if target_suffix != ".wav":
+            _register(
+                db,
+                tmp.name,
+                purpose=purpose,
+                job_id=job_id,
+                run_id=run_id,
+                track_id=track_id,
+            )
             return tmp.name
-        wav_path = _convert_to_wav(tmp.name)
+
+        wav_path = _convert_to_wav(
+            tmp.name,
+            db=db,
+            job_id=job_id,
+            run_id=run_id,
+            track_id=track_id,
+        )
         if wav_path != tmp.name and os.path.exists(tmp.name):
             os.unlink(tmp.name)
+        _register(
+            db,
+            wav_path,
+            purpose=f"{purpose}_wav",
+            job_id=job_id,
+            run_id=run_id,
+            track_id=track_id,
+        )
         return wav_path
 
 
 def cleanup_temp(path: str):
-    if path and os.path.exists(path):
-        os.unlink(path)
+    drop_temp_standalone(path)
 
 
-def _convert_to_wav(path: str) -> str:
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp_wav:
+def _convert_to_wav(
+    path: str,
+    *,
+    db=None,
+    job_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    track_id: Optional[str] = None,
+) -> str:
+    tmp_root = _temp_dir_for(job_id, run_id)
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=tmp_root) as tmp_wav:
         wav_path = tmp_wav.name
     try:
         subprocess.run(
@@ -98,7 +170,7 @@ def _convert_to_wav(path: str) -> str:
     except Exception:
         if os.path.exists(wav_path):
             os.unlink(wav_path)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as fallback_wav:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=tmp_root) as fallback_wav:
             wav_path = fallback_wav.name
         try:
             waveform, sr = torchaudio.load(path)

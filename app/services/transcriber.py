@@ -7,7 +7,12 @@ import torch
 from faster_whisper import WhisperModel
 
 from app.config import settings
-from app.core.hear_temp import hear_temp_directory
+from app.core.hear_temp import (
+    drop_temp_standalone,
+    hear_temp_directory,
+    hear_temp_job_dir,
+    register_temp_standalone,
+)
 
 
 class TranscriptionService:
@@ -27,16 +32,32 @@ class TranscriptionService:
     def is_loaded(self) -> bool:
         return self._model is not None
 
-    async def transcribe(self, audio_bytes: bytes) -> dict:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp:
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        *,
+        job_id: str | None = None,
+        run_id: str | None = None,
+        track_id: str | None = None,
+    ) -> dict:
+        directory = (
+            hear_temp_job_dir(job_id, run_id) if job_id and run_id else hear_temp_directory()
+        )
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=directory) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
+        register_temp_standalone(
+            tmp_path,
+            purpose="transcribe_input",
+            job_id=job_id,
+            run_id=run_id,
+            track_id=track_id,
+        )
         try:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self._run, tmp_path)
         finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+            drop_temp_standalone(tmp_path)
 
     _HALLUCINATION_PHRASES = {
         "thank you", "thanks for watching", "thanks for listening",
@@ -156,10 +177,27 @@ class TranscriptionService:
             "silent": False,
         }
 
-    async def stream(self, audio_bytes: bytes) -> AsyncGenerator[dict, None]:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp:
+    async def stream(
+        self,
+        audio_bytes: bytes,
+        *,
+        job_id: str | None = None,
+        run_id: str | None = None,
+        track_id: str | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        directory = (
+            hear_temp_job_dir(job_id, run_id) if job_id and run_id else hear_temp_directory()
+        )
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=directory) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
+        register_temp_standalone(
+            tmp_path,
+            purpose="transcribe_stream",
+            job_id=job_id,
+            run_id=run_id,
+            track_id=track_id,
+        )
 
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
@@ -199,8 +237,7 @@ class TranscriptionService:
             except Exception as e:
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
             finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+                drop_temp_standalone(tmp_path)
 
         loop.run_in_executor(None, _worker)
 

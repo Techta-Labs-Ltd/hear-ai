@@ -20,6 +20,7 @@ from silero_vad import get_speech_timestamps, load_silero_vad
 
 from app.config import settings
 from app.core.audio_utils import save_as_mp3
+from app.core.hear_temp import drop_temp_standalone
 from app.core.storage import storage
 
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*weights_only=False.*")
@@ -527,6 +528,8 @@ class AudioEnhancer:
         track_id: str,
         job_id: str,
         mode: ContentMode = ContentMode.AUTO,
+        ai_job_id: str | None = None,
+        ai_run_id: str | None = None,
     ) -> EnhancementResult:
         loop = asyncio.get_running_loop()
         out_path = None
@@ -627,7 +630,14 @@ class AudioEnhancer:
             peak_db = 20 * np.log10(enhanced.abs().max().item() + 1e-8)
             quality_score = self._compute_quality_score(snr, clipping_input, lufs)
 
-            out_path = save_as_mp3(enhanced.cpu(), self.TARGET_SR)
+            out_path = save_as_mp3(
+                enhanced.cpu(),
+                self.TARGET_SR,
+                job_id=ai_job_id,
+                run_id=ai_run_id,
+                track_id=track_id,
+                purpose="enhance_output",
+            )
 
             b2_key = f"{settings.B2_ENHANCED_PREFIX}{track_id}/{job_id}.mp3"
             enhanced_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
@@ -645,9 +655,13 @@ class AudioEnhancer:
             )
 
         except Exception:
-            if out_path and os.path.exists(out_path):
+            if out_path:
                 try:
-                    os.unlink(out_path)
-                except OSError:
-                    pass
+                    drop_temp_standalone(out_path)
+                except Exception:
+                    if os.path.exists(out_path):
+                        try:
+                            os.unlink(out_path)
+                        except OSError:
+                            pass
             raise

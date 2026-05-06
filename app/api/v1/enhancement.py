@@ -3,20 +3,16 @@ import asyncio
 import uuid
 
 from fastapi import APIRouter, HTTPException, Security
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 
 from app.api.auth import verify_service_key
 from app.config import settings
-from app.core.db_gate import commit_with_retry
+from app.core.db_gate import commit_with_retry, is_transient_db_error
 from app.models.schemas import EnhanceRequest, JobAccepted
 from app.models.database import SessionLocal, AiJob
 from app.services.registry import worker
 
 router = APIRouter(prefix="/api/v1", tags=["Enhancement"])
-
-
-def _is_locked_error(exc: Exception) -> bool:
-    return "database is locked" in str(exc).lower()
 
 
 @router.post(
@@ -66,9 +62,9 @@ async def enhance(body: EnhanceRequest, _auth: bool = Security(verify_service_ke
             db.rollback()
             worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
-        except OperationalError as exc:
+        except (OperationalError, DBAPIError) as exc:
             db.rollback()
-            if _is_locked_error(exc) and attempt < 4:
+            if is_transient_db_error(exc) and attempt < 4:
                 await asyncio.sleep(0.15 * (2 ** attempt))
                 continue
             raise

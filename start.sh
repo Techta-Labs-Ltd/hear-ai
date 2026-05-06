@@ -15,13 +15,21 @@ LOG_OUT=$LOG_DIR/hear-ai.out.log
 LOG_ERR=$LOG_DIR/hear-ai.err.log
 VENV=$WORKSPACE/venv
 
+cd "$WORKSPACE"
+if [ -f "$WORKSPACE/.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$WORKSPACE/.env"
+  set +a
+fi
+
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${RESET}"
 echo -e "${CYAN}${BOLD}║          HEAR AI  —  Boot Sequence       ║${RESET}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-echo -e "${YELLOW}[1/6] Configuring DNS...${RESET}"
+echo -e "${YELLOW}[1/8] Configuring DNS...${RESET}"
 chattr -i /etc/resolv.conf 2>/dev/null || true
 printf "nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\n" > /etc/resolv.conf
 chattr +i /etc/resolv.conf 2>/dev/null || true
@@ -29,7 +37,7 @@ nslookup media.hear.surf > /dev/null 2>&1 && echo -e "  ${GREEN}✓ media.hear.s
 nslookup api.hear.surf   > /dev/null 2>&1 && echo -e "  ${GREEN}✓ api.hear.surf reachable${RESET}"   || echo -e "  ${RED}✗ api.hear.surf unreachable (non-fatal)${RESET}"
 
 echo ""
-echo -e "${YELLOW}[2/6] Installing system audio libraries...${RESET}"
+echo -e "${YELLOW}[2/8] Installing system audio libraries...${RESET}"
 apt-get update -qq
 apt-get install -y -qq supervisor ffmpeg libsndfile1 sox libsox-dev libsox-fmt-all dnsutils
 echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, libsox-dev, libsox-fmt-all, dnsutils${RESET}"
@@ -37,18 +45,39 @@ echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, libsox-dev, libsox-
 mkdir -p $LOG_DIR
 
 echo ""
-echo -e "${YELLOW}[3/6] Installing Python dependencies (system-wide)...${RESET}"
-cd $WORKSPACE
+echo -e "${YELLOW}[3/8] Installing Python dependencies (system-wide)...${RESET}"
 pip install --no-cache-dir -r requirements.txt
 echo -e "  ${GREEN}✓ All packages installed${RESET}"
 
 echo ""
-echo -e "${YELLOW}[4/6] Verifying FastAPI is installed...${RESET}"
+echo -e "${YELLOW}[4/8] Validating environment and PostgreSQL...${RESET}"
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo -e "  ${RED}✗ DATABASE_URL is not set (required for PostgreSQL)${RESET}"
+  exit 1
+fi
+if [ "${AI_SERVICE_SECRET:-change-me}" = "change-me" ]; then
+  echo -e "  ${RED}✗ AI_SERVICE_SECRET must not be the default change-me${RESET}"
+  exit 1
+fi
+if [ -z "${B2_KEY_ID:-}" ]; then
+  echo -e "  ${YELLOW}⚠ B2_KEY_ID is empty (uploads will fail until set)${RESET}"
+fi
+python3 -c "from sqlalchemy import create_engine, text; from app.config import settings; e=create_engine(settings.DATABASE_URL); c=e.connect(); c.execute(text('select 1')); c.close(); e.dispose()"
+echo -e "  ${GREEN}✓ PostgreSQL reachable${RESET}"
+
+echo ""
+echo -e "${YELLOW}[5/8] Preparing temp directories and initial sweep...${RESET}"
+mkdir -p "${HEAR_TMP_DIR:-/tmp/hear-ai}/jobs"
+python3 -m app.tools.clean_temp --mode startup || true
+echo -e "  ${GREEN}✓ Temp directories ready${RESET}"
+
+echo ""
+echo -e "${YELLOW}[6/8] Verifying FastAPI is installed...${RESET}"
 python3 -c "import fastapi; print('  FastAPI', fastapi.__version__)"
 echo -e "  ${GREEN}✓ FastAPI OK${RESET}"
 
 echo ""
-echo -e "${YELLOW}[5/6] Writing Supervisor config...${RESET}"
+echo -e "${YELLOW}[7/8] Writing Supervisor config...${RESET}"
 cat > $SUPERVISOR_CONF <<EOF
 [program:hear-ai]
 command=python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
@@ -67,7 +96,7 @@ EOF
 echo -e "  ${GREEN}✓ Supervisor config written${RESET}"
 
 echo ""
-echo -e "${YELLOW}[6/6] Launching Hear AI server...${RESET}"
+echo -e "${YELLOW}[8/8] Launching Hear AI server...${RESET}"
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${RESET}"
 echo -e "${CYAN}${BOLD}║  ✅  Server Starting on port 8000        ║${RESET}"

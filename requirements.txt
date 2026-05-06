@@ -4,6 +4,7 @@ uvicorn[standard]==0.30.0
 pydantic-settings==2.5.0
 httpx==0.27.0
 sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
 sentry-sdk[fastapi]==2.14.0
 torch==2.4.1
 torchaudio==2.4.1

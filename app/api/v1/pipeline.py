@@ -2,14 +2,15 @@ import asyncio
 from datetime import datetime
 import uuid
 from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 
 from app.api.auth import verify_service_key
 from app.config import settings
 from app.models.schemas import PipelineRequest, RealtimeRequest, ReconstructRequest, SegmentChange, JobAccepted
 from app.models.database import SessionLocal, AiJob, AiTrackJob
-from app.core.db_gate import commit_with_retry
-from app.core.downloader import download_audio, cleanup_temp
+from app.core.db_gate import commit_with_retry, is_transient_db_error
+from app.core.downloader import download_audio
+from app.core.hear_temp import cleanup_job_temp, drop_temp_standalone
 from app.core.gpu import gpu
 from app.realtime.broadcaster import manager, make_sse_response
 from app.services.registry import worker, synthesizer
@@ -45,8 +46,6 @@ def _resolve_reconstruct_payload(body: PipelineRequest | RealtimeRequest) -> dic
     }
 
 
-def _is_locked_error(exc: Exception) -> bool:
-    return "database is locked" in str(exc).lower()
 
 
 @router.post(
@@ -111,9 +110,9 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
             db.rollback()
             worker.enqueue(body.job_id, run_id=run_id)
             return JobAccepted(job_id=body.job_id)
-        except OperationalError as exc:
+        except (OperationalError, DBAPIError) as exc:
             db.rollback()
-            if _is_locked_error(exc) and attempt < 4:
+            if is_transient_db_error(exc) and attempt < 4:
                 await asyncio.sleep(0.15 * (2 ** attempt))
                 continue
             raise HTTPException(status_code=503, detail="database_busy_try_again")
@@ -175,9 +174,9 @@ async def process_realtime(
                 db.add(job)
                 await commit_with_retry(db)
             break
-        except OperationalError as exc:
+        except (OperationalError, DBAPIError) as exc:
             db.rollback()
-            if _is_locked_error(exc) and attempt < 4:
+            if is_transient_db_error(exc) and attempt < 4:
                 await asyncio.sleep(0.15 * (2 ** attempt))
                 continue
             raise HTTPException(status_code=503, detail="database_busy_try_again")
@@ -233,7 +232,7 @@ async def reconstruct_segment(body: ReconstructRequest, _auth: bool = Security(v
             "segments_applied": len(changes),
         }
     finally:
-        cleanup_temp(tmp_path)
+        drop_temp_standalone(tmp_path)
 
 
 @router.get(
@@ -279,7 +278,7 @@ async def get_job(job_id: str, _auth: bool = Security(verify_service_key)):
             "created_at": str(job.created_at),
             "started_at": str(job.started_at) if job.started_at else None,
             "completed_at": str(job.completed_at) if job.completed_at else None,
-            "track_state": _get_track_state(job.id, job.run_id),
+            "track_state": _get_track_state(db, job.id, job.run_id),
         }
     finally:
         db.close()
@@ -314,6 +313,11 @@ async def cancel_job(job_id: str, _auth: bool = Security(verify_service_key)):
             track.completed_at = datetime.utcnow()
             track.updated_at = datetime.utcnow()
         await commit_with_retry(db)
+        try:
+            cleanup_job_temp(db, job.id, job.run_id)
+            await commit_with_retry(db)
+        except Exception:
+            pass
         return {"job_id": job_id, "status": "cancelled", "cancelled": True}
     finally:
         db.close()
@@ -380,29 +384,25 @@ async def websocket_stream(ws: WebSocket, job_id: str):
         manager.disconnect_ws(job_id, ws)
 
 
-def _get_track_state(job_id: str, run_id: str | None):
+def _get_track_state(db, job_id: str, run_id: str | None):
     if not run_id:
         return None
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(AiTrackJob)
-            .filter(
-                AiTrackJob.job_id == job_id,
-                AiTrackJob.run_id == run_id,
-            )
-            .first()
+    row = (
+        db.query(AiTrackJob)
+        .filter(
+            AiTrackJob.job_id == job_id,
+            AiTrackJob.run_id == run_id,
         )
-        if not row:
-            return None
-        return {
-            "track_id": row.track_id,
-            "status": row.status,
-            "current_stage": row.current_stage,
-            "attempts": row.attempts,
-            "error": row.error,
-            "started_at": str(row.started_at) if row.started_at else None,
-            "completed_at": str(row.completed_at) if row.completed_at else None,
-        }
-    finally:
-        db.close()
+        .first()
+    )
+    if not row:
+        return None
+    return {
+        "track_id": row.track_id,
+        "status": row.status,
+        "current_stage": row.current_stage,
+        "attempts": row.attempts,
+        "error": row.error,
+        "started_at": str(row.started_at) if row.started_at else None,
+        "completed_at": str(row.completed_at) if row.completed_at else None,
+    }

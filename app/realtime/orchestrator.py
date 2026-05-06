@@ -7,7 +7,8 @@ from functools import partial
 
 from app.config import settings
 from app.core.audio_utils import convert_wav_file_to_mp3
-from app.core.downloader import download_audio, cleanup_temp
+from app.core.hear_temp import drop_temp_standalone
+from app.core.downloader import download_audio
 from app.core.storage import storage
 from app.core.gpu import gpu
 from app.core.platform_settings import fetch_platform_settings
@@ -81,11 +82,23 @@ class PipelineOrchestrator:
                     transcript_text = existing_tx
                     segments = []
                 else:
-                    tmp_path = await download_audio(track.audio_url, suffix=".wav")
+                    tmp_path = await download_audio(
+                        track.audio_url,
+                        suffix=".wav",
+                        job_id=job_id,
+                        run_id=run_id,
+                        track_id=track_id,
+                        purpose="realtime_source",
+                    )
                     tmp_paths.append(tmp_path)
                     with open(tmp_path, "rb") as f:
                         audio_bytes = f.read()
-                    transcript = await self.transcriber.transcribe(audio_bytes)
+                    transcript = await self.transcriber.transcribe(
+                        audio_bytes,
+                        job_id=job_id,
+                        run_id=run_id,
+                        track_id=track_id,
+                    )
                     transcript_text = (transcript.get("transcript") or "").strip()
                     segments = transcript.get("segments", []) or []
 
@@ -134,11 +147,28 @@ class PipelineOrchestrator:
             if tmp_path and os.path.isfile(tmp_path):
                 wav_for_mp3 = tmp_path
             else:
-                wav_for_mp3 = await download_audio(track.audio_url, suffix=".wav")
+                wav_for_mp3 = await download_audio(
+                    track.audio_url,
+                    suffix=".wav",
+                    job_id=job_id,
+                    run_id=run_id,
+                    track_id=track_id,
+                    purpose="realtime_compress_source",
+                )
                 own_wav = True
             try:
                 loop = asyncio.get_event_loop()
-                mp3_local = await loop.run_in_executor(None, convert_wav_file_to_mp3, wav_for_mp3)
+                mp3_local = await loop.run_in_executor(
+                    None,
+                    partial(
+                        convert_wav_file_to_mp3,
+                        wav_for_mp3,
+                        job_id=job_id,
+                        run_id=run_id,
+                        track_id=track_id,
+                        purpose="realtime_pipeline_mp3",
+                    ),
+                )
                 try:
                     b2_key = f"{settings.B2_PIPELINE_MP3_PREFIX}{track_id}/{job_id}-{run_id}.mp3"
                     url = await loop.run_in_executor(
@@ -151,12 +181,12 @@ class PipelineOrchestrator:
                         "audio_format": "mp3",
                     }
                 finally:
-                    cleanup_temp(mp3_local)
+                    drop_temp_standalone(mp3_local)
             except Exception as exc:
                 print(f"[REALTIME] Pipeline compressed audio upload skipped: {exc}")
             finally:
                 if own_wav and wav_for_mp3:
-                    cleanup_temp(wav_for_mp3)
+                    drop_temp_standalone(wav_for_mp3)
 
             result = {
                 "track_id": track_id,
@@ -229,4 +259,4 @@ class PipelineOrchestrator:
                 self._update_job(job_id, callback_delivered=delivered)
         finally:
             for p in tmp_paths:
-                cleanup_temp(p)
+                drop_temp_standalone(p)

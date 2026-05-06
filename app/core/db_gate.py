@@ -1,8 +1,26 @@
 import asyncio
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
 db_write_lock = asyncio.Lock()
+
+TRANSIENT_PGCODES = {"40001", "40P01"}
+
+
+def is_transient_db_error(exc: BaseException) -> bool:
+    if isinstance(exc, InterfaceError):
+        return True
+    if isinstance(exc, (OperationalError, DBAPIError)):
+        orig = getattr(exc, "orig", None)
+        pgcode = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+        if pgcode in TRANSIENT_PGCODES:
+            return True
+        message = str(exc).lower()
+        if "server closed the connection" in message:
+            return True
+        if "ssl connection has been closed unexpectedly" in message:
+            return True
+    return False
 
 
 async def commit_with_retry(db, retries: int = 12) -> None:
@@ -22,9 +40,9 @@ async def commit_with_retry(db, retries: int = 12) -> None:
             async with db_write_lock:
                 await loop.run_in_executor(None, _commit)
             return
-        except OperationalError as exc:
+        except Exception as exc:
             await loop.run_in_executor(None, _rollback)
-            if "database is locked" in str(exc).lower() and attempt < retries - 1:
+            if is_transient_db_error(exc) and attempt < retries - 1:
                 await asyncio.sleep(0.04 * (2 ** min(attempt, 10)))
                 continue
             raise

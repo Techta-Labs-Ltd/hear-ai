@@ -12,9 +12,6 @@ build/
 .env.local
 .env.production
 
-data/jobs.db
-data/jobs.db-journal
-
 *.wav
 *.mp3
 *.flac

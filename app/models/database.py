@@ -1,10 +1,18 @@
-import os
-import sqlite3
-
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Column, String, Integer, DateTime, JSON, Boolean, create_engine, inspect, text, Index, event
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    DateTime,
+    JSON,
+    Boolean,
+    BigInteger,
+    create_engine,
+    text,
+    Index,
+)
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -66,31 +74,50 @@ class AiTrackJob(Base):
     )
 
 
+class AiTempFile(Base):
+    __tablename__ = "ai_temp_files"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String, nullable=True, index=True)
+    run_id = Column(String, nullable=True, index=True)
+    track_id = Column(String, nullable=True)
+    purpose = Column(String, nullable=False)
+    path = Column(String, nullable=False, unique=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_ai_temp_files_job_run", "job_id", "run_id"),
+    )
+
+
+if not settings.DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is required (PostgreSQL). Set it in .env, e.g. "
+        "postgresql+psycopg2://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require"
+    )
+
 engine = create_engine(
-    f"sqlite:///{settings.SQLITE_DB_PATH}",
+    settings.DATABASE_URL,
     echo=False,
+    pool_pre_ping=settings.DB_POOL_PRE_PING,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE,
     connect_args={
-        "check_same_thread": False,
-        "timeout": 90,
+        "options": (
+            f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS} "
+            f"-c application_name=hear-ai"
+        ),
+        "connect_timeout": 10,
     },
 )
-SessionLocal = sessionmaker(bind=engine)
-
-
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragmas(dbapi_connection, connection_record):
-    if not isinstance(dbapi_connection, sqlite3.Connection):
-        return
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA busy_timeout=60000")
-    cursor.execute("PRAGMA temp_store=MEMORY")
-    cursor.close()
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 MIGRATIONS = [
-    ("ai_jobs", "callback_delivered", "BOOLEAN DEFAULT 0"),
+    ("ai_jobs", "callback_delivered", "BOOLEAN DEFAULT FALSE"),
     ("ai_jobs", "max_tags", "INTEGER DEFAULT 8"),
     ("ai_jobs", "run_id", "VARCHAR"),
     ("ai_jobs", "track_id", "VARCHAR"),
@@ -100,24 +127,27 @@ MIGRATIONS = [
 
 
 def init_db():
-    os.makedirs(os.path.dirname(settings.SQLITE_DB_PATH), exist_ok=True)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
     Base.metadata.create_all(bind=engine)
     _run_migrations()
 
 
 def _run_migrations():
-    inspector = inspect(engine)
-    for table_name, column_name, column_def in MIGRATIONS:
-        if not inspector.has_table(table_name):
-            continue
-        existing = [c["name"] for c in inspector.get_columns(table_name)]
-        if column_name not in existing:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}"))
-            print(f"[MIGRATE] Added column {table_name}.{column_name}")
-    if inspector.has_table("ai_jobs"):
-        with engine.begin() as conn:
-            conn.execute(text("UPDATE ai_jobs SET run_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab', abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE run_id IS NULL OR run_id = ''"))
+    with engine.begin() as conn:
+        for table_name, column_name, column_def in MIGRATIONS:
+            conn.execute(
+                text(
+                    f'ALTER TABLE {table_name} '
+                    f'ADD COLUMN IF NOT EXISTS {column_name} {column_def}'
+                )
+            )
+        conn.execute(
+            text(
+                "UPDATE ai_jobs SET run_id = gen_random_uuid()::text "
+                "WHERE run_id IS NULL OR run_id = ''"
+            )
+        )
 
 
 def get_db():

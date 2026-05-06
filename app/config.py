@@ -16,7 +16,13 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_MAGIC_CLEAN_JOBS: int = 1
     JOB_MAX_RETRIES: int = 8
     CALLBACK_RETRY_POLL_SECONDS: int = 45
-    SQLITE_DB_PATH: str = "./data/jobs.db"
+    DATABASE_URL: str = ""
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
+    DB_POOL_PRE_PING: bool = True
+    DB_STATEMENT_TIMEOUT_MS: int = 60000
     HEAR_TMP_DIR: str = ""
     HEAR_TEMP_RETENTION_SECONDS: int = 172800
     HEAR_TEMP_SWEEP_INTERVAL_SECONDS: int = 3600

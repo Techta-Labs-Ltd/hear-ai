@@ -17,7 +17,12 @@ import torchaudio.functional as F_audio
 
 from app.config import settings
 from app.core.audio_utils import save_as_mp3
-from app.core.hear_temp import hear_temp_directory
+from app.core.hear_temp import (
+    drop_temp_standalone,
+    hear_temp_directory,
+    hear_temp_job_dir,
+    register_temp_standalone,
+)
 from app.core.storage import storage
 
 @dataclass
@@ -62,32 +67,33 @@ class SpeechSynthesizer:
 
         reference_path = None
         if same_speaker:
-            reference_path = self._export_reference_clip(original_waveform, start_sample, end_sample)
+            reference_path = self._export_reference_clip(original_waveform, start_sample, end_sample, track_id=track_id)
         try:
             tts_bytes = await self._synthesize_higgs(new_text, reference_audio_path=reference_path)
         finally:
-            if reference_path and os.path.exists(reference_path):
-                os.unlink(reference_path)
+            if reference_path:
+                drop_temp_standalone(reference_path)
 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(tts_bytes)
             tts_path = tmp.name
+        register_temp_standalone(tts_path, purpose="tts_segment", track_id=track_id)
 
         tts_waveform, tts_sr = torchaudio.load(tts_path)
-        os.unlink(tts_path)
+        drop_temp_standalone(tts_path)
 
         if tts_sr != self.TARGET_SR:
             tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
 
         reconstructed = self._splice_segment(original_waveform, tts_waveform, start_sample, end_sample)
 
-        out_path = save_as_mp3(reconstructed, self.TARGET_SR)
+        out_path = save_as_mp3(reconstructed, self.TARGET_SR, track_id=track_id, purpose="reconstruct_mp3")
 
         duration = reconstructed.shape[1] / self.TARGET_SR
         b2_key = f"reconstructed/{track_id}/{os.urandom(8).hex()}.mp3"
         loop = asyncio.get_event_loop()
         audio_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
-        os.unlink(out_path)
+        drop_temp_standalone(out_path)
 
         return SynthesisResult(
             b2_key=b2_key,
@@ -117,29 +123,30 @@ class SpeechSynthesizer:
             end_sample = max(start_sample + 1, min(end_sample, merged.shape[1]))
             reference_path = None
             if same_speaker:
-                reference_path = self._export_reference_clip(merged, start_sample, end_sample)
+                reference_path = self._export_reference_clip(merged, start_sample, end_sample, track_id=track_id)
             try:
                 tts_bytes = await self._synthesize_higgs(change["new_text"], reference_audio_path=reference_path)
             finally:
-                if reference_path and os.path.exists(reference_path):
-                    os.unlink(reference_path)
+                if reference_path:
+                    drop_temp_standalone(reference_path)
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
                 tmp.write(tts_bytes)
                 tts_path = tmp.name
+            register_temp_standalone(tts_path, purpose="tts_segment", track_id=track_id)
             tts_waveform, tts_sr = torchaudio.load(tts_path)
-            os.unlink(tts_path)
+            drop_temp_standalone(tts_path)
             if tts_sr != self.TARGET_SR:
                 tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
             merged = self._splice_segment(merged, tts_waveform, start_sample, end_sample)
         peak = merged.abs().max().item()
         if peak > 0.99:
             merged = merged * (0.99 / peak)
-        out_path = save_as_mp3(merged, self.TARGET_SR)
+        out_path = save_as_mp3(merged, self.TARGET_SR, track_id=track_id, purpose="reconstruct_mp3")
         duration = merged.shape[1] / self.TARGET_SR
         b2_key = f"reconstructed/{track_id}/{os.urandom(8).hex()}.mp3"
         loop = asyncio.get_event_loop()
         audio_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
-        os.unlink(out_path)
+        drop_temp_standalone(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -193,9 +200,15 @@ class SpeechSynthesizer:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(rebuilt_bytes)
             rebuilt_path = tmp.name
+        register_temp_standalone(
+            rebuilt_path,
+            purpose="rebuilt_track_intermediate",
+            job_id=job_id,
+            track_id=track_id,
+        )
 
         rebuilt_waveform, rebuilt_sr = torchaudio.load(rebuilt_path)
-        os.unlink(rebuilt_path)
+        drop_temp_standalone(rebuilt_path)
         if rebuilt_sr != self.TARGET_SR:
             rebuilt_waveform = F_audio.resample(rebuilt_waveform, rebuilt_sr, self.TARGET_SR)
 
@@ -205,12 +218,14 @@ class SpeechSynthesizer:
         if peak > 0.99:
             merged = merged * (0.99 / peak)
 
-        out_path = save_as_mp3(merged, self.TARGET_SR)
+        out_path = save_as_mp3(
+            merged, self.TARGET_SR, job_id=job_id, track_id=track_id, purpose="rebuilt_track_mp3"
+        )
         duration = merged.shape[1] / self.TARGET_SR
         b2_key = f"rebuild/{track_id}/{job_id}.mp3"
         loop = asyncio.get_event_loop()
         audio_url = await loop.run_in_executor(None, storage.upload_file, out_path, b2_key)
-        os.unlink(out_path)
+        drop_temp_standalone(out_path)
 
         return SynthesisResult(
             b2_key=b2_key,
@@ -379,13 +394,23 @@ class SpeechSynthesizer:
                 sys.path.insert(0, repo_path)
             importlib.invalidate_caches()
 
-    def _export_reference_clip(self, waveform: torch.Tensor, start_sample: int, end_sample: int) -> str:
+    def _export_reference_clip(
+        self,
+        waveform: torch.Tensor,
+        start_sample: int,
+        end_sample: int,
+        *,
+        track_id: str | None = None,
+    ) -> str:
         start_sample = max(0, start_sample)
         end_sample = max(start_sample + 1, min(end_sample, waveform.shape[1]))
         clip = waveform[:, start_sample:end_sample].detach().cpu()
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as tmp:
             ref_path = tmp.name
         torchaudio.save(ref_path, clip, self.TARGET_SR)
+        register_temp_standalone(
+            ref_path, purpose="reference_clip", track_id=track_id
+        )
         return ref_path
 
     def _detect_speech_bounds(self, waveform: torch.Tensor, sr: int, original_transcript: str) -> tuple[int, int]:
