@@ -283,8 +283,7 @@ class SpeechSynthesizer:
             if repo_path not in sys.path:
                 sys.path.insert(0, repo_path)
             importlib.invalidate_caches()
-        from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine
-        from boson_multimodal.data_types import ChatMLSample, Message
+        HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
 
         if self._higgs_engine is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -310,6 +309,33 @@ class SpeechSynthesizer:
             raise RuntimeError("Boson Higgs engine returned empty audio")
         sr = int(getattr(response, "sampling_rate", self.TARGET_SR))
         return self._wav_bytes_from_audio(audio, sr)
+
+    def _load_boson_symbols(self):
+        errors: list[str] = []
+        candidates = (
+            (
+                "boson_multimodal.serve.serve_engine",
+                "boson_multimodal.data_types",
+            ),
+            (
+                "boson_multimodal.serve_engine",
+                "boson_multimodal.data_types",
+            ),
+        )
+        for engine_mod_name, types_mod_name in candidates:
+            try:
+                engine_mod = importlib.import_module(engine_mod_name)
+                types_mod = importlib.import_module(types_mod_name)
+                return (
+                    getattr(engine_mod, "HiggsAudioServeEngine"),
+                    getattr(types_mod, "ChatMLSample"),
+                    getattr(types_mod, "Message"),
+                )
+            except Exception as exc:
+                errors.append(f"{engine_mod_name}: {exc}")
+        raise RuntimeError(
+            "Unable to import Boson Higgs symbols. Tried: " + " | ".join(errors)
+        )
 
     def _wav_bytes_from_audio(self, audio: np.ndarray, sampling_rate: int) -> bytes:
         pcm = np.clip(audio.astype(np.float32), -1.0, 1.0)
@@ -349,7 +375,10 @@ class SpeechSynthesizer:
         if importlib.util.find_spec(module_name) is None:
             return False
         if module_name == "boson_multimodal":
-            return importlib.util.find_spec("boson_multimodal.serve.serve_engine") is not None
+            serve_nested = importlib.util.find_spec("boson_multimodal.serve.serve_engine") is not None
+            serve_flat = importlib.util.find_spec("boson_multimodal.serve_engine") is not None
+            types_ok = importlib.util.find_spec("boson_multimodal.data_types") is not None
+            return (serve_nested or serve_flat) and types_ok
         return True
 
     def _install_higgs_repo(self):
