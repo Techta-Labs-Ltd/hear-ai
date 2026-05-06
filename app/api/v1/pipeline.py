@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 import uuid
-
+# todo: check if this is needed
 from fastapi import APIRouter, HTTPException, Security, WebSocket, WebSocketDisconnect
 from sqlalchemy.exc import IntegrityError
 
@@ -23,7 +23,7 @@ def _normalize_pipeline_job_type(job_type: str) -> str:
         return "magic_clean"
     return job_type
 
-# 
+# todo: check if this is needed
 @router.post(
     "/api/v1/process",
     response_model=JobAccepted,
