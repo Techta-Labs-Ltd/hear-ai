@@ -19,6 +19,7 @@ cd "$WORKSPACE"
 if [ -f "$WORKSPACE/.env" ]; then
   set -a
   # shellcheck source=/dev/null
+  # .env is shell-sourced: wrap values that contain spaces in double quotes (e.g. HIGGS_AUDIO_SYSTEM_PROMPT).
   . "$WORKSPACE/.env"
   set +a
 fi
