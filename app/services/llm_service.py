@@ -90,7 +90,9 @@ class LLMService:
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=False,
-                    temperature=1.0,
+                    temperature=None,
+                    top_p=None,
+                    top_k=None,
                     pad_token_id=self._tokenizer.eos_token_id,
                 )
             new_ids = output[0][inputs["input_ids"].shape[1]:]
