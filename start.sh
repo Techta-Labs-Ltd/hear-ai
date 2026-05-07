@@ -69,8 +69,29 @@ if [[ "$DATABASE_URL" =~ :PORT(/|\?|#|$) ]]; then
   echo -e "  ${YELLOW}  Edit ${WORKSPACE}/.env to use a numeric port, e.g. postgresql+psycopg2://USER:PASS@HOST:5432/DBNAME?sslmode=require${RESET}"
   DATABASE_URL="${DATABASE_URL//:PORT/:5432}"
 fi
+if [[ "$DATABASE_URL" == *"@db.example.com:"* ]] || [[ "$DATABASE_URL" == *"@HOST:"* ]]; then
+  echo -e "  ${RED}✗ DATABASE_URL still uses a documentation placeholder host (db.example.com or HOST).${RESET}"
+  echo -e "  ${YELLOW}  Set the real PostgreSQL hostname or IP in ${WORKSPACE}/.env (see .env.example comments).${RESET}"
+  exit 1
+fi
 export DATABASE_URL
-python3 -c "from sqlalchemy import create_engine, text; from app.config import settings; e=create_engine(settings.DATABASE_URL); c=e.connect(); c.execute(text('select 1')); c.close(); e.dispose()"
+if ! python3 -c "
+import sys
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
+from app.config import settings
+try:
+    e = create_engine(settings.DATABASE_URL)
+    with e.connect() as c:
+        c.execute(text('select 1'))
+    e.dispose()
+except OperationalError as err:
+    print('  PostgreSQL connection failed:', err.orig or err, file=sys.stderr)
+    sys.exit(1)
+"; then
+  echo -e "  ${RED}✗ PostgreSQL unreachable (see message above). Fix DATABASE_URL in ${WORKSPACE}/.env${RESET}"
+  exit 1
+fi
 echo -e "  ${GREEN}✓ PostgreSQL reachable${RESET}"
 
 echo ""
