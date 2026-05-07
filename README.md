@@ -137,8 +137,7 @@ Key variables from `.env.example`:
 | `JOB_MAX_RETRIES` | Re-queue processing after transient errors (before terminal `failed`) |
 | `CALLBACK_RETRY_POLL_SECONDS` | Background interval to POST undelivered completed/failed callbacks |
 | `WHISPER_MODEL_SIZE` | Whisper model id (default `distil-large-v3` for speed on one GPU) |
-| `WHISPER_DUAL_PASS` | Second relaxed pass when first pass is empty (`false` = faster) |
-| `WHISPER_BEAM_SIZE` | Decoder beam width (`1` = fastest) |
+| `WHISPER_BEAM_SIZE` | Decoder beam width (`1` = fastest, `5` = best accuracy) |
 | `WHISPER_WORD_TIMESTAMPS` | Word-level timestamps (`false` = faster) |
 | `QWEN_LLM_ENABLED` | Load Qwen for moderation/categorization (`false` = faster, BERT+NLI only) |
 | `DEMUCS_MODEL` | Enhancement model |

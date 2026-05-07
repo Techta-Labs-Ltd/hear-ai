@@ -6,7 +6,6 @@ class Settings(BaseSettings):
     HEAR_BACKEND_URL: str = "http://localhost:3000"
     HEAR_CALLBACK_URL: str = ""
     WHISPER_MODEL_SIZE: str = "distil-large-v3"
-    WHISPER_DUAL_PASS: bool = False
     WHISPER_BEAM_SIZE: int = 1
     WHISPER_WORD_TIMESTAMPS: bool = False
     QWEN_LLM_ENABLED: bool = False

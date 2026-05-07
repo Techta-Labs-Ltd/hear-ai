@@ -72,31 +72,22 @@ class TranscriptionService:
         ".", "..", "...", "[music]", "[applause]", "[laughter]",
         "[noise]", "[silence]", "[inaudible]", "[blank_audio]",
     }
-    _MIN_WORD_CONFIDENCE = 0.10
-    _MIN_TRANSCRIPT_CONFIDENCE = 0.15
+    _MIN_WORD_CONFIDENCE = 0.05
+    _MIN_TRANSCRIPT_CONFIDENCE = 0.05
     _MIN_REAL_WORDS = 1
 
     def _run(self, path: str) -> dict:
-        _silent = {
-            "transcript": "", "segments": [], "language": None,
-            "language_probability": 0.0, "duration": 0.0,
-            "confidence": 0.0, "silent": True,
-        }
         strict = self._run_pass(path, relaxed=False)
-        if not strict.get("silent") and not settings.WHISPER_DUAL_PASS:
-            return strict
-        if not strict.get("silent"):
-            word_count = len(strict.get("transcript", "").split())
-            if word_count >= 40:
-                return strict
         relaxed = self._run_pass(path, relaxed=True)
+        if strict.get("silent") and relaxed.get("silent"):
+            return strict
+        if strict.get("silent"):
+            return relaxed
         if relaxed.get("silent"):
             return strict
-        strict_words = len(strict.get("transcript", "").split()) if not strict.get("silent") else 0
+        strict_words = len(strict.get("transcript", "").split())
         relaxed_words = len(relaxed.get("transcript", "").split())
-        if relaxed_words > strict_words:
-            return relaxed
-        return strict if not strict.get("silent") else relaxed
+        return relaxed if relaxed_words > strict_words else strict
 
     def _run_pass(self, path: str, relaxed: bool) -> dict:
         _silent = {
@@ -115,7 +106,7 @@ class TranscriptionService:
                 kwargs["vad_filter"] = False
             else:
                 kwargs["vad_filter"] = True
-                kwargs["vad_parameters"] = dict(min_silence_duration_ms=1000, speech_pad_ms=400)
+                kwargs["vad_parameters"] = dict(min_silence_duration_ms=2000, speech_pad_ms=600)
             segments_gen, info = self._model.transcribe(path, **kwargs)
         except ValueError:
             return _silent
@@ -127,7 +118,7 @@ class TranscriptionService:
         min_word_conf = 0.05 if relaxed else self._MIN_WORD_CONFIDENCE
 
         for seg in segments_gen:
-            if not relaxed and getattr(seg, "no_speech_prob", 0) > 0.85:
+            if not relaxed and getattr(seg, "no_speech_prob", 0) > 0.95:
                 continue
             text = seg.text.strip()
             if not text or all(c in " \t\n.,-!?;:" for c in text):
