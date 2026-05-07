@@ -18,6 +18,7 @@ from app.core.hear_temp import (
 class TranscriptionService:
     def __init__(self):
         self._model = None
+        self._lock = asyncio.Lock()
 
     def load(self):
         self._model = WhisperModel(
@@ -55,7 +56,8 @@ class TranscriptionService:
         )
         try:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._run, tmp_path)
+            async with self._lock:
+                return await loop.run_in_executor(None, self._run, tmp_path)
         finally:
             drop_temp_standalone(tmp_path)
 
@@ -70,9 +72,9 @@ class TranscriptionService:
         ".", "..", "...", "[music]", "[applause]", "[laughter]",
         "[noise]", "[silence]", "[inaudible]", "[blank_audio]",
     }
-    _MIN_WORD_CONFIDENCE = 0.20
-    _MIN_TRANSCRIPT_CONFIDENCE = 0.30
-    _MIN_REAL_WORDS = 2
+    _MIN_WORD_CONFIDENCE = 0.10
+    _MIN_TRANSCRIPT_CONFIDENCE = 0.15
+    _MIN_REAL_WORDS = 1
 
     def _run(self, path: str) -> dict:
         _silent = {
@@ -107,13 +109,13 @@ class TranscriptionService:
                 "beam_size": max(1, settings.WHISPER_BEAM_SIZE),
                 "language": None,
                 "word_timestamps": settings.WHISPER_WORD_TIMESTAMPS,
-                "condition_on_previous_text": False,
+                "condition_on_previous_text": True,
             }
             if relaxed:
                 kwargs["vad_filter"] = False
             else:
                 kwargs["vad_filter"] = True
-                kwargs["vad_parameters"] = dict(min_silence_duration_ms=400, speech_pad_ms=200)
+                kwargs["vad_parameters"] = dict(min_silence_duration_ms=1000, speech_pad_ms=400)
             segments_gen, info = self._model.transcribe(path, **kwargs)
         except ValueError:
             return _silent
@@ -125,7 +127,7 @@ class TranscriptionService:
         min_word_conf = 0.05 if relaxed else self._MIN_WORD_CONFIDENCE
 
         for seg in segments_gen:
-            if not relaxed and getattr(seg, "no_speech_prob", 0) > 0.6:
+            if not relaxed and getattr(seg, "no_speech_prob", 0) > 0.85:
                 continue
             text = seg.text.strip()
             if not text or all(c in " \t\n.,-!?;:" for c in text):
@@ -201,6 +203,7 @@ class TranscriptionService:
 
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
+        await self._lock.acquire()
 
         def _worker():
             try:
@@ -208,8 +211,9 @@ class TranscriptionService:
                     tmp_path,
                     beam_size=max(1, settings.WHISPER_BEAM_SIZE),
                     vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=1000, speech_pad_ms=400),
                     word_timestamps=settings.WHISPER_WORD_TIMESTAMPS,
-                    condition_on_previous_text=False,
+                    condition_on_previous_text=True,
                 )
                 for seg in segments_gen:
                     text = seg.text.strip()
@@ -238,6 +242,7 @@ class TranscriptionService:
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
             finally:
                 drop_temp_standalone(tmp_path)
+                loop.call_soon_threadsafe(self._lock.release)
 
         loop.run_in_executor(None, _worker)
 

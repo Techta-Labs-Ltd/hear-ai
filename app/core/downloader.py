@@ -100,19 +100,26 @@ async def download_audio(
                 f"Expected audio file but got content-type '{content_type}' from {url}"
             )
 
-        if len(response.content) == 0:
+        body = response.content
+        if len(body) == 0:
             raise ValueError(f"Downloaded file is empty from {url}")
+
+        expected_len = response.headers.get("content-length")
+        if expected_len and expected_len.isdigit() and int(expected_len) != len(body):
+            raise ValueError(
+                f"Truncated download from {url}: got {len(body)} bytes, expected {expected_len}"
+            )
 
         resolved_suffix = suffix or _detect_suffix(url, content_type)
 
         tmp = tempfile.NamedTemporaryFile(suffix=resolved_suffix, delete=False, dir=tmp_root)
-        tmp.write(response.content)
+        tmp.write(body)
         tmp.flush()
         tmp.close()
 
-        if os.path.getsize(tmp.name) == 0:
+        if os.path.getsize(tmp.name) != len(body):
             os.unlink(tmp.name)
-            raise ValueError(f"Written temp file is empty for {url}")
+            raise ValueError(f"Written temp file size mismatch for {url}")
 
         target_suffix = (suffix or ".wav").lower()
         if target_suffix != ".wav":
