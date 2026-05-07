@@ -10,9 +10,9 @@ Current architecture is **track-first**:
 
 ### Database and temp files
 
-- **PostgreSQL** is required. Set `DATABASE_URL` (see `.env.example`), e.g. `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require` (the port must be a **number**, usually `5432`, never the literal word `PORT`). On first startup, `init_db()` creates tables, enables `pgcrypto`, and applies lightweight migrations.
+- **PostgreSQL** is required for the API and worker, but it does **not** have to run on the same machine as Hear AI. On a **RunPod GPU template** there is usually no local Postgres; point `DATABASE_URL` at a **remote** database (managed Postgres, RDS, Neon, Supabase, a Hear-hosted instance, etc.) that this pod can reach over the network (TLS and firewall rules must allow it). Example shape: `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require` (the port must be a **number**, usually `5432`, never the literal word `PORT`). On first successful connection, `init_db()` creates tables, enables `pgcrypto`, and applies lightweight migrations.
 - **Temp audio** lives under `HEAR_TMP_DIR` (default OS temp `hear-ai/`) with per-job subfolders `jobs/{job_id}/{run_id}/`. Tracked paths are stored in `ai_temp_files` and cleaned when jobs finish, cancel, or fail, plus a periodic sweep.
-- **RunPod / bare metal**: use `start.sh` or `make start` so DNS, deps, env checks, Postgres ping, and an initial temp sweep run before Supervisor starts the app. Use `make errors-tail`, `make migrate`, `make clean-temp`, `make psql` as needed.
+- **RunPod / bare metal**: use `start.sh` or `make start` so DNS, deps, env checks, a **network** Postgres ping (validates `DATABASE_URL`), and an initial temp sweep run before Supervisor starts the app. Use `make errors-tail`, `make migrate`, `make clean-temp`, `make psql` as needed.
 
 ---
 
