@@ -8,7 +8,7 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-WORKSPACE=/workspace/hear-ai
+WORKSPACE="${WORKSPACE:-/workspace/hear-ai}"
 SUPERVISOR_CONF=/etc/supervisor/conf.d/hear-ai.conf
 LOG_DIR=$WORKSPACE/logs
 LOG_OUT=$LOG_DIR/hear-ai.out.log
@@ -27,6 +27,7 @@ echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${RESET}"
 echo -e "${CYAN}${BOLD}║          HEAR AI  —  Boot Sequence       ║${RESET}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
+echo -e "  ${CYAN}WORKSPACE=${WORKSPACE}${RESET}"
 echo ""
 
 echo -e "${YELLOW}[1/8] Configuring DNS...${RESET}"
@@ -39,8 +40,8 @@ nslookup api.hear.surf   > /dev/null 2>&1 && echo -e "  ${GREEN}✓ api.hear.sur
 echo ""
 echo -e "${YELLOW}[2/8] Installing system audio libraries...${RESET}"
 apt-get update -qq
-apt-get install -y -qq supervisor ffmpeg libsndfile1 sox libsox-dev libsox-fmt-all dnsutils
-echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, libsox-dev, libsox-fmt-all, dnsutils${RESET}"
+apt-get install -y -qq supervisor ffmpeg libsndfile1 sox libsox-dev libsox-fmt-all dnsutils curl
+echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, libsox-dev, libsox-fmt-all, dnsutils, curl${RESET}"
 
 mkdir -p $LOG_DIR
 
@@ -100,9 +101,10 @@ echo -e "${YELLOW}[8/8] Launching Hear AI server...${RESET}"
 echo ""
 echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${RESET}"
 echo -e "${CYAN}${BOLD}║  ✅  Server Starting on port 8000        ║${RESET}"
-echo -e "${CYAN}${BOLD}║  📋 Logs: make logs                      ║${RESET}"
+echo -e "${CYAN}${BOLD}║  📋 Logs:    make logs                   ║${RESET}"
 echo -e "${CYAN}${BOLD}║  🔄 Restart: make restart                ║${RESET}"
-echo -e "${CYAN}${BOLD}║  🛑 Stop:    make stop                   ║${RESET}"
+echo -e "${CYAN}${BOLD}║  🛑 Stop:    make finish                 ║${RESET}"
+echo -e "${CYAN}${BOLD}║  ▶ Full boot: make / make up             ║${RESET}"
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
