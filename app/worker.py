@@ -562,13 +562,37 @@ class PipelineWorker:
                 }
             elif job.job_type == "categorization":
                 transcript_text = self._coerce_transcript_text(job.edited_transcript or track.transcription or "")
-                transcript_data = {
-                    "transcript": transcript_text,
-                    "segments": [],
-                    "language": "en",
-                    "confidence": 1.0,
-                    "edited": bool(job.edited_transcript),
-                }
+                if not transcript_text:
+                    if not await self._set_stage(db, job, track_job, "transcribing"):
+                        return
+                    tmp_path = await download_audio(
+                        track.audio_url,
+                        suffix=".wav",
+                        db=db,
+                        job_id=job.id,
+                        run_id=job.run_id,
+                        track_id=track.track_id,
+                        purpose="categorization_source",
+                    )
+                    with open(tmp_path, "rb") as f:
+                        audio_bytes = f.read()
+                    transcript_data = await self._transcriber.transcribe(
+                        audio_bytes,
+                        job_id=job.id,
+                        run_id=job.run_id,
+                        track_id=track.track_id,
+                    )
+                    transcript_text = self._coerce_transcript_text((transcript_data or {}).get("transcript", ""))
+                    segments = self._coerce_segments((transcript_data or {}).get("segments", []))
+                else:
+                    segments = []
+                    transcript_data = {
+                        "transcript": transcript_text,
+                        "segments": segments,
+                        "language": "en",
+                        "confidence": 1.0,
+                        "edited": bool(job.edited_transcript),
+                    }
             else:
                 reused_transcript = (
                     effective_transcript_text(track.transcription) if track.transcription else ""
