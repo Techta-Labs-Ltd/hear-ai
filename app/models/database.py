@@ -94,7 +94,7 @@ class AiTempFile(Base):
 if not settings.DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL is required (PostgreSQL). Set it in .env, e.g. "
-        "postgresql+psycopg2://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require"
+        "postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
     )
 
 engine = create_engine(

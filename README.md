@@ -10,7 +10,7 @@ Current architecture is **track-first**:
 
 ### Database and temp files
 
-- **PostgreSQL** is required. Set `DATABASE_URL` (see `.env.example`), e.g. `postgresql+psycopg2://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require`. On first startup, `init_db()` creates tables, enables `pgcrypto`, and applies lightweight migrations.
+- **PostgreSQL** is required. Set `DATABASE_URL` (see `.env.example`), e.g. `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require` (the port must be a **number**, usually `5432`, never the literal word `PORT`). On first startup, `init_db()` creates tables, enables `pgcrypto`, and applies lightweight migrations.
 - **Temp audio** lives under `HEAR_TMP_DIR` (default OS temp `hear-ai/`) with per-job subfolders `jobs/{job_id}/{run_id}/`. Tracked paths are stored in `ai_temp_files` and cleaned when jobs finish, cancel, or fail, plus a periodic sweep.
 - **RunPod / bare metal**: use `start.sh` or `make start` so DNS, deps, env checks, Postgres ping, and an initial temp sweep run before Supervisor starts the app. Use `make errors-tail`, `make migrate`, `make clean-temp`, `make psql` as needed.
 

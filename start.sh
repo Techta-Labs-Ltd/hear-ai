@@ -64,12 +64,12 @@ fi
 if [ -z "${B2_KEY_ID:-}" ]; then
   echo -e "  ${YELLOW}⚠ B2_KEY_ID is empty (uploads will fail until set)${RESET}"
 fi
-if [[ "$DATABASE_URL" =~ :PORT(/|\?|$) ]]; then
-  echo -e "  ${RED}✗ DATABASE_URL still uses the placeholder \`:PORT\` as the TCP port.${RESET}"
-  echo -e "  ${YELLOW}  Edit ${WORKSPACE}/.env and use a numeric port (PostgreSQL default is 5432), e.g.:${RESET}"
-  echo -e "  ${YELLOW}  postgresql+psycopg2://USER:PASS@HOST:5432/DBNAME?sslmode=require${RESET}"
-  exit 1
+if [[ "$DATABASE_URL" =~ :PORT(/|\?|#|$) ]]; then
+  echo -e "  ${YELLOW}⚠ DATABASE_URL uses the literal \`:PORT\` (often copied from old docs). Replacing with :5432 for this process tree.${RESET}"
+  echo -e "  ${YELLOW}  Edit ${WORKSPACE}/.env to use a numeric port, e.g. postgresql+psycopg2://USER:PASS@HOST:5432/DBNAME?sslmode=require${RESET}"
+  DATABASE_URL="${DATABASE_URL//:PORT/:5432}"
 fi
+export DATABASE_URL
 python3 -c "from sqlalchemy import create_engine, text; from app.config import settings; e=create_engine(settings.DATABASE_URL); c=e.connect(); c.execute(text('select 1')); c.close(); e.dispose()"
 echo -e "  ${GREEN}✓ PostgreSQL reachable${RESET}"
 
@@ -97,7 +97,7 @@ startsecs=20
 stopasgroup=true
 killasgroup=true
 stopsignal=TERM
-environment=PYTHONUNBUFFERED=1,GIT_PYTHON_REFRESH=quiet
+environment=PYTHONUNBUFFERED=1,GIT_PYTHON_REFRESH=quiet,DATABASE_URL=%(ENV_DATABASE_URL)s
 stderr_logfile=$LOG_ERR
 stdout_logfile=$LOG_OUT
 EOF
