@@ -95,7 +95,8 @@ fi
 echo -e "  ${GREEN}✓ PostgreSQL reachable${RESET}"
 
 echo ""
-echo -e "${YELLOW}[5/8] Preparing temp directories and initial sweep...${RESET}"
+echo -e "${YELLOW}[5/8] Database schema, temp dirs, and sweep...${RESET}"
+python3 -c "from app.models.database import init_db; init_db(); print('  schema OK')"
 mkdir -p "${HEAR_TMP_DIR:-/tmp/hear-ai}/jobs"
 python3 -m app.tools.clean_temp --mode startup || true
 echo -e "  ${GREEN}✓ Temp directories ready${RESET}"
@@ -118,7 +119,7 @@ startsecs=20
 stopasgroup=true
 killasgroup=true
 stopsignal=TERM
-environment=PYTHONUNBUFFERED=1,GIT_PYTHON_REFRESH=quiet,DATABASE_URL=%(ENV_DATABASE_URL)s
+environment=PYTHONUNBUFFERED=1,GIT_PYTHON_REFRESH=quiet
 stderr_logfile=$LOG_ERR
 stdout_logfile=$LOG_OUT
 EOF

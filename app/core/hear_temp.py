@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from app.config import settings
 from app.models.database import AiJob, AiTempFile, SessionLocal, engine
@@ -258,6 +259,11 @@ def sweep_tracked_temp_files(retention_seconds: Optional[int] = None) -> dict:
         tracked_paths = {
             r.path for r in db.query(AiTempFile.path).all() if r.path
         }
+    except ProgrammingError as e:
+        db.rollback()
+        if getattr(getattr(e, "orig", None), "pgcode", None) != "42P01":
+            raise
+        return summary
     finally:
         db.close()
 
