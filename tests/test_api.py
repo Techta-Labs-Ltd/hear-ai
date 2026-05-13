@@ -231,7 +231,7 @@ async def test_job_polling(client: httpx.AsyncClient, job_id: str):
                             log("pass", f"{label}: {url}")
                     else:
                         if (result.get("job_type") or "") == "pipeline":
-                            log("pass", "No output audio URL expected for pipeline job")
+                            log("warn", "Pipeline result missing compressed_audio / speed layer URLs")
                         else:
                             log("warn", "No audio URLs found in result payload")
 

@@ -59,6 +59,8 @@ Content-Type: application/json
 | `skip_transcription` | bool | ❌ | Skip transcription (default `false`) |
 | `existing_transcript` | string | ❌ | Provide existing transcript instead of running Whisper |
 | `max_tags` | int | ❌ | Max tags to return (default `8`) |
+| `speed_multipliers` | number[] | ❌ | Extra playback speed tiers (merged with defaults; `pipeline` / `magic_clean` only) |
+| `playback_instruction` | string | ❌ | Natural-language speed hints; Qwen extracts multipliers when enabled (`pipeline` / `magic_clean` only) |
 
 > Tags and blocked keywords are automatically fetched from your platform settings endpoint — no need to send them per job.
 
@@ -313,6 +315,29 @@ Only present when there are multiple tracks.
 | `categories` | object | Category → flagged boolean |
 | `scores` | object | Category → score float |
 
+### Track `GET /api/v1/internal/tracks/{id}/for-ai` (optional AI asset fields)
+
+Hear AI may delete prior B2 objects before uploading new pipeline or magic-clean outputs. Return these when your backend stores them:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ai_compressed_audio` | `{ "b2_key", "audio_url" }` \| null | Last pipeline compressed MP3 on B2 |
+| `ai_speed_layers` | `[{ "speed", "b2_key", "audio_url" }, ...]` \| null | Prior speed-variant MP3s |
+| `ai_enhanced_audio` | `{ "b2_key", "audio_url" }` \| null | Current enhanced (magic clean) file to replace |
+| `content_description` | string \| null | Prior short description (regenerated each run when LLM enabled) |
+
+Prefer `b2_key` for deletion; `audio_url` is used only if it matches the Hear AI public URL pattern.
+
+### `result` extensions (`pipeline` and `magic_clean`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `content_description` | string \| null | Short catalog-style summary (Qwen when enabled) |
+| `speed_layers` | array | `{ speed, audio_url, b2_key, audio_format: "mp3" }` per tier (never includes 1.0x) |
+| `playback_speeds_applied` | number[] | Multipliers encoded for this job |
+| `compressed_audio` | object \| null | Pipeline-only: low-bitrate MP3 of source waveform |
+| `b2_cleanup` | `{ "deleted_keys": string[] }` \| omitted | Keys best-effort deleted before upload |
+
 ---
 
 ## Other Available Endpoints
@@ -395,6 +420,10 @@ AI_SERVICE_SECRET=your-shared-secret-here
 # On Hear AI (.env)
 AI_SERVICE_SECRET=your-shared-secret-here
 HEAR_BACKEND_URL=https://api.hear.surf
+
+# Optional: pipeline speed tiers (comma-separated multipliers, 0.5–3.0, excluding 1.0) and MP3 bitrate (kbps)
+PIPELINE_SPEED_MULTIPLIERS=0.5,0.75,0.9,1.1,1.25,1.5,2.0,3.0
+PIPELINE_MP3_BITRATE_KBPS=96
 ```
 
 ---
