@@ -17,12 +17,16 @@ from app.core.hear_temp import (
     hear_temp_directory,
     sweep_tracked_temp_files,
 )
+from app.core.async_speed_upload import upload_pipeline_speed_layers
+from app.core.pipeline_speeds import merge_speed_multipliers, parse_speed_multiplier_csv
 from app.core.storage import storage
+from app.core.track_b2_cleanup import cleanup_track_ai_b2_assets
 from app.core.recording_fetcher import effective_transcript_text, fetch_track
 from app.core.platform_settings import fetch_platform_settings
 from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
+from app.services.llm_service import llm_service
 
 FETCH_RETRIES = 5
 FETCH_BASE_DELAY = 3
@@ -328,6 +332,91 @@ class PipelineWorker:
             )
         return changes, same_speaker
 
+    def _job_options_dict(self, job: AiJob) -> dict:
+        raw = getattr(job, "job_options", None)
+        return raw if isinstance(raw, dict) else {}
+
+    def _coerce_job_speed_multipliers(self, raw) -> list[float] | None:
+        if not isinstance(raw, list):
+            return None
+        out: list[float] = []
+        for x in raw:
+            try:
+                out.append(float(x))
+            except (TypeError, ValueError):
+                continue
+        return out or None
+
+    @staticmethod
+    def _categorization_hint(categorization: dict | None) -> str:
+        if not isinstance(categorization, dict):
+            return ""
+        parts: list[str] = []
+        tags = categorization.get("tags") or []
+        cats = categorization.get("categories") or []
+        if isinstance(tags, list):
+            parts.extend(str(t) for t in tags[:14])
+        if isinstance(cats, list):
+            parts.extend(str(c) for c in cats[:10])
+        return ", ".join(parts)[:500]
+
+    @staticmethod
+    def _tags_hint(tags) -> str:
+        if not tags:
+            return ""
+        parts: list[str] = []
+        for t in tags[:24]:
+            if isinstance(t, str):
+                parts.append(t)
+            elif isinstance(t, dict) and t.get("name"):
+                parts.append(str(t["name"]))
+        return ", ".join(parts)[:500]
+
+    async def _llm_instruction_speeds(self, job: AiJob) -> list[float]:
+        opts = self._job_options_dict(job)
+        ins = opts.get("playback_instruction")
+        if not isinstance(ins, str) or not ins.strip():
+            return []
+        if not llm_service.is_available:
+            return []
+        return await asyncio.to_thread(llm_service.resolve_playback_instruction_speeds, ins.strip())
+
+    async def _describe_audio_llm(
+        self,
+        transcript_text: str,
+        *,
+        track_name: str = "",
+        context_hint: str = "",
+    ) -> str | None:
+        if not llm_service.is_available:
+            return None
+        if not (transcript_text or "").strip() and not (track_name or "").strip():
+            return None
+        return await asyncio.to_thread(
+            llm_service.describe_audio_content,
+            transcript_text,
+            track_name=track_name,
+            context_hint=context_hint,
+        )
+
+    async def _upload_speed_layers(
+        self,
+        *,
+        track_id: str,
+        job: AiJob,
+        source_path: str,
+        speed_list: list[float],
+        bitrate_kbps: int | None = None,
+    ) -> list[dict]:
+        return await upload_pipeline_speed_layers(
+            track_id=track_id,
+            job_id=job.id,
+            run_id=job.run_id,
+            source_path=source_path,
+            speed_list=speed_list,
+            bitrate_kbps=bitrate_kbps,
+        )
+
     def _run_is_current(self, db, job_id: str, run_id: str) -> bool:
         current = db.query(AiJob.run_id).filter(AiJob.id == job_id).scalar()
         return current == run_id
@@ -393,13 +482,29 @@ class PipelineWorker:
         if not job.track_id:
             raise ValueError("track_id is required for magic_clean")
         track = await self._fetch_track_with_retry(job.track_id)
-        enhanced = {}
+        include_enhanced_cleanup = not track.is_enhanced
+        b2_deleted = cleanup_track_ai_b2_assets(storage, track, include_enhanced=include_enhanced_cleanup)
+
+        enhanced: dict = {}
+        speed_source: str | None = None
+        cleanup_paths: list[str] = []
+
         if track.is_enhanced:
             enhanced[track.track_id] = {
                 "enhanced_url": track.audio_url,
                 "quality_score": track.quality_score,
                 "snr_db": track.snr_db,
             }
+            speed_source = await download_audio(
+                track.audio_url,
+                suffix=None,
+                db=db,
+                job_id=job.id,
+                run_id=job.run_id,
+                track_id=track.track_id,
+                purpose="magic_clean_enhanced_source",
+            )
+            cleanup_paths.append(speed_source)
         else:
             local_path = await download_audio(
                 track.audio_url,
@@ -426,15 +531,54 @@ class PipelineWorker:
                     "quality_score": out.quality_score,
                     "snr_db": out.snr_db,
                 }
+                speed_source = out.local_path
+                cleanup_paths.append(speed_source)
             finally:
                 drop_temp_standalone(local_path)
+
+        content_description = None
+        speed_layers: list[dict] = []
+        playback_speeds_applied: list[float] = []
+        try:
+            opts = self._job_options_dict(job)
+            llm_speeds = await self._llm_instruction_speeds(job)
+            job_sm = self._coerce_job_speed_multipliers(opts.get("speed_multipliers"))
+            default_speeds = parse_speed_multiplier_csv(settings.PIPELINE_SPEED_MULTIPLIERS)
+            playback_speeds_applied = merge_speed_multipliers(default_speeds, job_sm, llm_speeds)
+
+            tx = effective_transcript_text(track.transcription) if track.transcription else ""
+            tag_hint = self._tags_hint(track.tags)
+            if tx.strip() or (track.name or "").strip():
+                content_description = await self._describe_audio_llm(
+                    tx,
+                    track_name=track.name or "",
+                    context_hint=tag_hint,
+                )
+
+            if speed_source and os.path.isfile(speed_source) and playback_speeds_applied:
+                speed_layers = await self._upload_speed_layers(
+                    track_id=track.track_id,
+                    job=job,
+                    source_path=speed_source,
+                    speed_list=playback_speeds_applied,
+                )
+        finally:
+            for p in cleanup_paths:
+                if p and os.path.isfile(p):
+                    drop_temp_standalone(p)
+
         result = {
             "job_id": job.id,
             "run_id": job.run_id,
             "job_type": "magic_clean",
             "track_id": track.track_id,
             "enhancement": enhanced.get(track.track_id, {}),
+            "content_description": content_description,
+            "speed_layers": speed_layers,
+            "playback_speeds_applied": playback_speeds_applied,
         }
+        if b2_deleted:
+            result["b2_cleanup"] = {"deleted_keys": b2_deleted}
         completed = await self._complete(db, job, track_job, result)
         if not completed:
             return
@@ -701,6 +845,10 @@ class PipelineWorker:
                 track_job.updated_at = datetime.utcnow()
                 await commit_with_retry(db)
 
+            content_description = None
+            speed_layers: list[dict] = []
+            playback_speeds_applied: list[float] = []
+            b2_deleted_keys: list[str] = []
             compressed_audio = None
             if job.job_type == "pipeline":
                 wav_for_mp3 = None
@@ -719,12 +867,29 @@ class PipelineWorker:
                     )
                     own_wav = True
                 try:
+                    b2_deleted_keys = cleanup_track_ai_b2_assets(storage, track, include_enhanced=False)
+                    opts = self._job_options_dict(job)
+                    llm_speeds = await self._llm_instruction_speeds(job)
+                    job_sm = self._coerce_job_speed_multipliers(opts.get("speed_multipliers"))
+                    default_speeds = parse_speed_multiplier_csv(settings.PIPELINE_SPEED_MULTIPLIERS)
+                    playback_speeds_applied = merge_speed_multipliers(default_speeds, job_sm, llm_speeds)
+
+                    cat_hint = self._categorization_hint(categorization)
+                    if transcript_text and transcript_text.strip():
+                        content_description = await self._describe_audio_llm(
+                            transcript_text,
+                            track_name=track.name or "",
+                            context_hint=cat_hint,
+                        )
+
                     loop = asyncio.get_event_loop()
+                    bitrate = settings.PIPELINE_MP3_BITRATE_KBPS
                     mp3_local = await loop.run_in_executor(
                         None,
                         partial(
                             convert_wav_file_to_mp3,
                             wav_for_mp3,
+                            bitrate,
                             job_id=job.id,
                             run_id=job.run_id,
                             track_id=track.track_id,
@@ -744,8 +909,17 @@ class PipelineWorker:
                         }
                     finally:
                         drop_temp_standalone(mp3_local)
+
+                    if wav_for_mp3 and os.path.isfile(wav_for_mp3) and playback_speeds_applied:
+                        speed_layers = await self._upload_speed_layers(
+                            track_id=track.track_id,
+                            job=job,
+                            source_path=wav_for_mp3,
+                            speed_list=playback_speeds_applied,
+                            bitrate_kbps=bitrate,
+                        )
                 except Exception as exc:
-                    print(f"[WORKER] Pipeline compressed audio upload skipped: {exc}")
+                    print(f"[WORKER] Pipeline compressed audio / speed upload skipped: {exc}")
                 finally:
                     if own_wav and wav_for_mp3:
                         drop_temp_standalone(wav_for_mp3)
@@ -767,6 +941,12 @@ class PipelineWorker:
                     "duration": rebuilt_audio.duration,
                 } if job.job_type == "rebuild" else None,
             }
+            if job.job_type == "pipeline":
+                result["content_description"] = content_description
+                result["speed_layers"] = speed_layers
+                result["playback_speeds_applied"] = playback_speeds_applied
+                if b2_deleted_keys:
+                    result["b2_cleanup"] = {"deleted_keys": b2_deleted_keys}
             completed = await self._complete(db, job, track_job, result)
             if not completed:
                 return

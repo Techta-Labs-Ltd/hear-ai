@@ -26,6 +26,18 @@ def _normalize_pipeline_job_type(job_type: str) -> str:
     return job_type
 
 
+def _track_job_options_payload(body: PipelineRequest | RealtimeRequest, normalized_job_type: str) -> dict | None:
+    if normalized_job_type not in ("pipeline", "magic_clean"):
+        return None
+    out: dict = {}
+    if body.speed_multipliers is not None:
+        out["speed_multipliers"] = [float(x) for x in body.speed_multipliers]
+    pi = (body.playback_instruction or "").strip() if body.playback_instruction else ""
+    if pi:
+        out["playback_instruction"] = pi
+    return out or None
+
+
 def _resolve_reconstruct_payload(body: PipelineRequest | RealtimeRequest) -> dict:
     changes: list[SegmentChange] = list(body.changes or [])
     if not changes:
@@ -64,6 +76,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
     reconstruct_payload = None
     if normalized_job_type == "reconstruct":
         reconstruct_payload = _resolve_reconstruct_payload(body)
+    job_opts = _track_job_options_payload(body, normalized_job_type)
     run_id = str(uuid.uuid4())
     for attempt in range(5):
         db = SessionLocal()
@@ -85,6 +98,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
                 existing.edited_transcript = body.edited_transcript
                 existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
                 existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
+                existing.job_options = job_opts
                 await commit_with_retry(db)
                 worker.enqueue(body.job_id, run_id=run_id)
                 return JobAccepted(job_id=body.job_id)
@@ -100,6 +114,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
                 max_tags=body.max_tags,
                 input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
                 custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
+                job_options=job_opts,
                 created_at=datetime.utcnow(),
             )
             db.add(job)
@@ -137,6 +152,7 @@ async def process_realtime(
     reconstruct_payload = None
     if normalized_job_type == "reconstruct":
         reconstruct_payload = _resolve_reconstruct_payload(body)
+    job_opts = _track_job_options_payload(body, normalized_job_type)
     run_id = str(uuid.uuid4())
     for attempt in range(5):
         db = SessionLocal()
@@ -157,6 +173,7 @@ async def process_realtime(
                 existing.track_id = body.track_id
                 existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
                 existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
+                existing.job_options = job_opts
                 await commit_with_retry(db)
             else:
                 job = AiJob(
@@ -169,6 +186,7 @@ async def process_realtime(
                     max_tags=body.max_tags,
                     input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
                     custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
+                    job_options=job_opts,
                     created_at=datetime.utcnow(),
                 )
                 db.add(job)

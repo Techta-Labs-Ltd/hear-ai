@@ -40,5 +40,33 @@ class B2Storage:
             ExpiresIn=expires_in,
         )
 
+    def public_url_to_key(self, url: str | None) -> str | None:
+        if not url or not isinstance(url, str):
+            return None
+        for ep in (settings.B2_ENDPOINT_URL, settings.B2_ENDPOINT_URL.rstrip("/")):
+            prefix = f"{ep}/{settings.B2_BUCKET_NAME}/"
+            if url.startswith(prefix):
+                rest = url[len(prefix) :].split("?", 1)[0].split("#", 1)[0]
+                return rest or None
+        return None
+
+    def delete_object(self, key: str | None) -> None:
+        if not key or not isinstance(key, str) or not key.strip():
+            return
+        self._client.delete_object(Bucket=settings.B2_BUCKET_NAME, Key=key.strip())
+
+    def delete_keys_best_effort(self, keys: list[str | None]) -> list[str]:
+        deleted: list[str] = []
+        for key in keys:
+            if not key or not isinstance(key, str) or not key.strip():
+                continue
+            k = key.strip()
+            try:
+                self.delete_object(k)
+                deleted.append(k)
+            except Exception as exc:
+                print(f"[B2] delete_object failed key={k!r}: {exc}")
+        return deleted
+
 
 storage = B2Storage()

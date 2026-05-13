@@ -19,6 +19,73 @@ def _temp_dir_for(job_id: Optional[str], run_id: Optional[str]) -> str:
     return hear_temp_directory()
 
 
+def _decompose_atempo_factors(tempo: float) -> list[float]:
+    factors: list[float] = []
+    t = float(tempo)
+    while t > 2.0 + 1e-9:
+        factors.append(2.0)
+        t /= 2.0
+    while t < 0.5 - 1e-9:
+        factors.append(0.5)
+        t /= 0.5
+    if abs(t - 1.0) > 1e-5:
+        factors.append(t)
+    return factors
+
+
+def atempo_filter_chain(multiplier: float) -> str:
+    parts = _decompose_atempo_factors(multiplier)
+    if not parts:
+        return "atempo=1.0"
+    return ",".join(f"atempo={p:g}" for p in parts)
+
+
+def speed_layer_filename_stem(multiplier: float) -> str:
+    s = f"{float(multiplier):.4f}".rstrip("0").rstrip(".")
+    return "x" + s.replace(".", "_")
+
+
+def export_speed_mp3_from_file(
+    source_path: str,
+    speed_multiplier: float,
+    bitrate_kbps: int,
+    *,
+    job_id: Optional[str] = None,
+    run_id: Optional[str] = None,
+    track_id: Optional[str] = None,
+    purpose: str = "speed_layer_mp3",
+) -> str:
+    tmp_root = _temp_dir_for(job_id, run_id)
+    mp3_fd, mp3_path = tempfile.mkstemp(suffix=".mp3", dir=tmp_root)
+    os.close(mp3_fd)
+    chain = atempo_filter_chain(speed_multiplier)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            source_path,
+            "-filter:a",
+            chain,
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            f"{bitrate_kbps}k",
+            mp3_path,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    register_temp_standalone(
+        mp3_path,
+        purpose=purpose,
+        job_id=job_id,
+        run_id=run_id,
+        track_id=track_id,
+    )
+    return mp3_path
+
+
 def save_as_mp3(
     waveform: torch.Tensor,
     sample_rate: int,

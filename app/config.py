@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     B2_ENDPOINT_URL: str = "https://s3.eu-central-003.backblazeb2.com"
     B2_ENHANCED_PREFIX: str = "enhanced/"
     B2_PIPELINE_MP3_PREFIX: str = "pipeline-source-mp3/"
+    PIPELINE_SPEED_MULTIPLIERS: str = "0.5,0.75,0.9,1.1,1.25,1.5,2.0,3.0"
+    PIPELINE_MP3_BITRATE_KBPS: int = 96
 
     CATEGORIES_FILE: str = "./data/categories.txt"
     HARM_KEYWORDS_FILE: str = "./data/harm_keywords.txt"

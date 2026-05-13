@@ -62,6 +62,10 @@ class TrackData:
     category: str | None = None
     tags: list | None = None
     flag: dict | None = None
+    ai_compressed_audio: dict | None = None
+    ai_speed_layers: list[dict] | None = None
+    ai_enhanced_audio: dict | None = None
+    content_description: str | None = None
 
     def __post_init__(self):
         if self.tags is None:
@@ -81,6 +85,40 @@ async def fetch_track(track_id: str) -> TrackData:
     track_payload = _resolve_track_payload(data, track_id)
     tx_effective = effective_transcript_text(track_payload.get("transcription"))
 
+    def _pair(d):
+        if not isinstance(d, dict):
+            return None
+        bk = d.get("b2_key") if isinstance(d.get("b2_key"), str) else None
+        au = d.get("audio_url") if isinstance(d.get("audio_url"), str) else None
+        if not bk and not au:
+            return None
+        return {"b2_key": bk, "audio_url": au}
+
+    ac = _pair(track_payload.get("ai_compressed_audio"))
+    ae = _pair(track_payload.get("ai_enhanced_audio"))
+    raw_layers = track_payload.get("ai_speed_layers")
+    layers: list[dict] | None = None
+    if isinstance(raw_layers, list):
+        layers = []
+        for item in raw_layers:
+            if not isinstance(item, dict):
+                continue
+            try:
+                sp = float(item["speed"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            layers.append(
+                {
+                    "speed": sp,
+                    "b2_key": item.get("b2_key") if isinstance(item.get("b2_key"), str) else None,
+                    "audio_url": item.get("audio_url") if isinstance(item.get("audio_url"), str) else None,
+                }
+            )
+        if not layers:
+            layers = None
+    cd = track_payload.get("content_description")
+    content_desc = cd.strip() if isinstance(cd, str) and cd.strip() else None
+
     return TrackData(
         track_id=track_payload.get("id", track_id),
         audio_url=track_payload.get("audio_url") or "",
@@ -98,6 +136,10 @@ async def fetch_track(track_id: str) -> TrackData:
         category=track_payload.get("category"),
         tags=track_payload.get("tags", []),
         flag=track_payload.get("flag"),
+        ai_compressed_audio=ac,
+        ai_speed_layers=layers,
+        ai_enhanced_audio=ae,
+        content_description=content_desc,
     )
 
 

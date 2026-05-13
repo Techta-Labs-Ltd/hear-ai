@@ -266,5 +266,77 @@ class LLMService:
 
         return {"tags": tags_out, "categories": cats_out, "sentiment": sentiment, "new_tags": new_tags, "new_categories": new_cats}
 
+    def describe_audio_content(
+        self,
+        transcript: str,
+        *,
+        track_name: str = "",
+        context_hint: str = "",
+    ) -> str | None:
+        if not self._available:
+            return None
+        body = (transcript or "").strip()[:8000]
+        hint = (context_hint or "").strip()[:600]
+        title = (track_name or "").strip()[:200]
+        if not body and not title:
+            return None
+        user_content = (
+            f"Track title: {title or 'unknown'}\n"
+            f"Tags/categories hint: {hint or 'none'}\n\n"
+            f"Transcript:\n{body or '(no transcript)'}\n\n"
+            "Write ONE short neutral sentence (max 35 words) describing what this audio is about for listeners. "
+            "Plain text only: no quotes, bullets, markdown, or JSON."
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You summarize podcast and voice audio for a catalog. Output plain text only.",
+            },
+            {"role": "user", "content": user_content},
+        ]
+        out = self._generate(messages, max_new_tokens=100).strip()
+        if not out:
+            return None
+        if len(out) > 500:
+            out = out[:497] + "..."
+        return out
+
+    def resolve_playback_instruction_speeds(self, instruction: str) -> list[float]:
+        if not self._available:
+            return []
+        ins = (instruction or "").strip()
+        if not ins:
+            return []
+        user_content = (
+            f"User playback request:\n{ins[:1200]}\n\n"
+            "You are an audio playback speed assistant. Speed values are multipliers of normal (1.0). "
+            "Slower: 0.5-0.9, faster: 1.1-3.0. Map phrases: \"normal speed\"->1.0, \"double speed\"->2.0, \"half speed\"->0.5.\n"
+            "Return ONLY this JSON (no markdown):\n"
+            '{"speeds":[1.5]}\n'
+            "The \"speeds\" array must list every distinct playback multiplier the user asked for, "
+            "each between 0.5 and 3.0. If they only asked for normal (1.0), use an empty array []. "
+            "At most 8 values."
+        )
+        messages = [
+            {"role": "system", "content": 'Return ONLY valid JSON with a "speeds" array of numbers.'},
+            {"role": "user", "content": user_content},
+        ]
+        raw = self._generate(messages, max_new_tokens=120)
+        parsed = self._extract_json(raw)
+        arr = parsed.get("speeds")
+        if not isinstance(arr, list):
+            arr = parsed.get("multipliers")
+        if not isinstance(arr, list):
+            return []
+        out: list[float] = []
+        for x in arr[:8]:
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                continue
+            if 0.5 <= v <= 3.0 and abs(v - 1.0) > 1e-6:
+                out.append(round(v, 4))
+        return sorted(set(out))
+
 
 llm_service = LLMService()

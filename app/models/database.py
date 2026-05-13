@@ -42,6 +42,7 @@ class AiJob(Base):
     max_tags = Column(Integer, default=8)
     custom_tags = Column(JSON, nullable=True)
     edited_transcript = Column(String, nullable=True)
+    job_options = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
@@ -123,6 +124,7 @@ MIGRATIONS = [
     ("ai_jobs", "track_id", "VARCHAR"),
     ("ai_jobs", "current_stage", "VARCHAR"),
     ("ai_jobs", "edited_transcript", "VARCHAR"),
+    ("ai_jobs", "job_options", "JSON"),
 ]
 
 

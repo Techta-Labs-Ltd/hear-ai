@@ -145,6 +145,13 @@ def _collect_audio_urls(result: dict) -> list[tuple[str, str]]:
         urls.append(("audio_url", result["audio_url"]))
     if isinstance(result.get("source_audio_url"), str):
         urls.append(("source_audio_url", result["source_audio_url"]))
+    comp = result.get("compressed_audio")
+    if isinstance(comp, dict) and isinstance(comp.get("audio_url"), str):
+        urls.append(("compressed_audio_url", comp["audio_url"]))
+    for layer in result.get("speed_layers") or []:
+        if isinstance(layer, dict) and isinstance(layer.get("audio_url"), str):
+            sp = layer.get("speed", "?")
+            urls.append((f"speed_layer_url[{sp}]", layer["audio_url"]))
     return urls
 
 
