@@ -1,11 +1,9 @@
 from fastapi import APIRouter
-import importlib.util
 
 from app.api.auth import verify_service_key
-from app.config import settings
 from app.core.gpu import gpu
 from app.models.schemas import HealthResponse
-from app.services.registry import transcriber, enhancer, categorizer, moderator
+from app.services.registry import transcriber, enhancer, categorizer, moderator, synthesizer
 
 router = APIRouter(tags=["System"])
 
@@ -26,9 +24,8 @@ async def health():
         models_loaded.append("categorizer")
     if moderator.is_loaded:
         models_loaded.append("moderator")
-    module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
-    if importlib.util.find_spec(module_name) is not None:
-        models_loaded.append(module_name)
+    if synthesizer.higgs_available:
+        models_loaded.append("higgs_audio")
 
     return HealthResponse(
         status="healthy",

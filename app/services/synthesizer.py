@@ -38,15 +38,31 @@ class SpeechSynthesizer:
     def __init__(self):
         self._loaded = False
         self._higgs_engine = None
+        self._higgs_available = False
 
     def load(self):
+        self._higgs_available = False
         if settings.HIGGS_AUDIO_ENABLED:
-            self._ensure_higgs_module_available()
+            module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
+            if self._is_higgs_module_ready(module_name):
+                self._higgs_available = True
+                print(f"[STARTUP] Higgs audio ready ({module_name})")
+            else:
+                print(
+                    f"[STARTUP] HIGGS_AUDIO_ENABLED=true but {module_name} not found under "
+                    f"{settings.HIGGS_AUDIO_REPO_DIR} — rebuild/reconstruct jobs will fail until installed"
+                )
+        else:
+            print("[STARTUP] Higgs audio disabled (pipeline, categorization, discovery unaffected)")
         self._loaded = True
 
     @property
     def is_loaded(self) -> bool:
         return self._loaded
+
+    @property
+    def higgs_available(self) -> bool:
+        return self._higgs_available
 
     async def reconstruct_segment(
         self,
@@ -236,9 +252,12 @@ class SpeechSynthesizer:
     async def _synthesize_higgs(self, text: str, reference_audio_path: str | None = None) -> bytes:
         if not text.strip():
             text = " "
-        if not settings.HIGGS_AUDIO_ENABLED:
-            raise RuntimeError("Higgs audio is disabled")
-        module_name = self._ensure_higgs_module_available()
+        if not settings.HIGGS_AUDIO_ENABLED or not self._higgs_available:
+            raise RuntimeError(
+                "Audio rebuild/reconstruct requires HIGGS_AUDIO_ENABLED=true and the Higgs module "
+                f"installed under {settings.HIGGS_AUDIO_REPO_DIR}"
+            )
+        module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
         return await asyncio.get_event_loop().run_in_executor(
             None,
             self._run_local_higgs,
