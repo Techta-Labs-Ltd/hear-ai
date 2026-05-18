@@ -14,7 +14,7 @@ WAIT_READY_SECS ?= 90
 .DEFAULT_GOAL := up
 
 .PHONY: help up up-bg all boot start finish down restart stop logs errors status \
-	bootstrap-logs env-check migrate clean-temp clean-temp-purge psql shell \
+	bootstrap-logs env-check migrate install-postgres clean-temp clean-temp-purge psql shell \
 	install clean errors-tail errors-head errors-cat errors-clear wait-ready
 
 help: ## Show targets (default: `make` = full bootstrap via `up`)
@@ -30,6 +30,7 @@ help: ## Show targets (default: `make` = full bootstrap via `up`)
 	@echo "  make status        supervisorctl status"
 	@echo "  make env-check     Quick DATABASE_URL + AI_SERVICE_SECRET check"
 	@echo "  make migrate       init_db() only (schema + extensions)"
+	@echo "  make install-postgres  Install/start local PostgreSQL (127.0.0.1 in DATABASE_URL)"
 	@echo "  make clean-temp    Periodic temp sweep"
 	@echo ""
 	@echo "WORKSPACE=$(WORKSPACE) (override: make up WORKSPACE=/your/path)"
@@ -109,6 +110,10 @@ env-check:
 
 migrate:
 	cd $(WORKSPACE) && python3 -c "from app.models.database import init_db; init_db(); print('migrated')"
+
+install-postgres:
+	chmod +x $(WORKSPACE)/scripts/setup-local-postgres.sh
+	INSTALL_LOCAL_POSTGRES=true bash $(WORKSPACE)/scripts/setup-local-postgres.sh
 
 clean-temp:
 	cd $(WORKSPACE) && python3 -m app.tools.clean_temp --mode periodic

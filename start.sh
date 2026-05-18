@@ -41,8 +41,8 @@ nslookup api.hear.surf   > /dev/null 2>&1 && echo -e "  ${GREEN}✓ api.hear.sur
 echo ""
 echo -e "${YELLOW}[2/8] Installing system audio libraries...${RESET}"
 apt-get update -qq
-apt-get install -y -qq supervisor ffmpeg libsndfile1 sox libsox-dev libsox-fmt-all dnsutils curl
-echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, libsox-dev, libsox-fmt-all, dnsutils, curl${RESET}"
+apt-get install -y -qq supervisor ffmpeg libsndfile1 sox libsox-dev libsox-fmt-all dnsutils curl postgresql-client
+echo -e "  ${GREEN}✓ supervisor, ffmpeg, libsndfile1, sox, postgresql-client, dnsutils, curl${RESET}"
 
 mkdir -p $LOG_DIR
 
@@ -75,7 +75,9 @@ if [[ "$DATABASE_URL" == *"@db.example.com:"* ]] || [[ "$DATABASE_URL" == *"@HOS
   exit 1
 fi
 export DATABASE_URL
-if ! python3 -c "
+
+_pg_check() {
+  python3 -c "
 import sys
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -88,9 +90,21 @@ try:
 except OperationalError as err:
     print('  PostgreSQL connection failed:', err.orig or err, file=sys.stderr)
     sys.exit(1)
-"; then
-  echo -e "  ${RED}✗ PostgreSQL unreachable (see message above). Fix DATABASE_URL in ${WORKSPACE}/.env${RESET}"
-  exit 1
+"
+}
+
+if ! _pg_check; then
+  echo -e "  ${YELLOW}⚠ PostgreSQL not reachable — attempting local install (127.0.0.1 / localhost)...${RESET}"
+  chmod +x "$WORKSPACE/scripts/setup-local-postgres.sh"
+  if bash "$WORKSPACE/scripts/setup-local-postgres.sh"; then
+    if ! _pg_check; then
+      echo -e "  ${RED}✗ PostgreSQL still unreachable after local setup. Check DATABASE_URL in ${WORKSPACE}/.env${RESET}"
+      exit 1
+    fi
+  else
+    echo -e "  ${RED}✗ PostgreSQL unreachable and local setup failed. Fix DATABASE_URL or run: bash scripts/setup-local-postgres.sh${RESET}"
+    exit 1
+  fi
 fi
 echo -e "  ${GREEN}✓ PostgreSQL reachable${RESET}"
 
