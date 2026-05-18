@@ -12,6 +12,26 @@ class DiscoveryEntities(BaseModel):
     apps: list[str] = Field(default_factory=list)
     technologies: list[str] = Field(default_factory=list)
 
+    def is_empty(self) -> bool:
+        return not any(
+            (
+                self.people,
+                self.animals,
+                self.products,
+                self.apps,
+                self.technologies,
+            )
+        )
+
+    def to_callback_dict(self) -> dict:
+        return {
+            "people": list(self.people),
+            "animals": list(self.animals),
+            "products": list(self.products),
+            "apps": list(self.apps),
+            "technologies": list(self.technologies),
+        }
+
 
 class ContentDiscoveryProfile(BaseModel):
     content_id: str | None = None
@@ -68,7 +88,7 @@ def flatten_entities(entities: DiscoveryEntities | dict | None) -> list[str]:
     if entities is None:
         return []
     if isinstance(entities, DiscoveryEntities):
-        bucket = entities.model_dump()
+        bucket = entities.to_callback_dict()
     elif isinstance(entities, dict):
         bucket = entities
     else:
@@ -103,37 +123,42 @@ def discovery_to_callback_dict(
     dur = duration_seconds if duration_seconds is not None else profile.duration_seconds
     ts = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     summary_short = (profile.summary_short or profile.short_summary or "").strip()
+    entities_obj = profile.entities.to_callback_dict()
+    confidence = dict(profile.confidence or {})
+    themes = list(profile.key_themes or [])
+    audience = list(profile.audience_relevance or [])
 
-    payload: dict = {
-        "id": profile.content_id or "",
-        "title": (profile.title_suggestion or "").strip(),
-        "duration_seconds": int(dur) if dur is not None else 0,
-        "source": (source or profile.source or "").strip(),
-        "speaker": (profile.speaker or "").strip(),
-        "summary_short": summary_short,
-        "summary_long": (profile.summary_long or "").strip(),
-        "primary_genre": (profile.primary_genre or "").strip(),
-        "controlled_tags": list(profile.controlled_tags or []),
-        "freeform_tags": list(profile.freeform_tags or []),
-        "entities": flatten_entities(profile.entities),
-        "themes": list(profile.key_themes or []),
-        "audience_groups": list(profile.audience_relevance or []),
-        "search_phrases": list(profile.search_phrases or []),
-        "recommendation_labels": list(profile.recommendation_labels or []),
-        "transcript_embedding_id": profile.transcript_embedding_id or "",
-        "summary_embedding_id": profile.summary_embedding_id or "",
-        "created_at": ts,
-        "confidence_scores": dict(profile.confidence or {}),
+    return {
         "content_id": profile.content_id or "",
         "title_suggestion": (profile.title_suggestion or "").strip(),
         "short_summary": summary_short,
+        "summary_short": summary_short,
+        "summary_long": (profile.summary_long or "").strip(),
         "one_line_description": (profile.one_line_description or "").strip(),
+        "primary_genre": (profile.primary_genre or "").strip(),
         "main_topic": (profile.main_topic or "").strip(),
         "secondary_topics": list(profile.secondary_topics or []),
+        "speaker": (profile.speaker or "").strip(),
+        "source": (source or profile.source or "").strip(),
+        "duration_seconds": int(dur) if dur is not None else 0,
+        "audience_relevance": audience,
+        "tone": list(profile.tone or []),
+        "entities": entities_obj,
+        "entities_flat": flatten_entities(profile.entities),
+        "key_themes": themes,
+        "search_phrases": list(profile.search_phrases or []),
+        "recommendation_labels": list(profile.recommendation_labels or []),
+        "sensitivity_flags": list(profile.sensitivity_flags or []),
+        "confidence": confidence,
+        "controlled_tags": list(profile.controlled_tags or []),
+        "freeform_tags": list(profile.freeform_tags or []),
         "embedding_source_text": (profile.embedding_source_text or "").strip(),
+        "transcript_embedding_id": profile.transcript_embedding_id or "",
+        "summary_embedding_id": profile.summary_embedding_id or "",
+        "created_at": ts,
+        "id": profile.content_id or "",
+        "title": (profile.title_suggestion or "").strip(),
+        "themes": themes,
+        "audience_groups": audience,
+        "confidence_scores": confidence,
     }
-    if profile.tone:
-        payload["tone"] = list(profile.tone)
-    if profile.sensitivity_flags:
-        payload["sensitivity_flags"] = list(profile.sensitivity_flags)
-    return payload

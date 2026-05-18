@@ -14,6 +14,18 @@ from app.models.discovery import (
 )
 from app.services.llm_service import llm_service
 
+_FILENAME_TITLE = re.compile(r"^\d{8}[\d_\-a-fA-Z]*$")
+_SPEAKER_PATTERNS = (
+    re.compile(
+        r"\b(?:this is|i am|i'm|my name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:with|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+in\s+[A-Z]",
+        re.IGNORECASE,
+    ),
+)
+
 
 def _categorization_hint(categorization: dict | None) -> str:
     if not isinstance(categorization, dict):
@@ -29,6 +41,114 @@ def _categorization_hint(categorization: dict | None) -> str:
 
 
 class DiscoveryService:
+    def _infer_speaker(self, transcript: str) -> str | None:
+        for pattern in _SPEAKER_PATTERNS:
+            match = pattern.search(transcript or "")
+            if match:
+                name = match.group(1).strip()
+                if len(name) >= 3:
+                    return name[:200]
+        return None
+
+    def _looks_like_filename_title(self, title: str, track_name: str) -> bool:
+        t = (title or "").strip()
+        n = (track_name or "").strip()
+        if not t:
+            return True
+        if n and t == n:
+            return bool(_FILENAME_TITLE.match(t.replace(" ", "")))
+        return bool(_FILENAME_TITLE.match(t.replace(" ", "").replace(".", "")))
+
+    def _is_weak_profile(
+        self,
+        profile: ContentDiscoveryProfile,
+        transcript: str,
+        track_name: str,
+    ) -> bool:
+        tx = (transcript or "").strip()
+        ss = (profile.summary_short or "").strip()
+        if not ss or not (profile.one_line_description or "").strip():
+            return True
+        if len(profile.search_phrases or []) < 2:
+            return True
+        if len(profile.key_themes or []) < 1:
+            return True
+        if len(profile.audience_relevance or []) < 1:
+            return True
+        if profile.entities.is_empty() and len(tx.split()) > 40:
+            return True
+        if not (profile.speaker or "").strip() and self._infer_speaker(tx):
+            return True
+        if tx and len(ss) > 40 and ss.lower()[:72] == tx.lower()[:72]:
+            return True
+        if self._looks_like_filename_title(profile.title_suggestion or "", track_name):
+            return True
+        return False
+
+    def _enrich_profile(
+        self,
+        profile: ContentDiscoveryProfile,
+        transcript: str,
+        categorization: dict | None,
+        track_name: str,
+    ) -> ContentDiscoveryProfile:
+        tx = (transcript or "").strip()
+        if not profile.speaker:
+            profile.speaker = self._infer_speaker(tx)
+        if profile.speaker and profile.speaker not in profile.entities.people:
+            profile.entities.people = [profile.speaker] + list(profile.entities.people)
+        if self._looks_like_filename_title(profile.title_suggestion or "", track_name):
+            topic = (profile.main_topic or profile.primary_genre or "Audio").strip()
+            profile.title_suggestion = f"{topic}: {profile.speaker or 'spoken piece'}"[:300]
+        if not profile.summary_long and profile.summary_short:
+            profile.summary_long = profile.summary_short
+        if not profile.embedding_source_text or profile.embedding_source_text.lower()[:60] == tx.lower()[:60]:
+            parts = [profile.primary_genre, profile.main_topic]
+            parts.extend(profile.secondary_topics or [])
+            parts.extend(profile.key_themes or [])
+            profile.embedding_source_text = ". ".join(p for p in parts if p)[:2000] or None
+        if len(profile.search_phrases or []) < 3:
+            phrases: list[str] = []
+            seen: set[str] = set()
+            for src in (
+                profile.secondary_topics or [],
+                profile.key_themes or [],
+                [profile.main_topic] if profile.main_topic else [],
+            ):
+                for item in src:
+                    p = str(item).strip()
+                    if not p:
+                        continue
+                    low = p.lower()
+                    if low in seen:
+                        continue
+                    seen.add(low)
+                    phrases.append(p)
+            if isinstance(categorization, dict):
+                for tag in categorization.get("tags") or []:
+                    t = str(tag).lstrip("#").strip()
+                    if t and t.lower() not in seen:
+                        seen.add(t.lower())
+                        phrases.append(t)
+            profile.search_phrases = (profile.search_phrases or []) + phrases
+            profile.search_phrases = profile.search_phrases[: settings.DISCOVERY_MAX_SEARCH_PHRASES]
+        if not profile.key_themes and profile.secondary_topics:
+            profile.key_themes = profile.secondary_topics[:6]
+        if not profile.audience_relevance and profile.main_topic:
+            profile.audience_relevance = [f"Listeners interested in {profile.main_topic}"]
+        if not profile.recommendation_labels and profile.primary_genre:
+            profile.recommendation_labels = [
+                f"For listeners interested in {profile.primary_genre}"
+            ]
+        if not profile.one_line_description and profile.summary_short:
+            profile.one_line_description = profile.summary_short[:500]
+        if not profile.summary_short:
+            lead = f"{profile.speaker} " if profile.speaker else ""
+            topic = profile.main_topic or profile.primary_genre or "this audio"
+            profile.summary_short = f"{lead}covers {topic}.".strip()[:500]
+            profile.short_summary = profile.summary_short
+        return profile
+
     def merge_controlled_tags(
         self,
         profile: ContentDiscoveryProfile,
@@ -115,17 +235,16 @@ class DiscoveryService:
             cats = [str(c) for c in (categorization.get("categories") or []) if c]
             tags = [str(t) for t in (categorization.get("tags") or []) if t]
         main = cats[0] if cats else (tags[0].lstrip("#") if tags else "Spoken audio")
-        snippet = (transcript or "").strip()[:400]
+        speaker = self._infer_speaker(transcript)
         profile = ContentDiscoveryProfile(
             content_id=content_id,
-            title_suggestion=track_name[:200] if track_name else None,
-            summary_short=snippet[:500] if snippet else None,
-            one_line_description=snippet[:200] if snippet else None,
-            primary_genre="Spoken audio",
+            title_suggestion=None,
+            primary_genre=main,
             main_topic=main,
             secondary_topics=cats[1:6] + [t.lstrip("#") for t in tags[:5]],
-            embedding_source_text=snippet[:800] if snippet else None,
+            speaker=speaker,
         )
+        profile = self._enrich_profile(profile, transcript, categorization, track_name)
         profile.controlled_tags = self.merge_controlled_tags(profile, [], categorization)
         profile.freeform_tags = self.map_freeform_tags(profile, categorization)
         return profile
@@ -217,20 +336,29 @@ class DiscoveryService:
         hint = _categorization_hint(categorization)
         taxonomy_paths = discovery_taxonomy_loader.data.paths
         if llm_service.is_available:
-            try:
-                raw = await asyncio.to_thread(
-                    llm_service.build_discovery_profile,
-                    transcript,
-                    track_name=track_name,
-                    duration_seconds=duration_seconds,
-                    categorization_hint=hint,
-                    prior_description=prior_description,
-                    partial_transcript=partial_transcript,
-                    max_search_phrases=settings.DISCOVERY_MAX_SEARCH_PHRASES,
-                    taxonomy_paths=taxonomy_paths,
-                )
-                if isinstance(raw, dict) and raw:
+            for attempt, strict in enumerate((False, True)):
+                try:
+                    raw = await asyncio.to_thread(
+                        llm_service.build_discovery_profile,
+                        transcript,
+                        track_name=track_name,
+                        duration_seconds=duration_seconds,
+                        categorization_hint=hint,
+                        prior_description=prior_description,
+                        partial_transcript=partial_transcript,
+                        max_search_phrases=settings.DISCOVERY_MAX_SEARCH_PHRASES,
+                        taxonomy_paths=taxonomy_paths,
+                        strict=strict,
+                    )
+                    if not isinstance(raw, dict) or not raw:
+                        continue
                     profile = self._parse_llm_dict(raw, content_id=content_id)
+                    profile = self._enrich_profile(
+                        profile, transcript, categorization, track_name
+                    )
+                    if self._is_weak_profile(profile, transcript, track_name) and attempt == 0:
+                        print("[DISCOVERY] Qwen profile weak — retrying with strict prompt")
+                        continue
                     profile.duration_seconds = duration_seconds
                     profile.source = source
                     if speaker and not profile.speaker:
@@ -241,8 +369,15 @@ class DiscoveryService:
                     )
                     profile.freeform_tags = self.map_freeform_tags(profile, categorization)
                     return profile
-            except Exception as exc:
-                print(f"[DISCOVERY] Qwen profile failed: {exc}")
+                except Exception as exc:
+                    print(f"[DISCOVERY] Qwen profile failed (attempt {attempt + 1}): {exc}")
+                    if attempt == 1:
+                        break
+        elif not llm_service.is_available:
+            print(
+                "[DISCOVERY] Qwen not loaded — enable QWEN_LLM_ENABLED=true and GPU; "
+                "using categorization fallback (limited metadata)"
+            )
 
         profile = self._fallback_from_categorization(
             transcript, categorization, content_id=content_id, track_name=track_name
@@ -252,6 +387,7 @@ class DiscoveryService:
             profile.source = source
             if speaker and not profile.speaker:
                 profile.speaker = speaker
+            profile = self._enrich_profile(profile, transcript, categorization, track_name)
         return profile
 
 

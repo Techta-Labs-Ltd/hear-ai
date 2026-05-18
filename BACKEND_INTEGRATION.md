@@ -332,38 +332,63 @@ Prefer `b2_key` for deletion; `audio_url` is used only if it matches the Hear AI
 
 Present on `pipeline`, `categorization`, `rebuild`, and `magic_clean` when a transcript exists and moderation did not flag the content. `content_description` is derived from `one_line_description` or `summary_short`.
 
-Primary fields (map directly into your discovery table):
+The object follows the contextual tagging model: canonical field names first, with aliases for legacy consumers (`id`/`title`, `themes`/`key_themes`, `audience_groups`/`audience_relevance`, `confidence`/`confidence_scores`).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Track / content id (`content_id` duplicate for convenience) |
-| `title` | string | Catalog title (`title_suggestion` duplicate) |
-| `duration_seconds` | int | From track metadata |
-| `source` | string | Track `source` or `category` from for-ai payload |
-| `speaker` | string | Primary narrator if named in audio |
-| `summary_short` | string | Engine-facing short summary (`short_summary` duplicate) |
-| `summary_long` | string | Human-facing paragraph |
+| `content_id` | string | Track id |
+| `title_suggestion` | string | Human discovery title |
+| `short_summary` / `summary_short` | string | 2–3 sentence engine blurb |
+| `summary_long` | string | Warm human-facing paragraph |
+| `one_line_description` | string | Single catalogue line |
 | `primary_genre` | string | e.g. Personal lived experience |
-| `controlled_tags` | string[] | Qwen-generated hierarchical paths; vocabulary guided by `data/discovery_taxonomy.txt`, engine merges and canonicalizes |
-| `freeform_tags` | string[] | Hashtag-style tags without `# |
-| `entities` | string[] | Flat list (people, animals, products, apps, tech) |
-| `themes` | string[] | Key thematic labels |
-| `audience_groups` | string[] | Who would find this relevant |
+| `main_topic` | string | Primary subject |
+| `secondary_topics` | string[] | Related subjects |
+| `speaker` | string | Narrator if named |
+| `source` | string | Track source or category |
+| `duration_seconds` | int | Track duration |
+| `audience_relevance` | string[] | Who would find this relevant |
+| `tone` | string[] | e.g. warm, reflective |
+| `entities` | object | `{ people, animals, products, apps, technologies }` |
+| `entities_flat` | string[] | Denormalized list for simple filters |
+| `key_themes` / `themes` | string[] | Insight-level themes |
 | `search_phrases` | string[] | Natural-language search hooks |
-| `recommendation_labels` | string[] | Recommendation facets |
-| `transcript_embedding_id` | string | Empty — your backend sets after indexing |
-| `summary_embedding_id` | string | Empty — your backend sets after indexing |
-| `created_at` | string | ISO-8601 UTC when profile was built |
-| `confidence_scores` | object | Field → score map from Qwen |
+| `recommendation_labels` | string[] | e.g. For listeners interested in … |
+| `sensitivity_flags` | string[] | Optional content warnings |
+| `controlled_tags` | string[] | Hierarchical taxonomy paths |
+| `freeform_tags` | string[] | Plain tags without `# |
+| `confidence` / `confidence_scores` | object | Field → score (0–1) |
+| `embedding_source_text` | string | Dense line for your vector indexer |
+| `transcript_embedding_id` | string | Empty until backend indexes |
+| `summary_embedding_id` | string | Empty until backend indexes |
+| `created_at` | string | ISO-8601 UTC |
+| `id` / `title` | string | Aliases of `content_id` / `title_suggestion` |
 
-Rich extras (same callback, for UI / search):
+Example fragment:
 
-| Field | Type |
-|-------|------|
-| `one_line_description` | string |
-| `main_topic` | string |
-| `secondary_topics` | string[] |
-| `embedding_source_text` | string |
+```json
+{
+  "title_suggestion": "Using Smart Glasses and AI to Experience the World Differently",
+  "short_summary": "A blind speaker describes walking with his guide dog Rocco...",
+  "one_line_description": "A personal story about smart glasses, guide-dog walking and AI tools...",
+  "primary_genre": "Personal lived experience",
+  "main_topic": "Assistive technology for visual impairment",
+  "secondary_topics": ["Meta Ray-Ban smart glasses", "Guide dogs", "Human connection"],
+  "audience_relevance": ["blind and partially sighted listeners", "guide dog users"],
+  "tone": ["warm", "reflective", "personal"],
+  "entities": {
+    "people": ["Paul", "Annie"],
+    "animals": ["Rocco the guide dog"],
+    "products": ["Meta Ray-Ban glasses", "Orion AI assistant"],
+    "apps": ["WhatsApp"],
+    "technologies": ["AI assistant", "smart glasses", "object recognition"]
+  },
+  "key_themes": ["independence is about choice", "AI can describe the visual world"],
+  "search_phrases": ["smart glasses for blind people", "guide dog and technology"],
+  "recommendation_labels": ["For listeners interested in assistive technology"],
+  "confidence": { "primary_genre": 0.95, "main_topic": 0.98 }
+}
+```
 
 `categorization` remains a separate sibling object (tags, categories, sentiment).
 

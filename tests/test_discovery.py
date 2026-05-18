@@ -66,9 +66,14 @@ def test_discovery_callback_matches_backend_schema():
     assert data["duration_seconds"] == 312
     assert data["source"] == "upload"
     assert data["speaker"] == "Alex"
+    assert data["key_themes"] == ["Independence"]
     assert data["themes"] == ["Independence"]
+    assert data["audience_relevance"] == ["Blind listeners"]
     assert data["audience_groups"] == ["Blind listeners"]
-    assert "Alex" in data["entities"] and "Rocco" in data["entities"]
+    assert data["entities"]["people"] == ["Alex"]
+    assert "Rocco" in data["entities"]["animals"]
+    assert "Alex" in data["entities_flat"]
+    assert data["confidence"]["main_topic"] == 0.92
     assert data["confidence_scores"]["main_topic"] == 0.92
     assert data["main_topic"] == "Assistive technology"
     assert data["one_line_description"] == "One line"
@@ -99,6 +104,53 @@ def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader, monkeypatc
 
 def test_canonicalize_path(taxonomy_loader):
     assert taxonomy_loader.canonicalize_path("accessibility > guide dogs") == "Accessibility > Guide dogs"
+
+
+def test_extract_json_nested_object():
+    from app.services.llm_service import LLMService
+
+    raw = (
+        'Here is the result: {"title_suggestion":"Guide dogs story","speaker":"Paul",'
+        '"entities":{"people":["Paul","Annie"],"animals":["Rocco"]},"search_phrases":["a","b"]} end'
+    )
+    parsed = LLMService._extract_json(raw)
+    assert parsed["speaker"] == "Paul"
+    assert parsed["entities"]["animals"] == ["Rocco"]
+    assert len(parsed["search_phrases"]) == 2
+
+
+def test_infer_speaker_and_weak_profile():
+    svc = DiscoveryService()
+    tx = "Hello everyone, this is Denise Wallace in Glasgow. I'm really pleased..."
+    assert svc._infer_speaker(tx) == "Denise Wallace"
+    profile = ContentDiscoveryProfile(
+        title_suggestion="20260514092830_372d5b77",
+        summary_short=tx[:400],
+        one_line_description=tx[:200],
+        main_topic="Gaming",
+        search_phrases=[],
+        key_themes=[],
+    )
+    assert svc._is_weak_profile(profile, tx, "20260514092830_372d5b77")
+
+
+def test_enrich_profile_fills_search_phrases():
+    svc = DiscoveryService()
+    profile = ContentDiscoveryProfile(
+        main_topic="Gaming",
+        secondary_topics=["Truman Adventure Games", "interviews"],
+        key_themes=[],
+        search_phrases=[],
+    )
+    enriched = svc._enrich_profile(
+        profile,
+        "Hello everyone, this is Denise Wallace in Glasgow.",
+        {"tags": ["#gaming"], "categories": ["Entertainment"]},
+        "20260514092830_372d5b77",
+    )
+    assert enriched.speaker == "Denise Wallace"
+    assert len(enriched.search_phrases) >= 2
+    assert not enriched.title_suggestion.startswith("20260514")
 
 
 def test_fallback_profile_when_llm_disabled(monkeypatch):

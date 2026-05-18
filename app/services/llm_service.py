@@ -100,12 +100,41 @@ class LLMService:
 
     @staticmethod
     def _extract_json(text: str) -> dict:
-        match = re.search(r"\{.*?\}", text, re.DOTALL)
-        if match:
+        if not text:
+            return {}
+        stripped = text.strip()
+        if stripped.startswith("{"):
             try:
-                return json.loads(match.group())
+                return json.loads(stripped)
             except json.JSONDecodeError:
                 pass
+        start = stripped.find("{")
+        if start < 0:
+            return {}
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(stripped)):
+            ch = stripped[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(stripped[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
         return {}
 
     def moderate(
@@ -277,6 +306,7 @@ class LLMService:
         partial_transcript: bool = False,
         max_search_phrases: int = 12,
         taxonomy_paths: list[str] | None = None,
+        strict: bool = False,
     ) -> dict:
         if not self._available:
             raise RuntimeError("LLM not loaded")
@@ -293,44 +323,58 @@ class LLMService:
         tax_block = "none"
         if taxonomy_paths:
             tax_block = "\n".join(f"- {p}" for p in taxonomy_paths[:40])
+        strict_note = ""
+        if strict:
+            strict_note = (
+                "CRITICAL: Fill EVERY field below. Never paste the transcript opening as summary_short or "
+                "one_line_description. Invent a discovery title — never use the track filename.\n"
+            )
         user_content = (
-            f"Track title: {title or 'unknown'}\n"
+            f"Track filename (do NOT use as title_suggestion): {title or 'unknown'}\n"
             f"Duration: {dur}\n"
             f"Existing tags/categories hint: {hint or 'none'}\n"
             f"Prior description (regenerate fully, do not copy blindly): {prior or 'none'}\n"
-            f"{partial_note}\n\n"
+            f"{partial_note}\n"
+            f"{strict_note}\n"
             f"Transcript:\n{body or '(no transcript)'}\n\n"
-            "Build a discovery profile for spoken-word audio search and recommendations.\n"
+            "Build a rich discovery profile for spoken-word audio search and recommendations.\n"
             "Do NOT reduce this to a single generic tag like Technology unless technology is truly the main subject.\n"
             "Prioritize content type (personal story, interview, news, review) and the emotional centre of the piece.\n"
-            f"Return ONLY valid JSON (no markdown) with up to {max_search_phrases} search_phrases:\n"
+            "Write summaries in third person about the content — never quote the opening line of the transcript.\n"
+            f"Return ONLY valid JSON (no markdown) with at least 5 search_phrases and 3 key_themes:\n"
             '{"title_suggestion":"","summary_short":"","summary_long":"","one_line_description":"",'
             '"speaker":"","primary_genre":"","main_topic":"","secondary_topics":[],'
-            '"audience_groups":[],"themes":[],"tone":[],'
-            '"controlled_tags":[],"'
+            '"audience_relevance":[],"tone":[],'
+            '"key_themes":[],"controlled_tags":[],"'
             '"entities":{"people":[],"animals":[],"products":[],"apps":[],"technologies":[]},'
             '"search_phrases":[],"recommendation_labels":[],"sensitivity_flags":[],'
-            '"confidence_scores":{"primary_genre":0.9,"main_topic":0.9},'
+            '"confidence":{"primary_genre":0.9,"main_topic":0.9},'
             '"embedding_source_text":"","freeform_tags":[]}\n'
-            "speaker = primary narrator or interviewee name if stated; themes = key thematic labels; "
-            "audience_groups = who would find this relevant (e.g. blind listeners, carers). "
-            "controlled_tags = hierarchical taxonomy paths using ' > ' separators (e.g. Accessibility > Guide dogs). "
-            "Pick the best-fitting paths from the reference vocabulary below; add new paths only when nothing fits.\n"
+            "title_suggestion = human discovery title (not the filename). "
+            "speaker = primary narrator name if stated (e.g. Denise Wallace). "
+            "key_themes = insight-level themes (e.g. independence is about choice). "
+            "audience_relevance = who would find this relevant. "
+            "controlled_tags = hierarchical paths with ' > ' (pick from vocabulary below when possible). "
+            "search_phrases = natural-language queries listeners might use. "
+            "recommendation_labels = 'For listeners interested in ...' style lines. "
+            "entities = names of people, animals, products, apps, technologies mentioned.\n"
             f"Reference taxonomy vocabulary:\n{tax_block}\n"
-            "summary_short = compact engine-facing blurb; summary_long = warm human-facing paragraph; "
-            "embedding_source_text = dense keyword-rich line for vector search."
+            "summary_short = 2-3 sentence engine blurb; summary_long = warm human paragraph; "
+            "one_line_description = single catalogue line; "
+            "embedding_source_text = dense keyword-rich line for vector search (no full transcript)."
         )
         messages = [
             {
                 "role": "system",
                 "content": (
                     "You are an expert audio discovery metadata analyst for a podcast and Talking Newspaper platform. "
-                    "Return ONLY valid JSON."
+                    "Return ONLY one complete JSON object. No markdown."
                 ),
             },
             {"role": "user", "content": user_content},
         ]
-        raw = self._generate(messages, max_new_tokens=700)
+        max_tokens = max(400, int(app_settings.DISCOVERY_MAX_NEW_TOKENS))
+        raw = self._generate(messages, max_new_tokens=max_tokens)
         parsed = self._extract_json(raw)
         if not isinstance(parsed, dict) or not parsed:
             return {}

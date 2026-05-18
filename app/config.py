@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     DISCOVERY_TAXONOMY_FILE: str = "./data/discovery_taxonomy.txt"
     DISCOVERY_METADATA_ENABLED: bool = True
     DISCOVERY_MAX_SEARCH_PHRASES: int = 12
+    DISCOVERY_MAX_NEW_TOKENS: int = 1100
     HARM_KEYWORDS_FILE: str = "./data/harm_keywords.txt"
     DEMUCS_MODEL: str = "htdemucs"
     MODEL_CACHE_DIR: str = "/opt/ml/models"
