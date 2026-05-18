@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+
+
+def coerce_discovery_source(*candidates: Any) -> str:
+    for val in candidates:
+        if val is None:
+            continue
+        if isinstance(val, str):
+            out = val.strip()
+            if out:
+                return out
+        if isinstance(val, dict):
+            for key in ("source", "name", "label", "type"):
+                inner = val.get(key)
+                if isinstance(inner, str) and inner.strip():
+                    return inner.strip()
+    return ""
 
 
 class DiscoveryEntities(BaseModel):
@@ -137,7 +154,7 @@ def discovery_to_callback_dict(
         "main_topic": (profile.main_topic or "").strip(),
         "secondary_topics": list(profile.secondary_topics or []),
         "speaker": (profile.speaker or "").strip(),
-        "source": (source or profile.source or "").strip(),
+        "source": coerce_discovery_source(source, profile.source),
         "duration_seconds": int(dur) if dur is not None else 0,
         "audience_relevance": audience,
         "tone": list(profile.tone or []),

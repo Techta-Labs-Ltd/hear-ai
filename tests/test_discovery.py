@@ -5,6 +5,7 @@ from app.models.discovery import (
     ContentDiscoveryProfile,
     DiscoveryEntities,
     content_description_from_discovery,
+    coerce_discovery_source,
     discovery_to_callback_dict,
     flatten_entities,
 )
@@ -65,6 +66,14 @@ def test_discovery_callback_matches_backend_schema():
     assert data["title"] == "Smart glasses walk"
     assert data["duration_seconds"] == 312
     assert data["source"] == "upload"
+
+
+def test_coerce_discovery_source_ignores_categorization_dict():
+    cat = {"categories": ["Music"], "tags": ["#rock"]}
+    assert coerce_discovery_source(cat) == ""
+    profile = ContentDiscoveryProfile(content_id="x")
+    data = discovery_to_callback_dict(profile, source=cat)
+    assert data["source"] == ""
     assert data["speaker"] == "Alex"
     assert data["key_themes"] == ["Independence"]
     assert data["themes"] == ["Independence"]

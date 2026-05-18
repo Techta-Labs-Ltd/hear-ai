@@ -26,6 +26,7 @@ from app.core.platform_settings import fetch_platform_settings
 from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
+from app.models.discovery import coerce_discovery_source
 from app.services.discovery import discovery_result_bundle, discovery_service
 from app.services.llm_service import llm_service
 
@@ -392,7 +393,12 @@ class PipelineWorker:
         source: str | None = None,
     ) -> tuple[dict | None, str | None]:
         duration = float(track.duration) if track.duration else None
-        track_source = source or getattr(track, "source", None) or track.category
+        track_category = getattr(track, "category", None)
+        track_source = coerce_discovery_source(
+            source,
+            getattr(track, "source", None),
+            track_category if isinstance(track_category, str) else None,
+        ) or None
         profile = await discovery_service.build_profile(
             transcript_text,
             content_id=track.track_id,
