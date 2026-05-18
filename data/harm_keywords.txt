@@ -170,4 +170,6 @@ pipe bomb
 nail bomb
 
 [PLATFORM_KEYWORDS]
-
+spam
+scam
+fraud

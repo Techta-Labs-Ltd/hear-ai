@@ -1058,6 +1058,11 @@ Obituaries
 #Review
 #Tutorial
 #Explainer
+#news
+#breaking
+#exclusive
+#interview
+#report
 
 [KEYWORDS]
 election|vote|voting|council|parliament|government|minister|MP|mayor|political|party|referendum|ballot|constituency|legislation|senator|congress|president|governor|primary|caucus|swing.state|gerrymandering|filibuster|bipartisan|lobby = #Politics
