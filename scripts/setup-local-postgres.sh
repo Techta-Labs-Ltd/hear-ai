@@ -17,7 +17,7 @@ print(
     parsed.hostname or "",
     unquote(parsed.username or ""),
     unquote(parsed.password or ""),
-    (parsed.path or "").lstrip("/"),
+    (parsed.path or "").lstrip("/").split("?")[0],
     parsed.port or 5432,
 )
 PY
@@ -102,8 +102,10 @@ _pg_reload() {
   local hba ver
   hba="$(_pg_hba_conf)"
   if [[ -n "$hba" ]] && command -v pg_ctlcluster >/dev/null 2>&1; then
-    ver="$(basename "$(dirname "$(dirname "$hba")")")")"
-    pg_ctlcluster "$ver" main reload 2>/dev/null || true
+    ver=$(sed -n 's#.*/postgresql/\([^/]*\)/.*#\1#p' <<<"$hba" | head -n1)
+    if [[ -n "$ver" ]]; then
+      pg_ctlcluster "$ver" main reload 2>/dev/null || true
+    fi
   fi
   service postgresql reload 2>/dev/null || true
 }
