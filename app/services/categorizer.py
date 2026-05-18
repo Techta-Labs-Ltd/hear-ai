@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Optional
 
 import httpx
@@ -110,27 +110,41 @@ class CategorizationService:
         )
 
         tag_pool = self._build_tag_pool(transcript, data.tags, layer1["scores"])
-        ranked_cats = self._rank_categories(data.categories, layer1["scores"])
 
-        # Zero-shot categories always runs (30-40 labels — NLI handles this well)
         layer2_cat = await loop.run_in_executor(
             None, self._zero_shot_labels, transcript, data.categories
         )
+        context_cats = self._build_context_category_shortlist(
+            transcript,
+            data.categories,
+            layer1["scores"],
+            layer2_cat.get("scores", {}),
+        )
+        nli_top = self._top_nli_categories(layer2_cat.get("scores", {}), limit=6)
 
         if llm_service.is_available:
             try:
                 llm_result = await loop.run_in_executor(
                     None,
-                    llm_service.categorize,
-                    transcript,
-                    ranked_cats,
-                    tag_pool,
-                    layer1["scores"],
+                    lambda: llm_service.categorize(
+                        transcript,
+                        context_cats,
+                        tag_pool,
+                        layer1["scores"],
+                        max_categories=3,
+                        nli_top_categories=nli_top,
+                    ),
                 )
                 tags, categories, new_tags_added, new_categories_added = (
                     self._integrate_llm_categorization(llm_result, catalog_tags=data.tags)
                 )
                 llm_sentiment = llm_result["sentiment"]
+                categories = self._finalize_categories(
+                    transcript,
+                    categories,
+                    layer2_cat.get("scores", {}),
+                    max_categories=3,
+                )
 
                 if platform.blocked_keywords:
                     tags = self._filter_blocked_tags(tags, platform.blocked_keywords)
@@ -243,24 +257,38 @@ class CategorizationService:
                 None, self._keyword_layer, t_text, [], data.keyword_rules
             )
             tag_pool = self._build_tag_pool(t_text, data.tags, layer1["scores"])
-            ranked_cats = self._rank_categories(data.categories, layer1["scores"])
+            layer2_cat = await loop.run_in_executor(
+                None, self._zero_shot_labels, t_text, data.categories
+            )
+            zs_scores = layer2_cat.get("scores", {})
+            context_cats = self._build_context_category_shortlist(
+                t_text, data.categories, layer1["scores"], zs_scores
+            )
+            nli_top = self._top_nli_categories(zs_scores, limit=6)
 
             if llm_service.is_available:
                 try:
                     llm_result = await loop.run_in_executor(
                         None,
-                        lambda lt=t_text, l1=layer1, tp=tag_pool, rc=ranked_cats: llm_service.categorize(
+                        lambda lt=t_text, l1=layer1, tp=tag_pool, cc=context_cats, nt=nli_top: llm_service.categorize(
                             lt,
-                            rc,
+                            cc,
                             tp,
                             l1["scores"],
-                            max_categories=2,
+                            max_categories=3,
+                            nli_top_categories=nt,
                         ),
                     )
                     t_tags, t_cats, track_new_tags, track_new_cats = (
                         self._integrate_llm_categorization(llm_result, catalog_tags=data.tags)
                     )
                     t_sent = llm_result.get("sentiment", "neutral")
+                    t_cats = self._finalize_categories(
+                        t_text, t_cats, zs_scores, max_categories=3
+                    )
+                    t_tags, t_cats = self._apply_editorial_rules(
+                        t_text, t_tags, t_cats, max_tags
+                    )
 
                     per_track[track_id] = {"tags": t_tags, "categories": t_cats, "sentiment": t_sent}
 
@@ -286,17 +314,19 @@ class CategorizationService:
                         track_id[:16], exc,
                     )
 
-            # NLI fallback for this track
-            layer2_cat = await loop.run_in_executor(
-                None, self._zero_shot_labels, t_text, data.categories
-            )
             layer2_tag: dict = {"scores": {}}
             layer3: dict = {"scores": {}, "suggested_tags": [], "suggested_categories": []}
             nli_merged = self._merge(layer1, layer2_cat, layer2_tag, layer3, data.tags, data.categories, max_tags)
             t_sent = await loop.run_in_executor(None, self._get_sentiment, t_text)
 
             t_tags = self._normalize_tags(nli_merged.get("tags", []))
-            t_cats = nli_merged.get("categories", [])
+            t_cats = self._finalize_categories(
+                t_text,
+                nli_merged.get("categories", []),
+                zs_scores,
+                max_categories=3,
+            )
+            t_tags, t_cats = self._apply_editorial_rules(t_text, t_tags, t_cats, max_tags)
             per_track[track_id] = {"tags": t_tags, "categories": t_cats, "sentiment": t_sent}
 
             for tag in t_tags:
@@ -430,6 +460,67 @@ class CategorizationService:
             return self._normalize_tags([words[0]])[:max_tags]
         return []
 
+    _FORMAT_CATEGORIES = frozenset(
+        {"podcast", "documentary", "entertainment", "lifestyle", "opinion", "media"}
+    )
+    _FORMAT_TAGS = frozenset({"#podcast", "#radio", "#broadcast", "#streaming"})
+
+    def _rebalance_subject_over_format(
+        self,
+        transcript: str,
+        tags: list[str],
+        categories: list[str],
+    ) -> tuple[list[str], list[str]]:
+        text = (transcript or "").lower()
+        normalized_tags = self._normalize_tags(tags)
+        normalized_categories = [c.strip() for c in (categories or []) if c and c.strip()]
+
+        subject_rules: list[tuple[tuple[str, ...], str, str, int]] = [
+            (
+                (
+                    "music", "song", "remix", "band", "album", "lyrics", "melody",
+                    "singer", "orchestral", "joan of arc", "soundtrack", "single",
+                    "ep", "guitar", "piano", "concert", "vinyl",
+                ),
+                "Music",
+                "#music",
+                2,
+            ),
+            (
+                ("game", "gaming", "xbox", "playstation", "nintendo", "esports", "truman adventure"),
+                "Gaming",
+                "#gaming",
+                2,
+            ),
+            (
+                ("football", "soccer", "rugby", "cricket", "tennis", "match", "goal", "league"),
+                "Sports",
+                "#sports",
+                3,
+            ),
+        ]
+
+        for terms, category, tag, min_hits in subject_rules:
+            hits = sum(1 for term in terms if term in text)
+            if hits < min_hits:
+                continue
+            if category not in normalized_categories:
+                normalized_categories.insert(0, category)
+            tag_norm = self._normalize_tag(tag)
+            if tag_norm and tag_norm not in normalized_tags:
+                normalized_tags.insert(0, tag_norm)
+            normalized_categories = [
+                c for c in normalized_categories
+                if c.lower() not in self._FORMAT_CATEGORIES or c.lower() == category.lower()
+            ]
+            normalized_tags = [
+                t for t in normalized_tags
+                if t.lower() not in self._FORMAT_TAGS or t.lower() == tag_norm
+            ]
+            break
+
+        return normalized_tags, normalized_categories
+
     def _apply_editorial_rules(
         self,
         transcript: str,
@@ -440,6 +531,9 @@ class CategorizationService:
         text = (transcript or "").lower()
         normalized_tags = self._normalize_tags(tags)
         normalized_categories = [c.strip() for c in (categories or []) if c and c.strip()]
+        normalized_tags, normalized_categories = self._rebalance_subject_over_format(
+            transcript, normalized_tags, normalized_categories
+        )
         sports_terms = (
             "football", "soccer", "rugby", "tennis", "cricket", "match", "league",
             "goal", "championship", "tournament", "athlete", "golf",
@@ -489,6 +583,92 @@ class CategorizationService:
             else:
                 rest.append(cat)
         return hit + rest
+
+    def _top_nli_categories(self, zero_shot_scores: dict, *, limit: int = 6) -> list[str]:
+        ranked = sorted(zero_shot_scores.items(), key=lambda x: x[1], reverse=True)
+        out: list[str] = []
+        for cat, score in ranked:
+            if score < 0.2:
+                break
+            if cat.lower() in self._FORMAT_CATEGORIES and score < 0.5:
+                continue
+            out.append(cat)
+            if len(out) >= limit:
+                break
+        return out
+
+    def _build_context_category_shortlist(
+        self,
+        transcript: str,
+        all_categories: list[str],
+        keyword_scores: dict,
+        zero_shot_scores: dict,
+        *,
+        limit: int = 50,
+    ) -> list[str]:
+        tx_words = self._extract_transcript_words(transcript)
+        canonical = {c.lower(): c for c in all_categories}
+        scores: dict[str, float] = defaultdict(float)
+
+        for cat, zs in zero_shot_scores.items():
+            key = cat.lower()
+            if key in canonical:
+                scores[canonical[key]] += float(zs) * 0.55
+
+        for tag, kw in keyword_scores.items():
+            tag_clean = tag.lstrip("#").lower()
+            for key, name in canonical.items():
+                if key == tag_clean or key in tag_clean or tag_clean in key:
+                    scores[name] += float(kw) * 0.35
+
+        for cat in all_categories:
+            cat_words = set(re.findall(r"[a-z]+", cat.lower()))
+            overlap = len(cat_words & tx_words)
+            if overlap:
+                scores[cat] += overlap * 0.12
+
+        for fmt in self._FORMAT_CATEGORIES:
+            for cat in list(scores):
+                if cat.lower() == fmt and scores[cat] < 0.45:
+                    scores[cat] *= 0.3
+
+        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        ordered = [c for c, s in ranked if s >= 0.08]
+        seen: set[str] = set()
+        shortlist: list[str] = []
+        for c in ordered:
+            if c not in seen:
+                seen.add(c)
+                shortlist.append(c)
+        for c in all_categories:
+            if c not in seen:
+                shortlist.append(c)
+        return shortlist[:limit]
+
+    def _finalize_categories(
+        self,
+        transcript: str,
+        categories: list[str],
+        zero_shot_scores: dict,
+        *,
+        max_categories: int = 3,
+    ) -> list[str]:
+        cats = [c.strip() for c in (categories or []) if isinstance(c, str) and c.strip()]
+        if not cats and zero_shot_scores:
+            ranked = sorted(zero_shot_scores.items(), key=lambda x: x[1], reverse=True)
+            cats = [c for c, s in ranked if s >= 0.28][:max_categories]
+
+        ranked = sorted(zero_shot_scores.items(), key=lambda x: x[1], reverse=True)
+        for cat, score in ranked[:8]:
+            if score < 0.32:
+                continue
+            if cat.lower() in self._FORMAT_CATEGORIES:
+                continue
+            if cat not in cats:
+                cats.insert(0, cat)
+
+        _, cats = self._rebalance_subject_over_format(transcript, [], cats)
+        return cats[:max_categories]
 
     def _build_tag_pool(self, transcript: str, all_tags: list[str], keyword_scores: dict) -> list[str]:
         tx_words = self._extract_transcript_words(transcript)

@@ -234,6 +234,7 @@ class LLMService:
         tags: list[str],
         keyword_hits: dict[str, float] | None = None,
         max_categories: int = 2,
+        nli_top_categories: list[str] | None = None,
     ) -> dict:
         if not self._available:
             raise RuntimeError("LLM not loaded")
@@ -242,6 +243,12 @@ class LLMService:
         if keyword_hits:
             top = sorted(keyword_hits.items(), key=lambda x: x[1], reverse=True)[:8]
             kw_hint = f"\nKeyword analysis pre-detected: {', '.join(t for t, _ in top)}"
+        nli_hint = ""
+        if nli_top_categories:
+            nli_hint = (
+                f"\nTranscript classifier top subjects (strong signal): "
+                f"{', '.join(nli_top_categories[:6])}"
+            )
 
         cat_str = ", ".join(categories[:40])
         tag_str = ", ".join(tags[:100])
@@ -249,8 +256,9 @@ class LLMService:
         user_content = (
             f"Available categories (choose from these only): {cat_str}\n"
             f"Available tags (choose from these only, keep # prefix): {tag_str}\n"
-            f"{kw_hint}\n\n"
+            f"{kw_hint}{nli_hint}\n\n"
             f"Transcript:\n{transcript[:2000]}\n\n"
+            "Read the FULL transcript before choosing — categories must describe what this audio is ABOUT.\n"
             "Return ONLY this JSON (no markdown, no extra text):\n"
             '{"tags":["#Sports"],"categories":["Sports"],"sentiment":"neutral","new_tags":[],"new_categories":[]}\n\n'
             "Rules:\n"
@@ -259,7 +267,9 @@ class LLMService:
             "- new_tags: up to 5 NEW tags you discovered that are NOT in the available list — must start with #\n"
             "- new_categories: up to 2 NEW categories NOT in the available list\n"
             "- sentiment: positive | negative | neutral\n"
-            "- Base on MAIN topics only — ignore passing mentions\n"
+            "- Base on MAIN SUBJECT topics (music, sport, news, health) — NOT audio format\n"
+            "- Do NOT use Podcast as the only category when the subject is music, gaming, news, etc.\n"
+            "- Podcast/Documentary describe FORMAT; prefer Music, Entertainment, Sports, News for subject\n"
             "- If multiple distinct topics exist in this text, include a category for each\n"
         )
 
@@ -271,7 +281,7 @@ class LLMService:
             {"role": "user", "content": user_content},
         ]
 
-        raw = self._generate(messages, max_new_tokens=180)
+        raw = self._generate(messages, max_new_tokens=220)
         parsed = self._extract_json(raw)
 
         valid_tags = set(tags)
@@ -339,7 +349,8 @@ class LLMService:
             f"Transcript:\n{body or '(no transcript)'}\n\n"
             "Build a rich discovery profile for spoken-word audio search and recommendations.\n"
             "Do NOT reduce this to a single generic tag like Technology unless technology is truly the main subject.\n"
-            "Prioritize content type (personal story, interview, news, review) and the emotional centre of the piece.\n"
+            "Prioritize the SUBJECT (music, sport, accessibility, news) and emotional centre — not the word podcast.\n"
+            "primary_genre = subject genre (e.g. Music discussion, Personal lived experience) — never just Podcast.\n"
             "Write summaries in third person about the content — never quote the opening line of the transcript.\n"
             f"Return ONLY valid JSON (no markdown) with at least 5 search_phrases and 3 key_themes:\n"
             '{"title_suggestion":"","summary_short":"","summary_long":"","one_line_description":"",'

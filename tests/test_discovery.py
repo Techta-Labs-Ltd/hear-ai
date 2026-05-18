@@ -153,6 +153,53 @@ def test_enrich_profile_fills_search_phrases():
     assert not enriched.title_suggestion.startswith("20260514")
 
 
+def test_context_category_shortlist_ranks_music_from_transcript():
+    from app.services.categorizer import CategorizationService
+
+    svc = CategorizationService()
+    tx = (
+        "We discuss a remix of Joan of Arc by Orchestral Manoeuvres in the Dark, "
+        "the song lyrics, and how the melody feels."
+    )
+    zs = {"Music": 0.82, "Podcast": 0.41, "Entertainment": 0.55, "Gaming": 0.1}
+    kw = {"#music": 0.7, "#podcast": 0.3}
+    shortlist = svc._build_context_category_shortlist(
+        tx, list(zs.keys()) + ["News", "Sports"], kw, zs
+    )
+    assert shortlist[0] == "Music"
+    assert "Podcast" not in shortlist[:2]
+
+
+def test_finalize_categories_uses_nli_when_llm_empty():
+    from app.services.categorizer import CategorizationService
+
+    svc = CategorizationService()
+    tx = "A remix of Joan of Arc by Orchestral Manoeuvres in the Dark."
+    zs = {"Music": 0.8, "Podcast": 0.4, "Entertainment": 0.5}
+    cats = svc._finalize_categories(tx, [], zs, max_categories=2)
+    assert "Music" in cats
+    assert "Podcast" not in cats
+
+
+def test_categorizer_prefers_music_over_podcast():
+    from app.services.categorizer import CategorizationService
+
+    svc = CategorizationService()
+    tx = (
+        "This episode is a heartfelt discussion about a remix of Joan of Arc by "
+        "Orchestral Manoeuvres in the Dark. We talk about love, loss, and how the song feels."
+    )
+    tags, cats = svc._rebalance_subject_over_format(
+        tx,
+        ["#podcast", "#gaming"],
+        ["Podcast", "Entertainment"],
+    )
+    assert "Music" in cats
+    assert "#music" in tags
+    assert "Podcast" not in cats
+    assert "#podcast" not in tags
+
+
 def test_fallback_profile_when_llm_disabled(monkeypatch):
     from app.config import settings
 

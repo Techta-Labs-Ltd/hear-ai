@@ -57,8 +57,6 @@ class ContentDiscoveryProfile(BaseModel):
     controlled_tags: list[str] = Field(default_factory=list)
     freeform_tags: list[str] = Field(default_factory=list)
     embedding_source_text: str | None = None
-    transcript_embedding_id: str | None = None
-    summary_embedding_id: str | None = None
 
     @model_validator(mode="after")
     def sync_summary_aliases(self) -> ContentDiscoveryProfile:
@@ -153,8 +151,6 @@ def discovery_to_callback_dict(
         "controlled_tags": list(profile.controlled_tags or []),
         "freeform_tags": list(profile.freeform_tags or []),
         "embedding_source_text": (profile.embedding_source_text or "").strip(),
-        "transcript_embedding_id": profile.transcript_embedding_id or "",
-        "summary_embedding_id": profile.summary_embedding_id or "",
         "created_at": ts,
         "id": profile.content_id or "",
         "title": (profile.title_suggestion or "").strip(),

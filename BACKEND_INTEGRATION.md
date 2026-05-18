@@ -358,9 +358,7 @@ The object follows the contextual tagging model: canonical field names first, wi
 | `controlled_tags` | string[] | Hierarchical taxonomy paths |
 | `freeform_tags` | string[] | Plain tags without `# |
 | `confidence` / `confidence_scores` | object | Field → score (0–1) |
-| `embedding_source_text` | string | Dense line for your vector indexer |
-| `transcript_embedding_id` | string | Empty until backend indexes |
-| `summary_embedding_id` | string | Empty until backend indexes |
+| `embedding_source_text` | string | Dense line for your vector indexer (your backend creates vectors) |
 | `created_at` | string | ISO-8601 UTC |
 | `id` / `title` | string | Aliases of `content_id` / `title_suggestion` |
 

@@ -142,12 +142,45 @@ class DiscoveryService:
             ]
         if not profile.one_line_description and profile.summary_short:
             profile.one_line_description = profile.summary_short[:500]
-        if not profile.summary_short:
-            lead = f"{profile.speaker} " if profile.speaker else ""
-            topic = profile.main_topic or profile.primary_genre or "this audio"
-            profile.summary_short = f"{lead}covers {topic}.".strip()[:500]
+        if not profile.summary_short or self._summary_reads_like_transcript(profile.summary_short, tx):
+            profile.summary_short = self._compose_summary_blurb(profile, tx)
             profile.short_summary = profile.summary_short
+        if profile.primary_genre and profile.primary_genre.strip().lower() in (
+            "spoken audio",
+            "podcast",
+            "podcast episode",
+        ):
+            profile.primary_genre = profile.main_topic or profile.primary_genre
         return profile
+
+    def _summary_reads_like_transcript(self, summary: str, transcript: str) -> bool:
+        s = (summary or "").strip().lower()
+        t = (transcript or "").strip().lower()
+        if not s or not t or len(s) < 40:
+            return False
+        return s[:80] == t[:80]
+
+    def _compose_summary_blurb(self, profile: ContentDiscoveryProfile, transcript: str) -> str:
+        speaker = (profile.speaker or "").strip()
+        topic = (profile.main_topic or "").strip()
+        genre = (profile.primary_genre or "").strip()
+        themes = profile.key_themes or []
+        if speaker and topic:
+            base = f"{speaker} discusses {topic}."
+        elif topic:
+            base = f"A conversation about {topic}."
+        elif genre and genre.lower() not in ("spoken audio", "podcast"):
+            base = f"A {genre.lower()} piece."
+        else:
+            base = "A spoken-word audio piece."
+        if themes:
+            base += f" Themes include {themes[0].lower()}"
+            if len(themes) > 1:
+                base += f" and {themes[1].lower()}"
+            base += "."
+        if not base.endswith(".") and profile.secondary_topics:
+            base += f" Topics include {profile.secondary_topics[0]}."
+        return base[:500]
 
     def merge_controlled_tags(
         self,
