@@ -108,18 +108,20 @@ echo -e "  ${GREEN}✓ FastAPI OK${RESET}"
 
 echo ""
 echo -e "${YELLOW}[7/8] Writing Supervisor config...${RESET}"
+RUN_SERVER=$WORKSPACE/scripts/run-server.sh
+chmod +x "$RUN_SERVER"
 cat > $SUPERVISOR_CONF <<EOF
 [program:hear-ai]
-command=python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+command=$RUN_SERVER
 directory=$WORKSPACE
 autostart=true
 autorestart=true
 startretries=999
-startsecs=20
+startsecs=120
 stopasgroup=true
 killasgroup=true
 stopsignal=TERM
-environment=PYTHONUNBUFFERED=1,GIT_PYTHON_REFRESH=quiet
+environment=WORKSPACE="$WORKSPACE",PYTHONUNBUFFERED="1",GIT_PYTHON_REFRESH="quiet"
 stderr_logfile=$LOG_ERR
 stdout_logfile=$LOG_OUT
 EOF
@@ -137,17 +139,29 @@ echo -e "${CYAN}${BOLD}║  ▶ Full boot: make / make up             ║${RESET
 echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-if pgrep -x supervisord >/dev/null 2>&1; then
+_supervisor_start() {
   supervisorctl reread >/dev/null 2>&1 || true
   supervisorctl update >/dev/null 2>&1 || true
-  supervisorctl restart hear-ai >/dev/null 2>&1 || supervisorctl start hear-ai >/dev/null 2>&1
-  echo -e "${GREEN}✓ Reused existing supervisord and (re)started hear-ai${RESET}"
+  if ! supervisorctl restart hear-ai 2>/dev/null; then
+    supervisorctl start hear-ai 2>/dev/null || true
+  fi
+  sleep 2
+  if supervisorctl status hear-ai 2>/dev/null | grep -qE 'RUNNING|STARTING'; then
+    echo -e "${GREEN}✓ hear-ai is RUNNING under supervisor${RESET}"
+    return 0
+  fi
+  echo -e "${RED}✗ hear-ai did not reach RUNNING — last stderr:${RESET}"
+  tail -n 30 "$LOG_ERR" 2>/dev/null || true
+  return 1
+}
+
+if pgrep -x supervisord >/dev/null 2>&1; then
+  echo -e "${GREEN}✓ Reusing existing supervisord${RESET}"
+  _supervisor_start || exit 1
   exit 0
 fi
 
 supervisord
 sleep 1
-supervisorctl reread >/dev/null 2>&1 || true
-supervisorctl update >/dev/null 2>&1 || true
-supervisorctl start hear-ai >/dev/null 2>&1 || true
+_supervisor_start || exit 1
 echo -e "${GREEN}✓ supervisord started in daemon mode${RESET}"

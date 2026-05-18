@@ -71,7 +71,14 @@ down: ## Stop hear-ai under Supervisor
 	supervisorctl stop hear-ai 2>/dev/null || true
 
 restart:
-	supervisorctl restart hear-ai 2>/dev/null || ( $(MAKE) up-bg && echo "Supervisor was not running — ran full bootstrap (up-bg)" )
+	@supervisorctl restart hear-ai 2>/dev/null && supervisorctl status hear-ai || { \
+	  echo "restart failed — running full bootstrap (up-bg)..."; \
+	  $(MAKE) up-bg; \
+	  sleep 3; \
+	  supervisorctl status hear-ai 2>/dev/null || true; \
+	  echo "--- last stderr (if any) ---"; \
+	  $(MAKE) errors-tail N=40 2>/dev/null || true; \
+	}
 
 stop: down ## Alias for `down`
 
