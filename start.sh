@@ -54,7 +54,13 @@ echo -e "  ${GREEN}✓ All packages installed${RESET}"
 echo ""
 echo -e "${YELLOW}[4/8] Validating environment and PostgreSQL...${RESET}"
 if [ -z "${DATABASE_URL:-}" ]; then
-  echo -e "  ${RED}✗ DATABASE_URL is not set (required for PostgreSQL)${RESET}"
+  if [ -f "$WORKSPACE/scripts/postgres-env.sh" ]; then
+    # shellcheck source=/dev/null
+    source "$WORKSPACE/scripts/postgres-env.sh"
+  fi
+fi
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo -e "  ${RED}✗ Set POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB (or DATABASE_URL) in ${WORKSPACE}/.env${RESET}"
   exit 1
 fi
 if [ "${AI_SERVICE_SECRET:-change-me}" = "change-me" ]; then
@@ -95,14 +101,14 @@ except OperationalError as err:
 
 if ! _pg_check; then
   echo -e "  ${YELLOW}⚠ PostgreSQL not reachable — attempting local install (127.0.0.1 / localhost)...${RESET}"
-  chmod +x "$WORKSPACE/scripts/setup-local-postgres.sh"
+  chmod +x "$WORKSPACE/scripts/setup-local-postgres.sh" "$WORKSPACE/scripts/postgres-env.sh"
   if bash "$WORKSPACE/scripts/setup-local-postgres.sh"; then
     if ! _pg_check; then
-      echo -e "  ${RED}✗ PostgreSQL still unreachable after local setup. Check DATABASE_URL in ${WORKSPACE}/.env${RESET}"
+      echo -e "  ${RED}✗ PostgreSQL still unreachable after local setup. Check POSTGRES_* / DATABASE_URL in ${WORKSPACE}/.env${RESET}"
       exit 1
     fi
   else
-    echo -e "  ${RED}✗ PostgreSQL unreachable and local setup failed. Fix DATABASE_URL or run: bash scripts/setup-local-postgres.sh${RESET}"
+    echo -e "  ${RED}✗ PostgreSQL unreachable and local setup failed. Fix POSTGRES_* / DATABASE_URL or run: make install-postgres${RESET}"
     exit 1
   fi
 fi

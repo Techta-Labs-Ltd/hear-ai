@@ -1,3 +1,6 @@
+from urllib.parse import quote_plus
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +19,12 @@ class Settings(BaseSettings):
     JOB_MAX_RETRIES: int = 8
     CALLBACK_RETRY_POLL_SECONDS: int = 45
     DATABASE_URL: str = ""
+    POSTGRES_USER: str = "hear_user"
+    POSTGRES_PASSWORD: str = ""
+    POSTGRES_DB: str = "hear_ai"
+    POSTGRES_HOST: str = "127.0.0.1"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_SSLMODE: str = "disable"
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_TIMEOUT: int = 30
@@ -65,6 +74,21 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def build_database_url_from_postgres(self) -> "Settings":
+        if (self.DATABASE_URL or "").strip():
+            return self
+        user = quote_plus(self.POSTGRES_USER)
+        password = quote_plus(self.POSTGRES_PASSWORD or "")
+        host = self.POSTGRES_HOST
+        port = self.POSTGRES_PORT
+        db = self.POSTGRES_DB
+        ssl = self.POSTGRES_SSLMODE
+        self.DATABASE_URL = (
+            f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}?sslmode={ssl}"
+        )
+        return self
 
 
 settings = Settings()

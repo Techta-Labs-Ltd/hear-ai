@@ -14,7 +14,7 @@ WAIT_READY_SECS ?= 90
 .DEFAULT_GOAL := up
 
 .PHONY: help up up-bg all boot start finish down restart stop logs errors status \
-	bootstrap-logs env-check migrate install-postgres clean-temp clean-temp-purge psql shell \
+	bootstrap-logs env-check migrate install-postgres postgres-show clean-temp clean-temp-purge psql shell \
 	install clean errors-tail errors-head errors-cat errors-clear wait-ready
 
 help: ## Show targets (default: `make` = full bootstrap via `up`)
@@ -30,7 +30,8 @@ help: ## Show targets (default: `make` = full bootstrap via `up`)
 	@echo "  make status        supervisorctl status"
 	@echo "  make env-check     Quick DATABASE_URL + AI_SERVICE_SECRET check"
 	@echo "  make migrate       init_db() only (schema + extensions)"
-	@echo "  make install-postgres  Install/start local PostgreSQL (127.0.0.1 in DATABASE_URL)"
+	@echo "  make install-postgres  Install local Postgres using POSTGRES_* from .env"
+	@echo "  make postgres-show     Print resolved DB user/host/db (not password)"
 	@echo "  make clean-temp    Periodic temp sweep"
 	@echo ""
 	@echo "WORKSPACE=$(WORKSPACE) (override: make up WORKSPACE=/your/path)"
@@ -105,15 +106,19 @@ errors-clear:
 	@: > $(LOG_ERR) && echo "Cleared $(LOG_ERR)"
 
 env-check:
-	@test -n "$$DATABASE_URL" || (echo "DATABASE_URL is empty (export or put in $(WORKSPACE)/.env)" && exit 1)
+	@cd $(WORKSPACE) && bash scripts/postgres-env.sh
 	@test "$$AI_SERVICE_SECRET" != "change-me" || (echo "AI_SERVICE_SECRET must not be change-me" && exit 1)
 
 migrate:
 	cd $(WORKSPACE) && python3 -c "from app.models.database import init_db; init_db(); print('migrated')"
 
 install-postgres:
-	chmod +x $(WORKSPACE)/scripts/setup-local-postgres.sh
+	chmod +x $(WORKSPACE)/scripts/setup-local-postgres.sh $(WORKSPACE)/scripts/postgres-env.sh
 	INSTALL_LOCAL_POSTGRES=true bash $(WORKSPACE)/scripts/setup-local-postgres.sh
+
+postgres-show:
+	@cd $(WORKSPACE) && bash scripts/postgres-env.sh && \
+	  echo "DATABASE_URL uses user=$$POSTGRES_USER db=$$POSTGRES_DB host=$$POSTGRES_HOST port=$$POSTGRES_PORT"
 
 clean-temp:
 	cd $(WORKSPACE) && python3 -m app.tools.clean_temp --mode periodic
@@ -122,7 +127,7 @@ clean-temp-purge:
 	cd $(WORKSPACE) && python3 -m app.tools.clean_temp --mode purge --yes
 
 psql:
-	@psql "$$DATABASE_URL"
+	@cd $(WORKSPACE) && bash scripts/postgres-env.sh && psql "$$PSQL_URL"
 
 shell:
 	cd $(WORKSPACE) && python3 -i -c "from app.models.database import SessionLocal, AiJob, AiTrackJob, AiTempFile; db = SessionLocal()"

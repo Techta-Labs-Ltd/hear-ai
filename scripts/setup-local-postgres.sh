@@ -3,35 +3,27 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-
-if [[ -f "$ROOT/.env" ]]; then
-  set -a
-  # shellcheck source=/dev/null
-  . "$ROOT/.env"
-  set +a
-fi
-
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "[postgres] DATABASE_URL not set — skip"
-  exit 0
-fi
+# shellcheck source=/dev/null
+source "$ROOT/scripts/postgres-env.sh"
 
 read -r PG_HOST PG_USER PG_PASS PG_DB PG_PORT < <(
   python3 <<'PY'
-import os
 from urllib.parse import urlparse, unquote
+import os
 
-raw = os.environ.get("DATABASE_URL", "")
-raw = raw.replace("postgresql+psycopg2://", "postgresql://", 1)
+raw = os.environ["DATABASE_URL"].replace("postgresql+psycopg2://", "postgresql://", 1)
 parsed = urlparse(raw)
-host = parsed.hostname or ""
-user = unquote(parsed.username or "")
-password = unquote(parsed.password or "")
-dbname = (parsed.path or "").lstrip("/")
-port = parsed.port or 5432
-print(host, user, password, dbname, port)
+print(
+    parsed.hostname or "",
+    unquote(parsed.username or ""),
+    unquote(parsed.password or ""),
+    (parsed.path or "").lstrip("/"),
+    parsed.port or 5432,
+)
 PY
 )
+
+echo "[postgres] Config: user=${PG_USER} db=${PG_DB} host=${PG_HOST} port=${PG_PORT}"
 
 LOCAL_HOSTS="127.0.0.1 localhost ::1"
 is_local=0
