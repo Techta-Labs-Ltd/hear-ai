@@ -266,6 +266,92 @@ class LLMService:
 
         return {"tags": tags_out, "categories": cats_out, "sentiment": sentiment, "new_tags": new_tags, "new_categories": new_cats}
 
+    def build_discovery_profile(
+        self,
+        transcript: str,
+        *,
+        track_name: str = "",
+        duration_seconds: float | None = None,
+        categorization_hint: str = "",
+        prior_description: str | None = None,
+        partial_transcript: bool = False,
+        max_search_phrases: int = 12,
+        taxonomy_paths: list[str] | None = None,
+    ) -> dict:
+        if not self._available:
+            raise RuntimeError("LLM not loaded")
+        body = (transcript or "").strip()[:8000]
+        title = (track_name or "").strip()[:200]
+        hint = (categorization_hint or "").strip()[:600]
+        prior = (prior_description or "").strip()[:500]
+        dur = f"{duration_seconds:.0f}s" if duration_seconds else "unknown"
+        partial_note = (
+            "The transcript may be partial or from metadata only; infer carefully."
+            if partial_transcript
+            else ""
+        )
+        tax_block = "none"
+        if taxonomy_paths:
+            tax_block = "\n".join(f"- {p}" for p in taxonomy_paths[:40])
+        user_content = (
+            f"Track title: {title or 'unknown'}\n"
+            f"Duration: {dur}\n"
+            f"Existing tags/categories hint: {hint or 'none'}\n"
+            f"Prior description (regenerate fully, do not copy blindly): {prior or 'none'}\n"
+            f"{partial_note}\n\n"
+            f"Transcript:\n{body or '(no transcript)'}\n\n"
+            "Build a discovery profile for spoken-word audio search and recommendations.\n"
+            "Do NOT reduce this to a single generic tag like Technology unless technology is truly the main subject.\n"
+            "Prioritize content type (personal story, interview, news, review) and the emotional centre of the piece.\n"
+            f"Return ONLY valid JSON (no markdown) with up to {max_search_phrases} search_phrases:\n"
+            '{"title_suggestion":"","summary_short":"","summary_long":"","one_line_description":"",'
+            '"speaker":"","primary_genre":"","main_topic":"","secondary_topics":[],'
+            '"audience_groups":[],"themes":[],"tone":[],'
+            '"controlled_tags":[],"'
+            '"entities":{"people":[],"animals":[],"products":[],"apps":[],"technologies":[]},'
+            '"search_phrases":[],"recommendation_labels":[],"sensitivity_flags":[],'
+            '"confidence_scores":{"primary_genre":0.9,"main_topic":0.9},'
+            '"embedding_source_text":"","freeform_tags":[]}\n'
+            "speaker = primary narrator or interviewee name if stated; themes = key thematic labels; "
+            "audience_groups = who would find this relevant (e.g. blind listeners, carers). "
+            "controlled_tags = hierarchical taxonomy paths using ' > ' separators (e.g. Accessibility > Guide dogs). "
+            "Pick the best-fitting paths from the reference vocabulary below; add new paths only when nothing fits.\n"
+            f"Reference taxonomy vocabulary:\n{tax_block}\n"
+            "summary_short = compact engine-facing blurb; summary_long = warm human-facing paragraph; "
+            "embedding_source_text = dense keyword-rich line for vector search."
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert audio discovery metadata analyst for a podcast and Talking Newspaper platform. "
+                    "Return ONLY valid JSON."
+                ),
+            },
+            {"role": "user", "content": user_content},
+        ]
+        raw = self._generate(messages, max_new_tokens=700)
+        parsed = self._extract_json(raw)
+        if not isinstance(parsed, dict) or not parsed:
+            return {}
+        entities_raw = parsed.get("entities")
+        if not isinstance(entities_raw, dict):
+            entities_raw = {}
+        parsed["entities"] = {
+            "people": [str(x) for x in entities_raw.get("people", []) if x][:20],
+            "animals": [str(x) for x in entities_raw.get("animals", []) if x][:20],
+            "products": [str(x) for x in entities_raw.get("products", []) if x][:20],
+            "apps": [str(x) for x in entities_raw.get("apps", []) if x][:20],
+            "technologies": [str(x) for x in entities_raw.get("technologies", []) if x][:20],
+        }
+        ss = str(parsed.get("summary_short") or parsed.get("short_summary") or "").strip()
+        if ss:
+            parsed["summary_short"] = ss
+            parsed["short_summary"] = ss
+        if not str(parsed.get("embedding_source_text") or "").strip():
+            parsed["embedding_source_text"] = ss
+        return parsed
+
     def describe_audio_content(
         self,
         transcript: str,
@@ -273,33 +359,20 @@ class LLMService:
         track_name: str = "",
         context_hint: str = "",
     ) -> str | None:
-        if not self._available:
+        try:
+            parsed = self.build_discovery_profile(
+                transcript,
+                track_name=track_name,
+                categorization_hint=context_hint,
+                max_search_phrases=6,
+            )
+        except RuntimeError:
             return None
-        body = (transcript or "").strip()[:8000]
-        hint = (context_hint or "").strip()[:600]
-        title = (track_name or "").strip()[:200]
-        if not body and not title:
-            return None
-        user_content = (
-            f"Track title: {title or 'unknown'}\n"
-            f"Tags/categories hint: {hint or 'none'}\n\n"
-            f"Transcript:\n{body or '(no transcript)'}\n\n"
-            "Write ONE short neutral sentence (max 35 words) describing what this audio is about for listeners. "
-            "Plain text only: no quotes, bullets, markdown, or JSON."
-        )
-        messages = [
-            {
-                "role": "system",
-                "content": "You summarize podcast and voice audio for a catalog. Output plain text only.",
-            },
-            {"role": "user", "content": user_content},
-        ]
-        out = self._generate(messages, max_new_tokens=100).strip()
-        if not out:
-            return None
-        if len(out) > 500:
-            out = out[:497] + "..."
-        return out
+        for key in ("one_line_description", "summary_short", "short_summary", "summary_long"):
+            val = parsed.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()[:500]
+        return None
 
     def resolve_playback_instruction_speeds(self, instruction: str) -> list[float]:
         if not self._available:

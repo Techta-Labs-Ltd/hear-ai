@@ -328,11 +328,51 @@ Hear AI may delete prior B2 objects before uploading new pipeline or magic-clean
 
 Prefer `b2_key` for deletion; `audio_url` is used only if it matches the Hear AI public URL pattern.
 
+### `result.discovery` (Qwen contextual profile)
+
+Present on `pipeline`, `categorization`, `rebuild`, and `magic_clean` when a transcript exists and moderation did not flag the content. `content_description` is derived from `one_line_description` or `summary_short`.
+
+Primary fields (map directly into your discovery table):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Track / content id (`content_id` duplicate for convenience) |
+| `title` | string | Catalog title (`title_suggestion` duplicate) |
+| `duration_seconds` | int | From track metadata |
+| `source` | string | Track `source` or `category` from for-ai payload |
+| `speaker` | string | Primary narrator if named in audio |
+| `summary_short` | string | Engine-facing short summary (`short_summary` duplicate) |
+| `summary_long` | string | Human-facing paragraph |
+| `primary_genre` | string | e.g. Personal lived experience |
+| `controlled_tags` | string[] | Qwen-generated hierarchical paths; vocabulary guided by `data/discovery_taxonomy.txt`, engine merges and canonicalizes |
+| `freeform_tags` | string[] | Hashtag-style tags without `# |
+| `entities` | string[] | Flat list (people, animals, products, apps, tech) |
+| `themes` | string[] | Key thematic labels |
+| `audience_groups` | string[] | Who would find this relevant |
+| `search_phrases` | string[] | Natural-language search hooks |
+| `recommendation_labels` | string[] | Recommendation facets |
+| `transcript_embedding_id` | string | Empty — your backend sets after indexing |
+| `summary_embedding_id` | string | Empty — your backend sets after indexing |
+| `created_at` | string | ISO-8601 UTC when profile was built |
+| `confidence_scores` | object | Field → score map from Qwen |
+
+Rich extras (same callback, for UI / search):
+
+| Field | Type |
+|-------|------|
+| `one_line_description` | string |
+| `main_topic` | string |
+| `secondary_topics` | string[] |
+| `embedding_source_text` | string |
+
+`categorization` remains a separate sibling object (tags, categories, sentiment).
+
 ### `result` extensions (`pipeline` and `magic_clean`)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `content_description` | string \| null | Short catalog-style summary (Qwen when enabled) |
+| `discovery` | object \| null | Full discovery profile (see above) |
+| `content_description` | string \| null | Alias of `discovery.one_line_description` or `summary_short` |
 | `speed_layers` | array | `{ speed, audio_url, b2_key, audio_format: "mp3" }` per tier (never includes 1.0x) |
 | `playback_speeds_applied` | number[] | Multipliers encoded for this job |
 | `compressed_audio` | object \| null | Pipeline-only: low-bitrate MP3 of source waveform |
@@ -362,7 +402,7 @@ Header: X-Service-Key: <secret>
 }
 ```
 
-Status values: `pending` → `enhancing` → `transcribing` → `categorizing` → `moderating` → `completed` / `failed`
+Status values: `pending` → `enhancing` → `transcribing` → `moderating` → `categorizing` → `discovering` → `completed` / `failed`
 
 ### Retry Callback
 

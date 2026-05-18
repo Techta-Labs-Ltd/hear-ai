@@ -11,6 +11,7 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from app.config import settings
 from app.core.category_loader import category_loader
+from app.core.discovery_taxonomy import discovery_taxonomy_loader
 from app.core.keyword_loader import harm_keyword_loader
 from app.models.database import init_db
 from app.services.registry import (
@@ -45,6 +46,7 @@ async def lifespan(application: FastAPI):
     init_sentry()
     init_db()
     category_loader.load()
+    discovery_taxonomy_loader.load()
     harm_keyword_loader.load()
     print("[STARTUP] Loading ML models...")
     transcriber.load()

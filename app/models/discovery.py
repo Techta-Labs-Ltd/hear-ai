@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, Field, model_validator
+
+
+class DiscoveryEntities(BaseModel):
+    people: list[str] = Field(default_factory=list)
+    animals: list[str] = Field(default_factory=list)
+    products: list[str] = Field(default_factory=list)
+    apps: list[str] = Field(default_factory=list)
+    technologies: list[str] = Field(default_factory=list)
+
+
+class ContentDiscoveryProfile(BaseModel):
+    content_id: str | None = None
+    title_suggestion: str | None = None
+    summary_short: str | None = None
+    summary_long: str | None = None
+    one_line_description: str | None = None
+    short_summary: str | None = None
+    primary_genre: str | None = None
+    main_topic: str | None = None
+    secondary_topics: list[str] = Field(default_factory=list)
+    speaker: str | None = None
+    source: str | None = None
+    duration_seconds: float | None = None
+    audience_relevance: list[str] = Field(default_factory=list)
+    tone: list[str] = Field(default_factory=list)
+    entities: DiscoveryEntities = Field(default_factory=DiscoveryEntities)
+    key_themes: list[str] = Field(default_factory=list)
+    search_phrases: list[str] = Field(default_factory=list)
+    recommendation_labels: list[str] = Field(default_factory=list)
+    sensitivity_flags: list[str] = Field(default_factory=list)
+    confidence: dict[str, float] = Field(default_factory=dict)
+    controlled_tags: list[str] = Field(default_factory=list)
+    freeform_tags: list[str] = Field(default_factory=list)
+    embedding_source_text: str | None = None
+    transcript_embedding_id: str | None = None
+    summary_embedding_id: str | None = None
+
+    @model_validator(mode="after")
+    def sync_summary_aliases(self) -> ContentDiscoveryProfile:
+        if self.short_summary and not self.summary_short:
+            self.summary_short = self.short_summary
+        elif self.summary_short and not self.short_summary:
+            self.short_summary = self.summary_short
+        return self
+
+
+def content_description_from_discovery(profile: ContentDiscoveryProfile | dict | None) -> str | None:
+    if profile is None:
+        return None
+    if isinstance(profile, dict):
+        for key in ("one_line_description", "summary_short", "short_summary", "summary_long"):
+            val = profile.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return None
+    for val in (profile.one_line_description, profile.summary_short, profile.short_summary, profile.summary_long):
+        if val and str(val).strip():
+            return str(val).strip()
+    return None
+
+
+def flatten_entities(entities: DiscoveryEntities | dict | None) -> list[str]:
+    if entities is None:
+        return []
+    if isinstance(entities, DiscoveryEntities):
+        bucket = entities.model_dump()
+    elif isinstance(entities, dict):
+        bucket = entities
+    else:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for key in ("people", "animals", "products", "apps", "technologies"):
+        for item in bucket.get(key) or []:
+            s = str(item).strip()
+            if not s:
+                continue
+            low = s.lower()
+            if low in seen:
+                continue
+            seen.add(low)
+            out.append(s)
+    return out
+
+
+def discovery_to_callback_dict(
+    profile: ContentDiscoveryProfile | dict | None,
+    *,
+    duration_seconds: float | None = None,
+    source: str | None = None,
+    created_at: str | None = None,
+) -> dict | None:
+    if profile is None:
+        return None
+    if isinstance(profile, dict):
+        profile = ContentDiscoveryProfile.model_validate(profile)
+
+    dur = duration_seconds if duration_seconds is not None else profile.duration_seconds
+    ts = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    summary_short = (profile.summary_short or profile.short_summary or "").strip()
+
+    payload: dict = {
+        "id": profile.content_id or "",
+        "title": (profile.title_suggestion or "").strip(),
+        "duration_seconds": int(dur) if dur is not None else 0,
+        "source": (source or profile.source or "").strip(),
+        "speaker": (profile.speaker or "").strip(),
+        "summary_short": summary_short,
+        "summary_long": (profile.summary_long or "").strip(),
+        "primary_genre": (profile.primary_genre or "").strip(),
+        "controlled_tags": list(profile.controlled_tags or []),
+        "freeform_tags": list(profile.freeform_tags or []),
+        "entities": flatten_entities(profile.entities),
+        "themes": list(profile.key_themes or []),
+        "audience_groups": list(profile.audience_relevance or []),
+        "search_phrases": list(profile.search_phrases or []),
+        "recommendation_labels": list(profile.recommendation_labels or []),
+        "transcript_embedding_id": profile.transcript_embedding_id or "",
+        "summary_embedding_id": profile.summary_embedding_id or "",
+        "created_at": ts,
+        "confidence_scores": dict(profile.confidence or {}),
+        "content_id": profile.content_id or "",
+        "title_suggestion": (profile.title_suggestion or "").strip(),
+        "short_summary": summary_short,
+        "one_line_description": (profile.one_line_description or "").strip(),
+        "main_topic": (profile.main_topic or "").strip(),
+        "secondary_topics": list(profile.secondary_topics or []),
+        "embedding_source_text": (profile.embedding_source_text or "").strip(),
+    }
+    if profile.tone:
+        payload["tone"] = list(profile.tone)
+    if profile.sensitivity_flags:
+        payload["sensitivity_flags"] = list(profile.sensitivity_flags)
+    return payload

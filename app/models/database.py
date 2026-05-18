@@ -63,6 +63,7 @@ class AiTrackJob(Base):
     transcript = Column(String, nullable=True)
     moderation_json = Column(JSON, nullable=True)
     categorization_json = Column(JSON, nullable=True)
+    discovery_json = Column(JSON, nullable=True)
     result_json = Column(JSON, nullable=True)
     error = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -125,6 +126,7 @@ MIGRATIONS = [
     ("ai_jobs", "current_stage", "VARCHAR"),
     ("ai_jobs", "edited_transcript", "VARCHAR"),
     ("ai_jobs", "job_options", "JSON"),
+    ("ai_track_jobs", "discovery_json", "JSON"),
 ]
 
 

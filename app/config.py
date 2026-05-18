@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     PIPELINE_MP3_BITRATE_KBPS: int = 96
 
     CATEGORIES_FILE: str = "./data/categories.txt"
+    DISCOVERY_TAXONOMY_FILE: str = "./data/discovery_taxonomy.txt"
+    DISCOVERY_METADATA_ENABLED: bool = True
+    DISCOVERY_MAX_SEARCH_PHRASES: int = 12
     HARM_KEYWORDS_FILE: str = "./data/harm_keywords.txt"
     DEMUCS_MODEL: str = "htdemucs"
     MODEL_CACHE_DIR: str = "/opt/ml/models"

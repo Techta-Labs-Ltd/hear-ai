@@ -19,20 +19,8 @@ from app.core.recording_fetcher import effective_transcript_text, fetch_track
 from app.models.database import SessionLocal, AiJob
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
+from app.services.discovery import discovery_result_bundle, discovery_service
 from app.services.llm_service import llm_service
-
-
-def _orch_cat_hint(categorization: dict | None) -> str:
-    if not isinstance(categorization, dict):
-        return ""
-    parts: list[str] = []
-    tags = categorization.get("tags") or []
-    cats = categorization.get("categories") or []
-    if isinstance(tags, list):
-        parts.extend(str(t) for t in tags[:14])
-    if isinstance(cats, list):
-        parts.extend(str(c) for c in cats[:10])
-    return ", ".join(parts)[:500]
 
 
 def _orch_job_options(job: AiJob | None) -> dict:
@@ -190,13 +178,24 @@ class PipelineOrchestrator:
 
             b2_deleted_keys = cleanup_track_ai_b2_assets(storage, track, include_enhanced=False)
 
+            discovery_dict = None
             content_description = None
-            if transcript_text and transcript_text.strip() and llm_service.is_available:
-                content_description = await asyncio.to_thread(
-                    llm_service.describe_audio_content,
+            if transcript_text and transcript_text.strip() and not moderation_data.get("flagged"):
+                self._update_job(job_id, status="running", current_stage="discovering")
+                duration = float(track.duration) if track.duration else None
+                track_source = track.source or track.category
+                profile = await discovery_service.build_profile(
                     transcript_text,
+                    content_id=track_id,
                     track_name=track.name or "",
-                    context_hint=_orch_cat_hint(categorization_data),
+                    duration_seconds=duration,
+                    source=track_source,
+                    speaker=track.speaker,
+                    categorization=categorization_data,
+                    prior_description=track.content_description,
+                )
+                discovery_dict, content_description = discovery_result_bundle(
+                    profile, duration_seconds=duration, source=track_source
                 )
 
             compressed_audio = None
@@ -265,6 +264,7 @@ class PipelineOrchestrator:
                 "transcription": transcript,
                 "moderation": moderation_data,
                 "categorization": categorization_data,
+                "discovery": discovery_dict,
                 "compressed_audio": compressed_audio,
                 "content_description": content_description,
                 "speed_layers": speed_layers,

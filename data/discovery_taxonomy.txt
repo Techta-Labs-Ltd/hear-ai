@@ -1,0 +1,12 @@
+[TAXONOMY]
+Accessibility > Visual impairment
+Accessibility > Visual impairment > Assistive technology
+Accessibility > Visual impairment > Assistive technology > Smart glasses
+Accessibility > Guide dogs
+Accessibility > Independence and daily living
+Accessibility > Blindness and visual impairment
+Personal lived experience
+Product experience > Informal review
+Human connection
+AI and smart glasses
+Daily living

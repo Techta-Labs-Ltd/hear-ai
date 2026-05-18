@@ -66,6 +66,8 @@ class TrackData:
     ai_speed_layers: list[dict] | None = None
     ai_enhanced_audio: dict | None = None
     content_description: str | None = None
+    speaker: str | None = None
+    source: str | None = None
 
     def __post_init__(self):
         if self.tags is None:
@@ -118,6 +120,10 @@ async def fetch_track(track_id: str) -> TrackData:
             layers = None
     cd = track_payload.get("content_description")
     content_desc = cd.strip() if isinstance(cd, str) and cd.strip() else None
+    sp = track_payload.get("speaker")
+    speaker = sp.strip() if isinstance(sp, str) and sp.strip() else None
+    src = track_payload.get("source")
+    source = src.strip() if isinstance(src, str) and src.strip() else None
 
     return TrackData(
         track_id=track_payload.get("id", track_id),
@@ -140,6 +146,8 @@ async def fetch_track(track_id: str) -> TrackData:
         ai_speed_layers=layers,
         ai_enhanced_audio=ae,
         content_description=content_desc,
+        speaker=speaker,
+        source=source,
     )
 
 

@@ -127,27 +127,10 @@ class CategorizationService:
                     tag_pool,
                     layer1["scores"],
                 )
-                tags = self._normalize_tags(llm_result["tags"])
-                categories = llm_result["categories"]
+                tags, categories, new_tags_added, new_categories_added = (
+                    self._integrate_llm_categorization(llm_result, catalog_tags=data.tags)
+                )
                 llm_sentiment = llm_result["sentiment"]
-
-                new_tags_added: list[str] = []
-                new_categories_added: list[str] = []
-
-                for tag in llm_result.get("new_tags", []):
-                    normalised = self._normalize_tag(tag)
-                    if normalised and normalised not in new_tags_added:
-                        category_loader.add_tag(normalised)
-                        new_tags_added.append(normalised)
-
-                for cat in llm_result.get("new_categories", []):
-                    category_loader.add_category(cat)
-                    new_categories_added.append(cat)
-
-                for tag in tags:
-                    if tag not in self._normalize_tags(data.tags) and tag not in new_tags_added:
-                        category_loader.add_tag(tag)
-                        new_tags_added.append(tag)
 
                 if platform.blocked_keywords:
                     tags = self._filter_blocked_tags(tags, platform.blocked_keywords)
@@ -242,6 +225,7 @@ class CategorizationService:
         all_sentiments: list[str] = []
         confidence_scores: dict[str, float] = {}
         new_tags_added: list[str] = []
+        new_categories_added: list[str] = []
         llm_was_used = False
         per_track: dict[str, dict] = {}
 
@@ -273,8 +257,9 @@ class CategorizationService:
                             max_categories=2,
                         ),
                     )
-                    t_tags = self._normalize_tags(llm_result.get("tags", []))
-                    t_cats = llm_result.get("categories", [])
+                    t_tags, t_cats, track_new_tags, track_new_cats = (
+                        self._integrate_llm_categorization(llm_result, catalog_tags=data.tags)
+                    )
                     t_sent = llm_result.get("sentiment", "neutral")
 
                     per_track[track_id] = {"tags": t_tags, "categories": t_cats, "sentiment": t_sent}
@@ -283,12 +268,15 @@ class CategorizationService:
                         if tag not in all_tags:
                             all_tags.append(tag)
                             confidence_scores[tag] = 0.85
-                            if tag not in self._normalize_tags(data.tags):
-                                category_loader.add_tag(tag)
-                                new_tags_added.append(tag)
+                    for nt in track_new_tags:
+                        if nt not in new_tags_added:
+                            new_tags_added.append(nt)
                     for cat in t_cats:
                         if cat not in all_categories:
                             all_categories.append(cat)
+                    for nc in track_new_cats:
+                        if nc not in new_categories_added:
+                            new_categories_added.append(nc)
                     all_sentiments.append(t_sent)
                     llm_was_used = True
                     continue
@@ -344,11 +332,63 @@ class CategorizationService:
             "confidence_scores": confidence_scores,
             "sentiment": final_sentiment,
             "new_tags_added": new_tags_added,
-            "new_categories_added": [],
+            "new_categories_added": new_categories_added,
             "settings_applied": settings_applied,
             "llm_used": llm_was_used,
             "per_track": per_track,
         }
+
+    def _integrate_llm_categorization(
+        self,
+        llm_result: dict,
+        *,
+        catalog_tags: list[str],
+    ) -> tuple[list[str], list[str], list[str], list[str]]:
+        catalog_norm = {t.lower() for t in self._normalize_tags(catalog_tags)}
+        tags_from_list = self._normalize_tags(llm_result.get("tags", []))
+        categories = [
+            c.strip()
+            for c in llm_result.get("categories", [])
+            if isinstance(c, str) and c.strip()
+        ]
+
+        new_tags_added: list[str] = []
+        new_categories_added: list[str] = []
+
+        def _register_new_tag(raw: str) -> None:
+            normalised = self._normalize_tag(raw)
+            if not normalised or normalised in new_tags_added:
+                return
+            category_loader.add_tag(normalised)
+            new_tags_added.append(normalised)
+
+        for tag in llm_result.get("new_tags", []):
+            if isinstance(tag, str):
+                _register_new_tag(tag)
+
+        for cat in llm_result.get("new_categories", []):
+            if isinstance(cat, str) and cat.strip():
+                c = cat.strip()
+                category_loader.add_category(c)
+                if c not in new_categories_added:
+                    new_categories_added.append(c)
+                if c not in categories:
+                    categories.append(c)
+
+        for tag in tags_from_list:
+            if tag.lower() not in catalog_norm:
+                _register_new_tag(tag)
+
+        merged_tags: list[str] = []
+        seen: set[str] = set()
+        for tag in tags_from_list + new_tags_added:
+            key = tag.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged_tags.append(tag)
+
+        return merged_tags, categories, new_tags_added, new_categories_added
 
     def _normalize_tag(self, tag: str) -> str:
         if not tag:

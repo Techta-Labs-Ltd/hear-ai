@@ -26,6 +26,7 @@ from app.core.platform_settings import fetch_platform_settings
 from app.models.database import SessionLocal, AiJob, AiTrackJob
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
+from app.services.discovery import discovery_result_bundle, discovery_service
 from app.services.llm_service import llm_service
 
 FETCH_RETRIES = 5
@@ -381,23 +382,29 @@ class PipelineWorker:
             return []
         return await asyncio.to_thread(llm_service.resolve_playback_instruction_speeds, ins.strip())
 
-    async def _describe_audio_llm(
+    async def _run_discovery(
         self,
+        track,
         transcript_text: str,
+        categorization: dict | None,
         *,
-        track_name: str = "",
-        context_hint: str = "",
-    ) -> str | None:
-        if not llm_service.is_available:
-            return None
-        if not (transcript_text or "").strip() and not (track_name or "").strip():
-            return None
-        return await asyncio.to_thread(
-            llm_service.describe_audio_content,
+        partial_transcript: bool = False,
+        source: str | None = None,
+    ) -> tuple[dict | None, str | None]:
+        duration = float(track.duration) if track.duration else None
+        track_source = source or getattr(track, "source", None) or track.category
+        profile = await discovery_service.build_profile(
             transcript_text,
-            track_name=track_name,
-            context_hint=context_hint,
+            content_id=track.track_id,
+            track_name=track.name or "",
+            duration_seconds=duration,
+            source=track_source,
+            speaker=getattr(track, "speaker", None),
+            categorization=categorization,
+            prior_description=track.content_description,
+            partial_transcript=partial_transcript,
         )
+        return discovery_result_bundle(profile, duration_seconds=duration, source=track_source)
 
     async def _upload_speed_layers(
         self,
@@ -537,6 +544,7 @@ class PipelineWorker:
                 drop_temp_standalone(local_path)
 
         content_description = None
+        discovery_dict = None
         speed_layers: list[dict] = []
         playback_speeds_applied: list[float] = []
         try:
@@ -547,13 +555,14 @@ class PipelineWorker:
             playback_speeds_applied = merge_speed_multipliers(default_speeds, job_sm, llm_speeds)
 
             tx = effective_transcript_text(track.transcription) if track.transcription else ""
-            tag_hint = self._tags_hint(track.tags)
-            if tx.strip() or (track.name or "").strip():
-                content_description = await self._describe_audio_llm(
-                    tx,
-                    track_name=track.name or "",
-                    context_hint=tag_hint,
-                )
+            if tx.strip():
+                if await self._set_stage(db, job, track_job, "discovering"):
+                    discovery_dict, content_description = await self._run_discovery(
+                        track, tx, None, partial_transcript=True
+                    )
+                    track_job.discovery_json = discovery_dict
+                    track_job.updated_at = datetime.utcnow()
+                    await commit_with_retry(db)
 
             if speed_source and os.path.isfile(speed_source) and playback_speeds_applied:
                 speed_layers = await self._upload_speed_layers(
@@ -573,6 +582,7 @@ class PipelineWorker:
             "job_type": "magic_clean",
             "track_id": track.track_id,
             "enhancement": enhanced.get(track.track_id, {}),
+            "discovery": discovery_dict,
             "content_description": content_description,
             "speed_layers": speed_layers,
             "playback_speeds_applied": playback_speeds_applied,
@@ -845,7 +855,21 @@ class PipelineWorker:
                 track_job.updated_at = datetime.utcnow()
                 await commit_with_retry(db)
 
+            discovery_dict = None
             content_description = None
+            if (
+                transcript_text
+                and not moderation.get("flagged")
+                and job.job_type in ("pipeline", "categorization", "rebuild")
+            ):
+                if await self._set_stage(db, job, track_job, "discovering"):
+                    discovery_dict, content_description = await self._run_discovery(
+                        track, transcript_text, categorization
+                    )
+                    track_job.discovery_json = discovery_dict
+                    track_job.updated_at = datetime.utcnow()
+                    await commit_with_retry(db)
+
             speed_layers: list[dict] = []
             playback_speeds_applied: list[float] = []
             b2_deleted_keys: list[str] = []
@@ -873,14 +897,6 @@ class PipelineWorker:
                     job_sm = self._coerce_job_speed_multipliers(opts.get("speed_multipliers"))
                     default_speeds = parse_speed_multiplier_csv(settings.PIPELINE_SPEED_MULTIPLIERS)
                     playback_speeds_applied = merge_speed_multipliers(default_speeds, job_sm, llm_speeds)
-
-                    cat_hint = self._categorization_hint(categorization)
-                    if transcript_text and transcript_text.strip():
-                        content_description = await self._describe_audio_llm(
-                            transcript_text,
-                            track_name=track.name or "",
-                            context_hint=cat_hint,
-                        )
 
                     loop = asyncio.get_event_loop()
                     bitrate = settings.PIPELINE_MP3_BITRATE_KBPS
@@ -941,8 +957,11 @@ class PipelineWorker:
                     "duration": rebuilt_audio.duration,
                 } if job.job_type == "rebuild" else None,
             }
-            if job.job_type == "pipeline":
+            if discovery_dict is not None:
+                result["discovery"] = discovery_dict
+            if content_description:
                 result["content_description"] = content_description
+            if job.job_type == "pipeline":
                 result["speed_layers"] = speed_layers
                 result["playback_speeds_applied"] = playback_speeds_applied
                 if b2_deleted_keys:
