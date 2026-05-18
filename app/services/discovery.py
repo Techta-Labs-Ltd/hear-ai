@@ -9,6 +9,7 @@ from app.core.discovery_taxonomy import discovery_taxonomy_loader
 from app.models.discovery import (
     ContentDiscoveryProfile,
     DiscoveryEntities,
+    coerce_discovery_source,
     content_description_from_discovery,
     discovery_to_callback_dict,
 )
@@ -359,7 +360,7 @@ class DiscoveryService:
             )
             if profile:
                 profile.duration_seconds = duration_seconds
-                profile.source = source
+                profile.source = coerce_discovery_source(source) or None
                 if speaker and not profile.speaker:
                     profile.speaker = speaker
             return profile
@@ -393,7 +394,7 @@ class DiscoveryService:
                         print("[DISCOVERY] Qwen profile weak — retrying with strict prompt")
                         continue
                     profile.duration_seconds = duration_seconds
-                    profile.source = source
+                    profile.source = coerce_discovery_source(source) or None
                     if speaker and not profile.speaker:
                         profile.speaker = speaker
                     llm_controlled = list(profile.controlled_tags or [])
@@ -417,7 +418,7 @@ class DiscoveryService:
         )
         if profile:
             profile.duration_seconds = duration_seconds
-            profile.source = source
+            profile.source = coerce_discovery_source(source) or None
             if speaker and not profile.speaker:
                 profile.speaker = speaker
             profile = self._enrich_profile(profile, transcript, categorization, track_name)

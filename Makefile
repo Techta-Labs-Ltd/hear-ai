@@ -14,7 +14,7 @@ WAIT_READY_SECS ?= 90
 .DEFAULT_GOAL := up
 
 .PHONY: help up up-bg all boot start finish down restart stop logs errors status \
-	bootstrap-logs env-check migrate install-postgres postgres-show clean-temp clean-temp-purge psql shell \
+	bootstrap-logs env-check migrate install-postgres postgres-password postgres-show clean-temp clean-temp-purge psql shell \
 	install clean errors-tail errors-head errors-cat errors-clear wait-ready
 
 help: ## Show targets (default: `make` = full bootstrap via `up`)
@@ -31,6 +31,7 @@ help: ## Show targets (default: `make` = full bootstrap via `up`)
 	@echo "  make env-check     Quick DATABASE_URL + AI_SERVICE_SECRET check"
 	@echo "  make migrate       init_db() only (schema + extensions)"
 	@echo "  make install-postgres  Install local Postgres (parses DATABASE_URL from .env)"
+	@echo "  make postgres-password Sync hear_user password from DATABASE_URL only"
 	@echo "  make postgres-show     Print user/db/host from DATABASE_URL (not password)"
 	@echo "  make clean-temp    Periodic temp sweep"
 	@echo ""
@@ -113,8 +114,12 @@ migrate:
 	cd $(WORKSPACE) && python3 -c "from app.models.database import init_db; init_db(); print('migrated')"
 
 install-postgres:
-	chmod +x $(WORKSPACE)/scripts/setup-local-postgres.sh $(WORKSPACE)/scripts/postgres-env.sh
+	chmod +x $(WORKSPACE)/scripts/setup-local-postgres.sh $(WORKSPACE)/scripts/postgres-env.sh $(WORKSPACE)/scripts/sync-postgres-password.sh
 	INSTALL_LOCAL_POSTGRES=true bash $(WORKSPACE)/scripts/setup-local-postgres.sh
+
+postgres-password:
+	chmod +x $(WORKSPACE)/scripts/sync-postgres-password.sh $(WORKSPACE)/scripts/postgres-env.sh
+	bash $(WORKSPACE)/scripts/sync-postgres-password.sh
 
 postgres-show:
 	@cd $(WORKSPACE) && bash scripts/postgres-env.sh && \

@@ -17,6 +17,7 @@ from app.core.gpu import gpu
 from app.core.platform_settings import fetch_platform_settings
 from app.core.recording_fetcher import effective_transcript_text, fetch_track
 from app.models.database import SessionLocal, AiJob
+from app.models.discovery import coerce_discovery_source
 from app.realtime.broadcaster import manager
 from app.services.callback import callback_service
 from app.services.discovery import discovery_result_bundle, discovery_service
@@ -183,7 +184,11 @@ class PipelineOrchestrator:
             if transcript_text and transcript_text.strip() and not moderation_data.get("flagged"):
                 self._update_job(job_id, status="running", current_stage="discovering")
                 duration = float(track.duration) if track.duration else None
-                track_source = track.source or track.category
+                track_category = track.category
+                track_source = coerce_discovery_source(
+                    track.source,
+                    track_category if isinstance(track_category, str) else None,
+                ) or None
                 profile = await discovery_service.build_profile(
                     transcript_text,
                     content_id=track_id,
