@@ -209,6 +209,50 @@ def test_categorizer_prefers_music_over_podcast():
     assert "#podcast" not in tags
 
 
+def test_sanitize_speaker_rejects_taxonomy_device_terms():
+    svc = DiscoveryService()
+    tx = "I was recording your production for me."
+    assert svc._sanitize_speaker("Smart glasses", tx) is None
+    assert svc._sanitize_speaker("Hardware", tx) is None
+    assert svc._infer_speaker(tx) is None
+
+
+def test_sanitize_speaker_keeps_introduced_name():
+    svc = DiscoveryService()
+    tx = "Hello everyone, this is Denise Wallace in Glasgow."
+    assert svc._sanitize_speaker("Denise Wallace", tx) == "Denise Wallace"
+    assert svc._sanitize_speaker("Denise Wallace", tx, trusted=True) == "Denise Wallace"
+
+
+def test_enrich_profile_clears_hallucinated_llm_speaker():
+    svc = DiscoveryService()
+    profile = ContentDiscoveryProfile(
+        speaker="Smart glasses",
+        main_topic="Recording feedback",
+        entities=DiscoveryEntities(people=["Smart glasses", "Hardware"]),
+        summary_short="User feedback on recording.",
+        one_line_description="Feedback on production recording.",
+        key_themes=["Recording quality"],
+        audience_relevance=["Producers"],
+        search_phrases=["recording quality", "production feedback", "hardware review"],
+    )
+    enriched = svc._enrich_profile(
+        profile,
+        "I was recording your production for me.",
+        {"categories": ["Technology"], "tags": ["#Hardware"]},
+        "track.wav",
+    )
+    assert enriched.speaker is None
+    assert "Smart glasses" not in enriched.entities.people
+
+
+def test_taxonomy_label_terms_includes_leaf_segments(taxonomy_loader):
+    terms = taxonomy_loader.taxonomy_label_terms()
+    assert "guide dogs" in terms
+    assert "ai and smart glasses" in terms
+    assert "accessibility > visual impairment" in terms
+
+
 def test_fallback_profile_when_llm_disabled(monkeypatch):
     from app.config import settings
 

@@ -81,5 +81,16 @@ class DiscoveryTaxonomyLoader:
                 return canonical
         return cleaned
 
+    def taxonomy_label_terms(self) -> frozenset[str]:
+        """Normalized segment and full-path labels — not valid human speaker names."""
+        terms: set[str] = set()
+        for path in self.data.paths:
+            terms.add(_norm(path))
+            for segment in path.split(" > "):
+                seg = segment.strip()
+                if seg:
+                    terms.add(_norm(seg))
+        return frozenset(terms)
+
 
 discovery_taxonomy_loader = DiscoveryTaxonomyLoader()

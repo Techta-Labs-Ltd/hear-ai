@@ -37,6 +37,8 @@ class PipelineRequest(BaseModel):
     track_count: int = 1
     speed_multipliers: Optional[list[float]] = None
     playback_instruction: Optional[str] = None
+    type: Optional[str] = None
+    media_file_id: Optional[str] = None
 
 
 class RealtimeRequest(BaseModel):
@@ -57,6 +59,8 @@ class RealtimeRequest(BaseModel):
     track_count: int = 1
     speed_multipliers: Optional[list[float]] = None
     playback_instruction: Optional[str] = None
+    type: Optional[str] = None
+    media_file_id: Optional[str] = None
 
 
 class TranscribeRequest(BaseModel):

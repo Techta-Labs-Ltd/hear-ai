@@ -362,7 +362,9 @@ class LLMService:
             '"confidence":{"primary_genre":0.9,"main_topic":0.9},'
             '"embedding_source_text":"","freeform_tags":[]}\n'
             "title_suggestion = human discovery title (not the filename). "
-            "speaker = primary narrator name if stated (e.g. Denise Wallace). "
+            "speaker = human narrator's personal name ONLY when they introduce themselves in the transcript "
+            "(e.g. Denise Wallace). Use empty string if no person is named. "
+            "NEVER put devices, products, apps, technologies, topics, or taxonomy paths in speaker. "
             "key_themes = insight-level themes (e.g. independence is about choice). "
             "audience_relevance = who would find this relevant. "
             "controlled_tags = hierarchical paths with ' > ' (pick from vocabulary below when possible). "

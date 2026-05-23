@@ -44,6 +44,7 @@ class SpeechSynthesizer:
         self._higgs_available = False
         if settings.HIGGS_AUDIO_ENABLED:
             module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
+            self._inject_higgs_repo_path()
             if self._is_higgs_module_ready(module_name):
                 self._higgs_available = True
                 print(f"[STARTUP] Higgs audio ready ({module_name})")
@@ -131,7 +132,7 @@ class SpeechSynthesizer:
         normalized = self._normalize_changes(changes)
         if not normalized:
             raise ValueError("reconstruct requires non-empty segment changes")
-        normalized = sorted(normalized, key=lambda c: float(c["segment_start"]))
+        normalized = sorted(normalized, key=lambda c: float(c["segment_start"]), reverse=True)
         for change in normalized:
             start_sample = int(float(change["segment_start"]) * self.TARGET_SR)
             end_sample = int(float(change["segment_end"]) * self.TARGET_SR)
@@ -257,116 +258,76 @@ class SpeechSynthesizer:
                 "Audio rebuild/reconstruct requires HIGGS_AUDIO_ENABLED=true and the Higgs module "
                 f"installed under {settings.HIGGS_AUDIO_REPO_DIR}"
             )
-        module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
-        return await asyncio.get_event_loop().run_in_executor(
-            None,
-            self._run_local_higgs,
-            text,
-            reference_audio_path,
-        )
+        
+        prompt_name = None
+        prompts_dir = os.path.join((settings.HIGGS_AUDIO_REPO_DIR or "/workspace/higgs-audio").strip(), "examples", "voice_prompts")
+        if reference_audio_path:
+            import uuid
+            import shutil
+            from app.services.registry import transcriber
+            with open(reference_audio_path, "rb") as f:
+                ref_bytes = f.read()
+            t_res = await transcriber.transcribe(ref_bytes)
+            ref_text = t_res.get("transcript", "").strip() or " "
+            prompt_name = f"tmp_{uuid.uuid4().hex}"
+            os.makedirs(prompts_dir, exist_ok=True)
+            shutil.copy2(reference_audio_path, os.path.join(prompts_dir, f"{prompt_name}.wav"))
+            with open(os.path.join(prompts_dir, f"{prompt_name}.txt"), "w") as f:
+                f.write(ref_text)
 
-    def _run_local_higgs(self, text: str, reference_audio_path: str | None = None) -> bytes:
         module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
-        higgs_audio = importlib.import_module(module_name)
-
-        if module_name != "boson_multimodal" and hasattr(higgs_audio, "synthesize"):
-            synth = higgs_audio.synthesize
-            kwargs = {"text": text, "voice": settings.HIGGS_AUDIO_VOICE}
-            try:
-                params = inspect.signature(synth).parameters
-            except Exception:
-                params = {}
-            if reference_audio_path:
-                for key in (
-                    "reference_audio",
-                    "reference_audio_path",
-                    "speaker_audio",
-                    "prompt_audio",
-                    "audio_prompt",
-                    "source_audio",
-                ):
-                    if key in params:
-                        kwargs[key] = reference_audio_path
-                        break
-            out = synth(**kwargs)
-            if isinstance(out, bytes):
-                return out
-            if isinstance(out, str) and os.path.exists(out):
-                with open(out, "rb") as f:
-                    return f.read()
-            if isinstance(out, dict):
-                audio = out.get("audio") or out.get("bytes")
-                if isinstance(audio, bytes):
-                    return audio
-                path = out.get("path") or out.get("audio_path") or out.get("output_path")
-                if isinstance(path, str) and os.path.exists(path):
-                    with open(path, "rb") as f:
-                        return f.read()
         try:
-            return self._run_boson_engine(text, reference_audio_path)
+            return await asyncio.get_event_loop().run_in_executor(
+                None,
+                self._run_local_higgs,
+                text,
+                reference_audio_path,
+                prompt_name,
+            )
+        finally:
+            if prompt_name:
+                try:
+                    os.remove(os.path.join(prompts_dir, f"{prompt_name}.wav"))
+                    os.remove(os.path.join(prompts_dir, f"{prompt_name}.txt"))
+                except Exception:
+                    pass
+
+    def _run_local_higgs(self, text: str, reference_audio_path: str | None = None, prompt_name: str | None = None) -> bytes:
+        module_name = (settings.HIGGS_AUDIO_MODULE or "higgs_audio").strip()
+        try:
+            return self._run_boson_engine(text, prompt_name)
         except Exception as exc:
             raise RuntimeError(f"Local {module_name} module did not return audio bytes ({exc})") from exc
 
-    def _run_boson_engine(self, text: str, reference_audio_path: str | None = None) -> bytes:
-        self._inject_higgs_repo_path()
-        HiggsAudioServeEngine, ChatMLSample, Message = self._load_boson_symbols()
+    def _run_boson_engine(self, text: str, prompt_name: str | None = None) -> bytes:
+        import subprocess
+        import tempfile
+        from app.core.hear_temp import hear_temp_directory
 
-        if self._higgs_engine is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._higgs_engine = HiggsAudioServeEngine(
-                settings.HIGGS_AUDIO_MODEL_PATH,
-                settings.HIGGS_AUDIO_TOKENIZER_PATH,
-                device=device,
-            )
-        messages = [
-            Message(role="system", content=settings.HIGGS_AUDIO_SYSTEM_PROMPT),
-            Message(role="user", content=text),
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=hear_temp_directory()) as out_tmp:
+            out_path = out_tmp.name
+        
+        script_path = os.path.join((settings.HIGGS_AUDIO_REPO_DIR or "/workspace/higgs-audio").strip(), "examples", "generation.py")
+        cmd = [
+            "python3", script_path,
+            "--transcript", text,
+            "--temperature", "0.3",
+            "--out_path", out_path
         ]
-        sample = ChatMLSample(messages=messages)
-        response = self._generate_with_compat(sample)
-        audio = np.asarray(getattr(response, "audio", []), dtype=np.float32)
-        if audio.size == 0:
-            raise RuntimeError("Boson Higgs engine returned empty audio")
-        sr = int(getattr(response, "sampling_rate", self.TARGET_SR))
-        return self._wav_bytes_from_audio(audio, sr)
-
-    def _generate_with_compat(self, sample):
-        generate = self._higgs_engine.generate
-        return generate(
-            chat_ml_sample=sample,
-            max_new_tokens=1024,
-            temperature=0.3,
-            top_p=0.95,
-            top_k=50,
-            stop_strings=["<|end_of_text|>", "<|eot_id|>"],
-        )
-
-    def _load_boson_symbols(self):
-        errors: list[str] = []
-        candidates = (
-            (
-                "boson_multimodal.serve.serve_engine",
-                "boson_multimodal.data_types",
-            ),
-            (
-                "boson_multimodal.serve_engine",
-                "boson_multimodal.data_types",
-            ),
-        )
-        for engine_mod_name, types_mod_name in candidates:
-            try:
-                engine_mod = importlib.import_module(engine_mod_name)
-                types_mod = importlib.import_module(types_mod_name)
-                return (
-                    getattr(engine_mod, "HiggsAudioServeEngine"),
-                    getattr(types_mod, "ChatMLSample"),
-                    getattr(types_mod, "Message"),
-                )
-            except Exception as exc:
-                errors.append(f"{engine_mod_name}: {exc}")
-        raise RuntimeError(
-            "Unable to import Boson Higgs symbols. Tried: " + " | ".join(errors)
-        )
+        if prompt_name:
+            cmd.extend(["--ref_audio", prompt_name])
+        
+        env = os.environ.copy()
+        
+        try:
+            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"generation.py failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}")
+            with open(out_path, "rb") as f:
+                return f.read()
+        finally:
+            if os.path.exists(out_path):
+                os.remove(out_path)
 
     def _wav_bytes_from_audio(self, audio: np.ndarray, sampling_rate: int) -> bytes:
         pcm = np.clip(audio.astype(np.float32), -1.0, 1.0)
@@ -457,19 +418,8 @@ class SpeechSynthesizer:
         start_sample: int,
         end_sample: int,
     ) -> torch.Tensor:
-        target_length = max(1, end_sample - start_sample)
         if replacement_waveform.shape[0] != original_waveform.shape[0]:
             replacement_waveform = replacement_waveform.mean(dim=0, keepdim=True).expand(original_waveform.shape[0], -1)
-        if replacement_waveform.shape[1] < target_length:
-            pad = torch.zeros(replacement_waveform.shape[0], target_length - replacement_waveform.shape[1])
-            replacement_waveform = torch.cat([replacement_waveform, pad], dim=1)
-        elif replacement_waveform.shape[1] > target_length:
-            speed_factor = replacement_waveform.shape[1] / target_length
-            replacement_waveform = F_audio.resample(
-                replacement_waveform,
-                int(self.TARGET_SR * speed_factor),
-                self.TARGET_SR,
-            )[:, :target_length]
 
         before = original_waveform[:, :start_sample]
         after = original_waveform[:, end_sample:]
@@ -483,4 +433,4 @@ class SpeechSynthesizer:
             if after.shape[1] >= cross_len:
                 replacement_waveform[:, -cross_len:] = (replacement_waveform[:, -cross_len:] * tail_out) + (after[:, :cross_len] * tail_in)
                 after = after[:, cross_len:]
-        return torch.cat([before, replacement_waveform, after], dim=1)
+        return torch.cat([before, replacement_waveform[:, cross_len:], after], dim=1)

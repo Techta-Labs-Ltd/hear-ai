@@ -1,5 +1,12 @@
+import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
 import asyncio
+
 import json
+import re
 import os
 import traceback
 from datetime import datetime
@@ -187,7 +194,7 @@ class PipelineWorker:
                     "status": "completed",
                     "result_missing": True,
                 }
-            return {
+            payload = {
                 "job_id": job.id,
                 "run_id": job.run_id,
                 "track_id": job.track_id,
@@ -196,6 +203,11 @@ class PipelineWorker:
                 "result": result_obj,
                 "error": None,
             }
+            if job.job_type == "audio_tag" and isinstance(result_obj, dict):
+                for key in ("tags", "categories", "media_file_id", "type"):
+                    if key in result_obj:
+                        payload[key] = result_obj[key]
+            return payload
         if job.status == "failed":
             return {
                 "job_id": job.id,
@@ -337,6 +349,20 @@ class PipelineWorker:
     def _job_options_dict(self, job: AiJob) -> dict:
         raw = getattr(job, "job_options", None)
         return raw if isinstance(raw, dict) else {}
+
+    @staticmethod
+    def _audio_tag_result_field(tag_type: str | None) -> str:
+        t = (tag_type or "track").strip().lower()
+        if t in ("category", "categories"):
+            return "categories"
+        return "tags"
+
+    @staticmethod
+    def _extract_spoken_tags(transcript_text: str) -> list[str]:
+        spoken = re.sub(r"[.!?]+$", "", (transcript_text or "").strip())
+        if not spoken:
+            return []
+        return [t.strip() for t in re.split(r",\s*|\s+and\s+|\n+", spoken) if t.strip()]
 
     def _coerce_job_speed_multipliers(self, raw) -> list[float] | None:
         if not isinstance(raw, list):
@@ -667,6 +693,65 @@ class PipelineWorker:
                         "duration": rebuilt_audio.duration,
                         "audio_format": "mp3",
                     },
+                }
+                completed = await self._complete(db, job, track_job, result)
+                if not completed:
+                    return
+                if job.callback_url:
+                    callback_job_id = job.id
+                return
+
+            if job.job_type == "audio_tag":
+                if not await self._set_stage(db, job, track_job, "audio_tagging"):
+                    return
+                opts = self._job_options_dict(job)
+                media_file_id = opts.get("media_file_id") or self._coerce_transcript_text(job.track_id or "")
+                audio_url = self._coerce_transcript_text(
+                    job.input_url or opts.get("audio_url") or ""
+                )
+
+                if not audio_url:
+                    raise ValueError("audio_tag requires audio_url")
+
+                source_path = await download_audio(
+                    audio_url,
+                    suffix=".wav",
+                    db=db,
+                    job_id=job.id,
+                    run_id=job.run_id,
+                    track_id=media_file_id or None,
+                    purpose="audio_tag_source",
+                )
+                try:
+                    with open(source_path, "rb") as f:
+                        audio_bytes = f.read()
+                    if not audio_bytes:
+                        raise ValueError("audio_tag source file is empty")
+                    raw_transcript = await self._transcriber.transcribe(
+                        audio_bytes,
+                        job_id=job.id,
+                        run_id=job.run_id,
+                        track_id=media_file_id or "",
+                        short_utterance=True,
+                    )
+                    transcript_text = self._coerce_transcript_text((raw_transcript or {}).get("transcript", ""))
+                    extracted_tags = self._extract_spoken_tags(transcript_text)
+                    if not extracted_tags:
+                        print(
+                            f"[AUDIO_TAG] No speech detected job={job.id} "
+                            f"silent={bool((raw_transcript or {}).get('silent'))}"
+                        )
+                finally:
+                    drop_temp_standalone(source_path)
+
+                tag_type = opts.get("type", "track")
+                result_field = self._audio_tag_result_field(str(tag_type) if tag_type else "track")
+                result: dict = {
+                    "job_id": job.id,
+                    "job_type": "audio_tag",
+                    "media_file_id": media_file_id,
+                    "type": tag_type,
+                    result_field: extracted_tags,
                 }
                 completed = await self._complete(db, job, track_job, result)
                 if not completed:

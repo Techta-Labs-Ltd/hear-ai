@@ -40,6 +40,7 @@ class TranscriptionService:
         job_id: str | None = None,
         run_id: str | None = None,
         track_id: str | None = None,
+        short_utterance: bool = False,
     ) -> dict:
         directory = (
             hear_temp_job_dir(job_id, run_id) if job_id and run_id else hear_temp_directory()
@@ -57,6 +58,10 @@ class TranscriptionService:
         try:
             loop = asyncio.get_event_loop()
             async with self._lock:
+                if short_utterance:
+                    return await loop.run_in_executor(
+                        None, lambda: self._run_pass(tmp_path, relaxed=True)
+                    )
                 return await loop.run_in_executor(None, self._run, tmp_path)
         finally:
             drop_temp_standalone(tmp_path)

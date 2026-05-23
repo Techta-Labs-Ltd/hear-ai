@@ -26,6 +26,19 @@ _SPEAKER_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+_NON_PERSON_SPEAKER = re.compile(
+    r"\b(?:glasses|hardware|wearable|device|technology|recruitment|production|podcast|"
+    r"accessibility|assistive)\b",
+    re.IGNORECASE,
+)
+_PERSON_NAME_SHAPE = re.compile(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}$")
+_SPEAKER_CAPTURE_STOP = frozenset(
+    {"in", "from", "at", "and", "with", "of", "for", "on", "to", "by"}
+)
+
+
+def _norm_label(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
 def _categorization_hint(categorization: dict | None) -> str:
@@ -42,13 +55,69 @@ def _categorization_hint(categorization: dict | None) -> str:
 
 
 class DiscoveryService:
+    def _trim_speaker_capture(self, name: str) -> str:
+        parts: list[str] = []
+        for word in (name or "").split():
+            if word.lower() in _SPEAKER_CAPTURE_STOP:
+                break
+            if not re.match(r"^[A-Z][a-z]+$", word):
+                break
+            parts.append(word)
+            if len(parts) >= 4:
+                break
+        return " ".join(parts)
+
     def _infer_speaker(self, transcript: str) -> str | None:
         for pattern in _SPEAKER_PATTERNS:
             match = pattern.search(transcript or "")
             if match:
-                name = match.group(1).strip()
-                if len(name) >= 3:
+                name = self._trim_speaker_capture(match.group(1).strip())
+                if len(name) >= 3 and self._is_plausible_speaker(name, transcript, from_regex=True):
                     return name[:200]
+        return None
+
+    def _is_plausible_speaker(
+        self,
+        name: str,
+        transcript: str,
+        *,
+        from_regex: bool = False,
+    ) -> bool:
+        s = (name or "").strip()
+        if not s or len(s) < 3:
+            return False
+        if " > " in s:
+            return False
+        low = _norm_label(s)
+        if low in discovery_taxonomy_loader.taxonomy_label_terms():
+            return False
+        if _NON_PERSON_SPEAKER.search(s):
+            return False
+        if from_regex:
+            return bool(_PERSON_NAME_SHAPE.match(s))
+        if not _PERSON_NAME_SHAPE.match(s):
+            return False
+        intro = re.compile(
+            rf"\b(?:this is|i am|i'm|my name is|called|named)\s+{re.escape(s)}\b",
+            re.IGNORECASE,
+        )
+        return bool(intro.search(transcript or ""))
+
+    def _sanitize_speaker(
+        self,
+        speaker: str | None,
+        transcript: str,
+        *,
+        trusted: bool = False,
+    ) -> str | None:
+        if trusted:
+            s = (speaker or "").strip()
+            return s[:200] if s else None
+        s = (speaker or "").strip()
+        if not s:
+            return None
+        if self._is_plausible_speaker(s, transcript):
+            return s[:200]
         return None
 
     def _looks_like_filename_title(self, title: str, track_name: str) -> bool:
@@ -94,10 +163,19 @@ class DiscoveryService:
         track_name: str,
     ) -> ContentDiscoveryProfile:
         tx = (transcript or "").strip()
+        profile.speaker = self._sanitize_speaker(profile.speaker, tx)
         if not profile.speaker:
             profile.speaker = self._infer_speaker(tx)
         if profile.speaker and profile.speaker not in profile.entities.people:
             profile.entities.people = [profile.speaker] + list(profile.entities.people)
+        profile.entities.people = [
+            p
+            for p in profile.entities.people
+            if _norm_label(p) != _norm_label(profile.speaker or "")
+            and self._is_plausible_speaker(p, tx)
+        ]
+        if profile.speaker and profile.speaker not in profile.entities.people:
+            profile.entities.people = [profile.speaker] + profile.entities.people
         if self._looks_like_filename_title(profile.title_suggestion or "", track_name):
             topic = (profile.main_topic or profile.primary_genre or "Audio").strip()
             profile.title_suggestion = f"{topic}: {profile.speaker or 'spoken piece'}"[:300]
@@ -362,7 +440,9 @@ class DiscoveryService:
                 profile.duration_seconds = duration_seconds
                 profile.source = coerce_discovery_source(source) or None
                 if speaker and not profile.speaker:
-                    profile.speaker = speaker
+                    profile.speaker = self._sanitize_speaker(
+                        speaker, transcript, trusted=True
+                    )
             return profile
         if not (transcript or "").strip():
             return None
@@ -396,7 +476,9 @@ class DiscoveryService:
                     profile.duration_seconds = duration_seconds
                     profile.source = coerce_discovery_source(source) or None
                     if speaker and not profile.speaker:
-                        profile.speaker = speaker
+                        profile.speaker = self._sanitize_speaker(
+                            speaker, transcript, trusted=True
+                        )
                     llm_controlled = list(profile.controlled_tags or [])
                     profile.controlled_tags = self.merge_controlled_tags(
                         profile, llm_controlled, categorization
@@ -419,9 +501,11 @@ class DiscoveryService:
         if profile:
             profile.duration_seconds = duration_seconds
             profile.source = coerce_discovery_source(source) or None
-            if speaker and not profile.speaker:
-                profile.speaker = speaker
             profile = self._enrich_profile(profile, transcript, categorization, track_name)
+            if speaker and not profile.speaker:
+                profile.speaker = self._sanitize_speaker(
+                    speaker, transcript, trusted=True
+                )
         return profile
 
 

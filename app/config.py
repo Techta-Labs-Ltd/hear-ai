@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-4o-mini"
     MODERATION_AUTO_LEARN: bool = False
-    HIGGS_AUDIO_ENABLED: bool = False
+    HIGGS_AUDIO_ENABLED: bool = True
     HIGGS_AUDIO_MODULE: str = "boson_multimodal"
     HIGGS_AUDIO_REPO_DIR: str = "/workspace/higgs-audio"
     HIGGS_AUDIO_VOICE: str = "en_us_001"

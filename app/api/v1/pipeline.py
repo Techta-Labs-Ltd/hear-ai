@@ -17,7 +17,7 @@ from app.services.registry import worker, synthesizer
 from app.services.callback import callback_service
 
 router = APIRouter(tags=["Pipeline"])
-ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "magic_clean", "rebuild", "reconstruct", "transcription", "categorization"}
+ALLOWED_JOB_TYPES = {"pipeline", "magic-clean", "magic_clean", "rebuild", "reconstruct", "transcription", "categorization", "audio_tag"}
 
 
 def _normalize_pipeline_job_type(job_type: str) -> str:
@@ -27,12 +27,19 @@ def _normalize_pipeline_job_type(job_type: str) -> str:
 
 
 def _track_job_options_payload(body: PipelineRequest | RealtimeRequest, normalized_job_type: str) -> dict | None:
-    if normalized_job_type not in ("pipeline", "magic_clean"):
+    if normalized_job_type not in ("pipeline", "magic_clean", "audio_tag"):
         return None
     out: dict = {}
+    if normalized_job_type == "audio_tag":
+        if getattr(body, "type", None):
+            out["type"] = body.type
+        if getattr(body, "media_file_id", None):
+            out["media_file_id"] = body.media_file_id
+        if getattr(body, "audio_url", None):
+            out["audio_url"] = body.audio_url
     if body.speed_multipliers is not None:
         out["speed_multipliers"] = [float(x) for x in body.speed_multipliers]
-    pi = (body.playback_instruction or "").strip() if body.playback_instruction else ""
+    pi = (body.playback_instruction or "").strip() if getattr(body, "playback_instruction", None) else ""
     if pi:
         out["playback_instruction"] = pi
     return out or None
@@ -96,7 +103,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
                 existing.max_tags = body.max_tags
                 existing.track_id = body.track_id
                 existing.edited_transcript = body.edited_transcript
-                existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
+                existing.input_url = body.audio_url if normalized_job_type in ("reconstruct", "audio_tag") else None
                 existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
                 existing.job_options = job_opts
                 await commit_with_retry(db)
@@ -112,7 +119,7 @@ async def process_pipeline(body: PipelineRequest, _auth: bool = Security(verify_
                 status="queued",
                 callback_url=settings.HEAR_CALLBACK_URL or None,
                 max_tags=body.max_tags,
-                input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
+                input_url=body.audio_url if normalized_job_type in ("reconstruct", "audio_tag") else None,
                 custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
                 job_options=job_opts,
                 created_at=datetime.utcnow(),
@@ -171,7 +178,7 @@ async def process_realtime(
                 existing.job_type = normalized_job_type
                 existing.max_tags = body.max_tags
                 existing.track_id = body.track_id
-                existing.input_url = body.audio_url if normalized_job_type == "reconstruct" else None
+                existing.input_url = body.audio_url if normalized_job_type in ("reconstruct", "audio_tag") else None
                 existing.custom_tags = reconstruct_payload if normalized_job_type == "reconstruct" else None
                 existing.job_options = job_opts
                 await commit_with_retry(db)
@@ -184,7 +191,7 @@ async def process_realtime(
                     status="queued",
                     callback_url=settings.HEAR_CALLBACK_URL or None,
                     max_tags=body.max_tags,
-                    input_url=body.audio_url if normalized_job_type == "reconstruct" else None,
+                    input_url=body.audio_url if normalized_job_type in ("reconstruct", "audio_tag") else None,
                     custom_tags=reconstruct_payload if normalized_job_type == "reconstruct" else None,
                     job_options=job_opts,
                     created_at=datetime.utcnow(),
