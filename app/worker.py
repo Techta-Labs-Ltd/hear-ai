@@ -485,6 +485,25 @@ class PipelineWorker:
         })
         return True
 
+    def _job_completed_broadcast(
+        self, job: AiJob, track_job: AiTrackJob, result: dict
+    ) -> dict:
+        event = {
+            "event": "job_completed",
+            "job_id": job.id,
+            "run_id": job.run_id,
+            "track_id": track_job.track_id,
+            "job_type": job.job_type,
+            "status": "completed",
+            "current_stage": None,
+            "result": result,
+        }
+        if job.job_type == "audio_tag" and isinstance(result, dict):
+            for key in ("tags", "categories", "media_file_id", "type"):
+                if key in result:
+                    event[key] = result[key]
+        return event
+
     async def _complete(self, db, job: AiJob, track_job: AiTrackJob, result: dict) -> bool:
         if not self._run_is_current(db, job.id, job.run_id):
             return False
@@ -506,15 +525,9 @@ class PipelineWorker:
             await commit_with_retry(db)
         except Exception as exc:
             print(f"[TEMP] cleanup_job_temp on complete failed for {job_id}: {exc}")
-        await manager.broadcast(job.id, {
-            "event": "job_completed",
-            "job_id": job.id,
-            "run_id": job.run_id,
-            "track_id": track_job.track_id,
-            "job_type": job.job_type,
-            "status": "completed",
-            "current_stage": None,
-        })
+        await manager.broadcast(
+            job.id, self._job_completed_broadcast(job, track_job, result)
+        )
         return True
 
     async def _process_magic_clean(self, job: AiJob, track_job: AiTrackJob, db):
