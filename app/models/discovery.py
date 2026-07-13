@@ -74,6 +74,9 @@ class ContentDiscoveryProfile(BaseModel):
     controlled_tags: list[str] = Field(default_factory=list)
     freeform_tags: list[str] = Field(default_factory=list)
     embedding_source_text: str | None = None
+    published_at: str | None = None
+    latest_at: str | None = None
+    trending_score: float | None = None
 
     @model_validator(mode="after")
     def sync_summary_aliases(self) -> ContentDiscoveryProfile:
@@ -129,6 +132,8 @@ def discovery_to_callback_dict(
     duration_seconds: float | None = None,
     source: str | None = None,
     created_at: str | None = None,
+    published_at: str | None = None,
+    trending_score: float | None = None,
 ) -> dict | None:
     if profile is None:
         return None
@@ -137,6 +142,13 @@ def discovery_to_callback_dict(
 
     dur = duration_seconds if duration_seconds is not None else profile.duration_seconds
     ts = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pub = (published_at or profile.published_at or "").strip() or None
+    latest = (profile.latest_at or "").strip() or pub or ts
+    trend_raw = trending_score if trending_score is not None else profile.trending_score
+    try:
+        trend = float(trend_raw) if trend_raw is not None else 0.0
+    except (TypeError, ValueError):
+        trend = 0.0
     summary_short = (profile.summary_short or profile.short_summary or "").strip()
     entities_obj = profile.entities.to_callback_dict()
     confidence = dict(profile.confidence or {})
@@ -169,6 +181,9 @@ def discovery_to_callback_dict(
         "freeform_tags": list(profile.freeform_tags or []),
         "embedding_source_text": (profile.embedding_source_text or "").strip(),
         "created_at": ts,
+        "published_at": pub or "",
+        "latest_at": latest,
+        "trending_score": trend,
         "id": profile.content_id or "",
         "title": (profile.title_suggestion or "").strip(),
         "themes": themes,

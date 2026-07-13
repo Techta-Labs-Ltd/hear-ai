@@ -6,7 +6,7 @@ import torchaudio
 import torchaudio.functional as F_audio
 
 from app.core.audio_utils import save_as_mp3
-from app.core.storage import storage
+from app.core.storage import get_storage
 
 
 class AudioMixer:
@@ -52,7 +52,7 @@ class AudioMixer:
 
         b2_key = f"masters/{track_id}/{job_id}.mp3"
         loop = asyncio.get_event_loop()
-        url = await loop.run_in_executor(None, storage.upload_file, mixed_path, b2_key)
+        url = await loop.run_in_executor(None, get_storage().upload_file, mixed_path, b2_key)
         os.unlink(mixed_path)
 
         return {

@@ -3,100 +3,34 @@ import logging
 import re
 import threading
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 from app.config import settings as app_settings
-
-try:
-    from transformers import BitsAndBytesConfig
-    _BNB_AVAILABLE = True
-except ImportError:
-    BitsAndBytesConfig = None  # type: ignore[assignment,misc]
-    _BNB_AVAILABLE = False
+from app.services.triton_client import get_triton_client
 
 logger = logging.getLogger(__name__)
 
 MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
-MIN_VRAM_GB = 4.5
 
 
 class LLMService:
     def __init__(self):
-        self._model = None
-        self._tokenizer = None
         self._lock = threading.Lock()
-        self._available = False
-
-    def load(self):
-        if not app_settings.QWEN_LLM_ENABLED:
-            logger.info("[LLM] Qwen disabled (QWEN_LLM_ENABLED=false) — toxic-bert + NLI path")
-            return
-        if not self._has_enough_gpu():
-            logger.info("[LLM] No GPU with ≥%.1f GB VRAM — LLM disabled", MIN_VRAM_GB)
-            return
-        try:
-            logger.info("[LLM] Loading %s on GPU...", MODEL_ID)
-            self._tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True)
-
-            load_kwargs: dict = {
-                "device_map": "auto",
-                "torch_dtype": torch.float16,
-            }
-            if _BNB_AVAILABLE:
-                load_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_compute_dtype=torch.float16,
-                )
-                logger.info("[LLM] 4-bit quantisation enabled (~4 GB VRAM)")
-            else:
-                logger.info("[LLM] bitsandbytes not available — loading fp16 (~14 GB VRAM)")
-
-            self._model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
-            self._model.eval()
-            self._available = True
-            logger.info("[LLM] %s ready on %s", MODEL_ID, next(self._model.parameters()).device)
-
-        except Exception as exc:
-            logger.warning("[LLM] Load failed (%s) — falling back to local models", exc)
-            self._available = False
 
     @property
     def is_available(self) -> bool:
-        return self._available
+        return bool(app_settings.QWEN_LLM_ENABLED)
 
-    def _has_enough_gpu(self) -> bool:
-        if not torch.cuda.is_available():
-            return False
-        try:
-            vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-            logger.info("[LLM] GPU VRAM: %.1f GB (need ≥%.1f GB)", vram_gb, MIN_VRAM_GB)
-            return vram_gb >= MIN_VRAM_GB
-        except Exception:
-            return False
+    def load(self):
+        pass
+
+    def unload(self):
+        pass
+
+    def ensure_loaded(self):
+        pass
 
     def _generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
         with self._lock:
-            text = self._tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-            inputs = self._tokenizer(text, return_tensors="pt").to(self._model.device)
-            with torch.no_grad():
-                output = self._model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=False,
-                    temperature=None,
-                    top_p=None,
-                    top_k=None,
-                    pad_token_id=self._tokenizer.eos_token_id,
-                )
-            new_ids = output[0][inputs["input_ids"].shape[1]:]
-            return self._tokenizer.decode(new_ids, skip_special_tokens=True).strip()
+            return get_triton_client().llm_generate_sync(messages, max_tokens=max_new_tokens)
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -145,8 +79,8 @@ class LLMService:
         harm_keywords: list[str] | None = None,
         is_borderline: bool = False,
     ) -> dict:
-        if not self._available:
-            raise RuntimeError("LLM not loaded")
+        if not self.is_available:
+            raise RuntimeError("LLM not available")
 
         found_kw = [kw for kw in (harm_keywords or []) if kw in transcript.lower()][:10]
 
@@ -235,9 +169,10 @@ class LLMService:
         keyword_hits: dict[str, float] | None = None,
         max_categories: int = 2,
         nli_top_categories: list[str] | None = None,
+        taxonomy_paths: list[str] | None = None,
     ) -> dict:
-        if not self._available:
-            raise RuntimeError("LLM not loaded")
+        if not self.is_available:
+            raise RuntimeError("LLM not available")
 
         kw_hint = ""
         if keyword_hits:
@@ -250,53 +185,115 @@ class LLMService:
                 f"{', '.join(nli_top_categories[:6])}"
             )
 
-        cat_str = ", ".join(categories[:40])
-        tag_str = ", ".join(tags[:100])
+        cat_str = ", ".join(categories[:50])
+        tag_str = ", ".join(tags[:120])
+        tax_block = ""
+        if taxonomy_paths:
+            tax_block = (
+                "\nEditorial taxonomy paths (use for subject context; map to tags/categories):\n"
+                + "\n".join(f"- {p}" for p in taxonomy_paths[:25])
+                + "\n"
+            )
 
         user_content = (
-            f"Available categories (choose from these only): {cat_str}\n"
-            f"Available tags (choose from these only, keep # prefix): {tag_str}\n"
-            f"{kw_hint}{nli_hint}\n\n"
-            f"Transcript:\n{transcript[:2000]}\n\n"
-            "Read the FULL transcript before choosing — categories must describe what this audio is ABOUT.\n"
+            f"Suggested categories (use when they fit; otherwise new_categories): {cat_str}\n"
+            f"Suggested tags (use when they fit; otherwise new_tags): {tag_str}\n"
+            f"{tax_block}{kw_hint}{nli_hint}\n\n"
+            f"Transcript:\n{transcript[:4000]}\n\n"
+            "You are the PRIMARY classifier. Read the FULL transcript and decide what this audio is ABOUT.\n"
+            "Keyword/NLI/taxonomy hints are advisory — override them when they misread the story.\n"
             "Return ONLY this JSON (no markdown, no extra text):\n"
-            '{"tags":["#Sports"],"categories":["Sports"],"sentiment":"neutral","new_tags":[],"new_categories":[]}\n\n'
+            '{"tags":["#accessibility"],"categories":["Personal lived experience"],'
+            '"sentiment":"neutral","new_tags":["#guidedogs"],"new_categories":[]}\n\n'
             "Rules:\n"
-            "- tags: up to 5, must start with #, must come from the available list\n"
-            f"- categories: up to {max_categories}, must come from the available list\n"
-            "- new_tags: up to 5 NEW tags you discovered that are NOT in the available list — must start with #\n"
-            "- new_categories: up to 2 NEW categories NOT in the available list\n"
+            "- tags: up to 5 hashtag tags with # prefix (e.g. #environment, #community) — "
+            "NEVER return taxonomy paths with ' > ' as tags\n"
+            f"- categories: up to {max_categories} flat editorial category names (catalog or new) — "
+            "NEVER return hierarchical taxonomy paths with ' > ' as categories\n"
+            "- new_tags: REQUIRED when the best subject tags are missing from the suggested list "
+            "(create concise # tags, e.g. #assistive-technology, #guide-dogs)\n"
+            "- new_categories: REQUIRED when no suggested category fits (e.g. Personal lived experience)\n"
+            "- Put your best tags in BOTH tags and new_tags if needed — unknown labels are saved to the catalog\n"
             "- sentiment: positive | negative | neutral\n"
-            "- Base on MAIN SUBJECT topics (music, sport, news, health) — NOT audio format\n"
-            "- Do NOT use Podcast as the only category when the subject is music, gaming, news, etc.\n"
-            "- Podcast/Documentary describe FORMAT; prefer Music, Entertainment, Sports, News for subject\n"
-            "- If multiple distinct topics exist in this text, include a category for each\n"
+            "- Classify the MAIN SUBJECT (music, sport, news, wildlife, politics) — NOT audio format alone\n"
+            "- Do NOT use Podcast/Documentary as the only category when the subject is music, news, wildlife, etc.\n"
+            "- News stories about wildlife photographers, awards, or nature documentaries: use News, Wildlife, "
+            "Photography, Environment — NOT Veterinary, Dentistry, or clinical medicine unless the piece is "
+            "about animal healthcare\n"
+            "- First-person stories by blind or visually impaired speakers about guide dogs, smart glasses "
+            "(e.g. Meta Ray-Ban), AI assistants (e.g. Orion), independence, and family: use Personal lived "
+            "experience, Accessibility, Human connection; tags like #Accessibility #GuideDogs "
+            "#AssistiveTechnology #SmartGlasses — NOT Wildlife, Nature, #wildlife, or Technology as the main "
+            "subject (trees/lakes mentioned in passing are NOT a wildlife documentary)\n"
+            "- Technology history / audio format documentaries (Minidisc, Betamax, cassette, format wars, Sony, Philips): "
+            "use Technology, Entertainment, or Documentary; tags like #technology #history #audio — "
+            "NOT #wildlife #photography #accessibility and NEVER taxonomy paths about smart glasses\n"
+            "- Sports commentary → Sports; recipe → Food; obituary → Obituaries + News\n"
+            "- Prefer specific subjects over vague buckets (Technology, Business) unless truly central\n"
         )
 
         messages = [
             {
                 "role": "system",
-                "content": "You are an expert audio content categorizer. Return ONLY valid JSON.",
+                "content": (
+                    "You are an expert audio content categorizer for a Talking Newspaper and podcast platform. "
+                    "Return ONLY valid JSON. Your categories must match what a human editor would assign."
+                ),
             },
             {"role": "user", "content": user_content},
         ]
 
-        raw = self._generate(messages, max_new_tokens=220)
+        raw = self._generate(messages, max_new_tokens=280)
         parsed = self._extract_json(raw)
 
-        valid_tags = set(tags)
-        valid_cats = set(categories)
+        valid_tags = {t.lower() for t in tags}
+        valid_cats = {c.lower() for c in categories}
 
-        tags_out = [t for t in parsed.get("tags", []) if t in valid_tags][:5]
-        cats_out = [c for c in parsed.get("categories", []) if c in valid_cats][:max_categories]
-        new_tags = [
-            t for t in parsed.get("new_tags", [])
-            if isinstance(t, str) and t.startswith("#") and t not in valid_tags
-        ][:5]
-        new_cats = [
-            c for c in parsed.get("new_categories", [])
-            if isinstance(c, str) and c and c not in valid_cats
-        ][:2]
+        def _norm_tag(raw: str) -> str:
+            t = str(raw or "").strip().lower().lstrip("#")
+            t = re.sub(r"\s+", "-", t)
+            t = re.sub(r"[^a-z0-9\-]", "", t)
+            return f"#{t}" if t else ""
+
+        tags_out: list[str] = []
+        new_tags: list[str] = []
+        seen_tags: set[str] = set()
+        for raw in list(parsed.get("tags", [])) + list(parsed.get("new_tags", [])):
+            if not isinstance(raw, str):
+                continue
+            norm = _norm_tag(raw)
+            if not norm or norm in seen_tags:
+                continue
+            seen_tags.add(norm)
+            if norm.lower() in valid_tags:
+                tags_out.append(norm)
+            else:
+                new_tags.append(norm)
+            if len(tags_out) + len(new_tags) >= 5:
+                break
+
+        cats_out: list[str] = []
+        new_cats: list[str] = []
+        seen_cats: set[str] = set()
+        for raw in list(parsed.get("categories", [])) + list(parsed.get("new_categories", [])):
+            if not isinstance(raw, str):
+                continue
+            cat = re.sub(r"\s+", " ", raw.strip())
+            if not cat:
+                continue
+            key = cat.lower()
+            if key in seen_cats:
+                continue
+            seen_cats.add(key)
+            if key in valid_cats:
+                for c in categories:
+                    if c.lower() == key:
+                        cats_out.append(c)
+                        break
+            else:
+                new_cats.append(cat)
+            if len(cats_out) + len(new_cats) >= max_categories:
+                break
         sentiment = parsed.get("sentiment", "neutral")
         if sentiment not in ("positive", "negative", "neutral"):
             sentiment = "neutral"
@@ -318,8 +315,8 @@ class LLMService:
         taxonomy_paths: list[str] | None = None,
         strict: bool = False,
     ) -> dict:
-        if not self._available:
-            raise RuntimeError("LLM not loaded")
+        if not self.is_available:
+            raise RuntimeError("LLM not available")
         body = (transcript or "").strip()[:8000]
         title = (track_name or "").strip()[:200]
         hint = (categorization_hint or "").strip()[:600]
@@ -364,7 +361,10 @@ class LLMService:
             "title_suggestion = human discovery title (not the filename). "
             "speaker = human narrator's personal name ONLY when they introduce themselves in the transcript "
             "(e.g. Denise Wallace). Use empty string if no person is named. "
-            "NEVER put devices, products, apps, technologies, topics, or taxonomy paths in speaker. "
+            "NEVER put devices, products (Minidisc, Walkman, iPod), brands, formats, apps, topics, or taxonomy paths in speaker. "
+            "controlled_tags = ONLY hierarchical taxonomy paths from the vocabulary that clearly match the story — "
+            "do NOT tag accessibility/smart glasses unless the piece is about blind users, guide dogs, or assistive tech. "
+            "Do NOT tag wildlife/photography unless the story is about animals, nature media, or photo awards. "
             "key_themes = insight-level themes (e.g. independence is about choice). "
             "audience_relevance = who would find this relevant. "
             "controlled_tags = hierarchical paths with ' > ' (pick from vocabulary below when possible). "
@@ -432,7 +432,7 @@ class LLMService:
         return None
 
     def resolve_playback_instruction_speeds(self, instruction: str) -> list[float]:
-        if not self._available:
+        if not self.is_available:
             return []
         ins = (instruction or "").strip()
         if not ins:
@@ -469,4 +469,11 @@ class LLMService:
         return sorted(set(out))
 
 
-llm_service = LLMService()
+_llm_service = None
+
+
+def get_llm_service():
+    global _llm_service
+    if _llm_service is None:
+        _llm_service = LLMService()
+    return _llm_service

@@ -60,7 +60,6 @@ class AiTrackJob(Base):
     status = Column(String, nullable=False, default="queued", index=True)
     current_stage = Column(String, nullable=True, index=True)
     attempts = Column(Integer, default=0)
-    transcript = Column(String, nullable=True)
     moderation_json = Column(JSON, nullable=True)
     categorization_json = Column(JSON, nullable=True)
     discovery_json = Column(JSON, nullable=True)
@@ -70,27 +69,33 @@ class AiTrackJob(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
+    is_regenerated = Column(Boolean, default=False)
 
     __table_args__ = (
         Index("ix_ai_track_jobs_job_run", "job_id", "run_id"),
     )
 
 
-class AiTempFile(Base):
-    __tablename__ = "ai_temp_files"
+class RegenerationPreview(Base):
+    __tablename__ = "regeneration_previews"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    job_id = Column(String, nullable=True, index=True)
-    run_id = Column(String, nullable=True, index=True)
-    track_id = Column(String, nullable=True)
-    purpose = Column(String, nullable=False)
-    path = Column(String, nullable=False, unique=True)
-    size_bytes = Column(BigInteger, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    job_id = Column(String, index=True)
+    track_id = Column(String, index=True)
+    action = Column(String, default="replace")
+    changes_json = Column(JSON, nullable=True)
+    preview_b2_key = Column(String)
+    preview_audio_url = Column(String)
+    original_audio_url = Column(String)
+    quality_metrics = Column(JSON, nullable=True)
+    status = Column(String, default="pending", index=True)
+    seed = Column(Integer, nullable=True)
+    user_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    confirmed_at = Column(DateTime, nullable=True)
 
-    __table_args__ = (
-        Index("ix_ai_temp_files_job_run", "job_id", "run_id"),
-    )
+
 
 
 if not settings.DATABASE_URL:
@@ -99,23 +104,40 @@ if not settings.DATABASE_URL:
         "postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
     )
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_pre_ping=settings.DB_POOL_PRE_PING,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_timeout=settings.DB_POOL_TIMEOUT,
-    pool_recycle=settings.DB_POOL_RECYCLE,
-    connect_args={
-        "options": (
-            f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS} "
-            f"-c application_name=hear-ai"
-        ),
-        "connect_timeout": 10,
-    },
-)
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+_engine = None
+_SessionLocal = None
+
+
+def _get_engine():
+    global _engine
+    if _engine is None:
+        _engine = create_engine(
+            settings.DATABASE_URL,
+            echo=False,
+            pool_pre_ping=settings.DB_POOL_PRE_PING,
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_timeout=settings.DB_POOL_TIMEOUT,
+            pool_recycle=settings.DB_POOL_RECYCLE,
+            connect_args={
+                "options": (
+                    f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS} "
+                    f"-c application_name=hear-ai"
+                ),
+                "connect_timeout": 10,
+            },
+        )
+    return _engine
+
+
+def SessionLocal():
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(bind=_get_engine(), expire_on_commit=False, autoflush=True)
+    return _SessionLocal()
+
+def get_engine():
+    return _get_engine()
 
 
 MIGRATIONS = [
@@ -127,18 +149,30 @@ MIGRATIONS = [
     ("ai_jobs", "edited_transcript", "VARCHAR"),
     ("ai_jobs", "job_options", "JSON"),
     ("ai_track_jobs", "discovery_json", "JSON"),
+    ("regeneration_previews", "preview_b2_key", "VARCHAR"),
+    ("regeneration_previews", "preview_audio_url", "VARCHAR"),
+    ("regeneration_previews", "original_audio_url", "VARCHAR"),
+    ("regeneration_previews", "quality_metrics", "JSON"),
+    ("regeneration_previews", "changes_json", "JSON"),
+    ("regeneration_previews", "seed", "INTEGER"),
+    ("regeneration_previews", "user_id", "VARCHAR"),
+    ("regeneration_previews", "expires_at", "TIMESTAMP"),
+    ("regeneration_previews", "confirmed_at", "TIMESTAMP"),
+    ("ai_track_jobs", "is_regenerated", "BOOLEAN DEFAULT FALSE"),
 ]
 
 
 def init_db():
-    with engine.begin() as conn:
+    eng = get_engine()
+    with eng.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=eng)
     _run_migrations()
 
 
 def _run_migrations():
-    with engine.begin() as conn:
+    eng = get_engine()
+    with eng.begin() as conn:
         for table_name, column_name, column_def in MIGRATIONS:
             conn.execute(
                 text(

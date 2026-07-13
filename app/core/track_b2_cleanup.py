@@ -9,7 +9,7 @@ def _asset_b2_key(storage, asset: dict | None) -> str | None:
         return key.strip()
     url = asset.get("audio_url")
     if isinstance(url, str) and url.strip():
-        return storage.public_url_to_key(url.strip())
+        return get_storage().public_url_to_key(url.strip())
     return None
 
 
@@ -21,4 +21,4 @@ def cleanup_track_ai_b2_assets(storage, track: TrackData, *, include_enhanced: b
     keys.append(_asset_b2_key(storage, track.ai_compressed_audio))
     if include_enhanced:
         keys.append(_asset_b2_key(storage, track.ai_enhanced_audio))
-    return storage.delete_keys_best_effort(keys)
+    return get_storage().delete_keys_best_effort(keys)

@@ -5,7 +5,14 @@ import re
 
 from app.config import settings
 from app.core.category_loader import category_loader
-from app.core.discovery_taxonomy import discovery_taxonomy_loader
+from app.core.content_context import (
+    assistive_tech_narrative,
+    filter_controlled_taxonomy_paths,
+    filter_freeform_tag_labels,
+    is_assistive_taxonomy_path,
+    tech_history_narrative,
+)
+from app.core.discovery_taxonomy import _norm, discovery_taxonomy_loader
 from app.models.discovery import (
     ContentDiscoveryProfile,
     DiscoveryEntities,
@@ -13,7 +20,7 @@ from app.models.discovery import (
     content_description_from_discovery,
     discovery_to_callback_dict,
 )
-from app.services.llm_service import llm_service
+from app.services.llm_service import get_llm_service
 
 _FILENAME_TITLE = re.compile(r"^\d{8}[\d_\-a-fA-Z]*$")
 _SPEAKER_PATTERNS = (
@@ -30,6 +37,26 @@ _NON_PERSON_SPEAKER = re.compile(
     r"\b(?:glasses|hardware|wearable|device|technology|recruitment|production|podcast|"
     r"accessibility|assistive)\b",
     re.IGNORECASE,
+)
+_NON_PERSON_SPEAKER_NAMES = frozenset(
+    {
+        "minidisc",
+        "mini disc",
+        "walkman",
+        "cassette",
+        "betamax",
+        "ipod",
+        "napster",
+        "sony",
+        "philips",
+        "compact disc",
+        "smart glasses",
+        "hardware",
+        "technology",
+        "documentary",
+        "podcast",
+        "speaker",
+    }
 )
 _PERSON_NAME_SHAPE = re.compile(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}$")
 _SPEAKER_CAPTURE_STOP = frozenset(
@@ -89,6 +116,8 @@ class DiscoveryService:
         if " > " in s:
             return False
         low = _norm_label(s)
+        if low in _NON_PERSON_SPEAKER_NAMES:
+            return False
         if low in discovery_taxonomy_loader.taxonomy_label_terms():
             return False
         if _NON_PERSON_SPEAKER.search(s):
@@ -266,6 +295,8 @@ class DiscoveryService:
         profile: ContentDiscoveryProfile,
         llm_tags: list[str] | None,
         categorization: dict | None,
+        *,
+        transcript: str = "",
     ) -> list[str]:
         paths: list[str] = []
         seen: set[str] = set()
@@ -281,7 +312,9 @@ class DiscoveryService:
             paths.append(canonical)
 
         for tag in llm_tags or []:
-            _add(str(tag))
+            raw = str(tag).strip()
+            if " > " in raw:
+                _add(raw)
 
         topics: list[str] = []
         if profile.main_topic:
@@ -290,25 +323,14 @@ class DiscoveryService:
         for matched in discovery_taxonomy_loader.match_paths_for_topics(topics):
             _add(matched)
 
-        cat_data = category_loader.data
-        cat_names = {c.lower(): c for c in cat_data.categories}
-        for topic in topics:
-            nt = re.sub(r"\s+", " ", topic.strip().lower())
-            for key, canonical in cat_names.items():
-                if key in nt or nt in key:
-                    _add(canonical)
-
-        if isinstance(categorization, dict):
-            for c in categorization.get("categories") or []:
-                if isinstance(c, str) and c.strip():
-                    _add(c.strip())
-
-        return paths[:15]
+        return filter_controlled_taxonomy_paths(transcript, paths)[:15]
 
     def map_freeform_tags(
         self,
         profile: ContentDiscoveryProfile,
         categorization: dict | None,
+        *,
+        transcript: str = "",
     ) -> list[str]:
         free: list[str] = []
         seen: set[str] = set()
@@ -329,7 +351,37 @@ class DiscoveryService:
                     if t and t.lower() not in seen:
                         seen.add(t.lower())
                         free.append(t)
-        return free[:20]
+        return filter_freeform_tag_labels(transcript, free)[:20]
+
+    def _finalize_discovery_profile(
+        self,
+        profile: ContentDiscoveryProfile,
+        transcript: str,
+    ) -> ContentDiscoveryProfile:
+        tx = (transcript or "").strip()
+        profile.speaker = self._sanitize_speaker(profile.speaker, tx)
+        if profile.speaker and not self._is_plausible_speaker(profile.speaker, tx):
+            profile.speaker = None
+        genre = (profile.primary_genre or "").strip()
+        if " > " in genre:
+            if is_assistive_taxonomy_path(genre) and not assistive_tech_narrative(tx.lower()):
+                profile.primary_genre = genre.split(" > ")[-1].strip()
+            elif tech_history_narrative(tx.lower()):
+                profile.primary_genre = "Technology history"
+            else:
+                profile.primary_genre = genre.split(" > ")[-1].strip()
+        if tech_history_narrative(tx.lower()) and not assistive_tech_narrative(tx.lower()):
+            if (profile.main_topic or "").strip().lower() in ("accessibility", "wildlife"):
+                profile.main_topic = "Technology"
+        profile.entities.people = [
+            p for p in profile.entities.people if self._is_plausible_speaker(p, tx)
+        ]
+        profile.entities.products = [
+            p
+            for p in profile.entities.products
+            if _norm_label(p) not in _NON_PERSON_SPEAKER_NAMES
+        ]
+        return profile
 
     def _fallback_from_categorization(
         self,
@@ -357,9 +409,13 @@ class DiscoveryService:
             speaker=speaker,
         )
         profile = self._enrich_profile(profile, transcript, categorization, track_name)
-        profile.controlled_tags = self.merge_controlled_tags(profile, [], categorization)
-        profile.freeform_tags = self.map_freeform_tags(profile, categorization)
-        return profile
+        profile.controlled_tags = self.merge_controlled_tags(
+            profile, [], categorization, transcript=transcript
+        )
+        profile.freeform_tags = self.map_freeform_tags(
+            profile, categorization, transcript=transcript
+        )
+        return self._finalize_discovery_profile(profile, transcript)
 
     def _parse_llm_dict(self, raw: dict, *, content_id: str | None) -> ContentDiscoveryProfile:
         entities_raw = raw.get("entities")
@@ -449,11 +505,11 @@ class DiscoveryService:
 
         hint = _categorization_hint(categorization)
         taxonomy_paths = discovery_taxonomy_loader.data.paths
-        if llm_service.is_available:
+        if get_llm_service().is_available:
             for attempt, strict in enumerate((False, True)):
                 try:
                     raw = await asyncio.to_thread(
-                        llm_service.build_discovery_profile,
+                        get_llm_service().build_discovery_profile,
                         transcript,
                         track_name=track_name,
                         duration_seconds=duration_seconds,
@@ -481,15 +537,17 @@ class DiscoveryService:
                         )
                     llm_controlled = list(profile.controlled_tags or [])
                     profile.controlled_tags = self.merge_controlled_tags(
-                        profile, llm_controlled, categorization
+                        profile, llm_controlled, categorization, transcript=transcript
                     )
-                    profile.freeform_tags = self.map_freeform_tags(profile, categorization)
-                    return profile
+                    profile.freeform_tags = self.map_freeform_tags(
+                        profile, categorization, transcript=transcript
+                    )
+                    return self._finalize_discovery_profile(profile, transcript)
                 except Exception as exc:
                     print(f"[DISCOVERY] Qwen profile failed (attempt {attempt + 1}): {exc}")
                     if attempt == 1:
                         break
-        elif not llm_service.is_available:
+        elif not get_llm_service().is_available:
             print(
                 "[DISCOVERY] Qwen not loaded — enable QWEN_LLM_ENABLED=true and GPU; "
                 "using categorization fallback (limited metadata)"
@@ -509,7 +567,14 @@ class DiscoveryService:
         return profile
 
 
-discovery_service = DiscoveryService()
+_discovery_service = None
+
+
+def get_discovery_service():
+    global _discovery_service
+    if _discovery_service is None:
+        _discovery_service = DiscoveryService()
+    return _discovery_service
 
 
 def discovery_result_bundle(
@@ -517,14 +582,25 @@ def discovery_result_bundle(
     *,
     duration_seconds: float | None = None,
     source: str | None = None,
+    published_at: str | None = None,
+    trending_score: float | None = None,
 ) -> tuple[dict | None, str | None]:
     if profile is None:
         return None, None
+    if profile is not None:
+        if published_at and not profile.published_at:
+            profile.published_at = published_at
+        if trending_score is not None and profile.trending_score is None:
+            profile.trending_score = trending_score
+        if profile.published_at and not profile.latest_at:
+            profile.latest_at = profile.published_at
     return (
         discovery_to_callback_dict(
             profile,
             duration_seconds=duration_seconds,
             source=source,
+            published_at=published_at,
+            trending_score=trending_score,
         ),
         content_description_from_discovery(profile),
     )

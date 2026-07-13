@@ -1,0 +1,175 @@
+--- /tmp/whisperx-orig/whisperx/asr_qwen.py	2026-07-08 17:38:10.700504236 +0000
++++ /usr/local/lib/python3.11/dist-packages/whisperx/asr_qwen.py	2026-07-08 18:52:09.380197916 +0000
+@@ -1,4 +1,5 @@
+ from typing import Any, List, Optional, Union
++import re
+ 
+ import numpy as np
+ import torch
+@@ -11,6 +12,33 @@
+ 
+ logger = get_logger(__name__)
+ 
++PUNCTUATION_RE = re.compile(r"[^\w']+")
++
++
++def _merge_punctuation(text: str, words: List[dict]) -> List[dict]:
++    if not words or not text:
++        return words
++    result: List[dict] = []
++    tokens = text.split()
++    wi = 0
++    for token in tokens:
++        if wi >= len(words):
++            break
++        clean_token = PUNCTUATION_RE.sub("", token)
++        clean_word = PUNCTUATION_RE.sub("", words[wi]["word"])
++        if clean_token.lower() == clean_word.lower():
++            result.append({
++                "word": token,
++                "start": words[wi]["start"],
++                "end": words[wi]["end"],
++                "score": words[wi]["score"],
++            })
++            wi += 1
++    while wi < len(words):
++        result.append(words[wi])
++        wi += 1
++    return result
++
+ DEFAULT_QWEN_ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
+ 
+ WHISPER_TO_QWEN_LANGUAGE = {
+@@ -146,10 +174,12 @@
+     qwen_device_map: Optional[str],
+     local_files_only: bool,
+     use_auth_token: Optional[Union[str, bool]],
++    max_inference_batch_size: Optional[int] = None,
++    max_new_tokens: Optional[int] = None,
+ ) -> dict:
+     kwargs: dict[str, Any] = {}
+     if qwen_dtype in DTYPE_MAP:
+-        kwargs["torch_dtype"] = DTYPE_MAP[qwen_dtype]
++        kwargs["dtype"] = DTYPE_MAP[qwen_dtype]
+     if qwen_device_map:
+         trimmed = qwen_device_map.strip()
+         lowered = trimmed.lower()
+@@ -159,6 +189,10 @@
+         kwargs["local_files_only"] = True
+     if isinstance(use_auth_token, str) and use_auth_token:
+         kwargs["token"] = use_auth_token
++    if max_inference_batch_size is not None:
++        kwargs["max_inference_batch_size"] = max_inference_batch_size
++    if max_new_tokens is not None:
++        kwargs["max_new_tokens"] = max_new_tokens
+     return kwargs
+ 
+ 
+@@ -169,11 +203,13 @@
+         vad,
+         vad_params: dict,
+         language: Optional[str] = None,
++        return_time_stamps: bool = False,
+     ):
+         self.model = model
+         self.vad_model = vad
+         self._vad_params = vad_params
+         self.preset_language = normalize_whisper_language_code(language)
++        self.return_time_stamps = return_time_stamps
+ 
+     def _get_vad_preprocess(self):
+         if hasattr(self.vad_model, "preprocess_audio") and hasattr(self.vad_model, "merge_chunks"):
+@@ -234,7 +270,7 @@
+             sub_result = self.model.transcribe(
+                 audio=sub_audio,
+                 language=qwen_lang,
+-                return_time_stamps=False,
++                return_time_stamps=self.return_time_stamps,
+             )
+             all_results.extend(sub_result)
+ 
+@@ -260,13 +296,29 @@
+             if detected_code:
+                 detected_language_codes.append(detected_code)
+ 
+-            segments.append(
+-                {
+-                    "text": text,
+-                    "start": round(seg["start"], 3),
+-                    "end": round(seg["end"], 3),
+-                }
+-            )
++            seg_start = seg["start"]
++            words: List[dict] = []
++            ts = getattr(out, "time_stamps", None)
++            if ts is not None and hasattr(ts, "items"):
++                for item in ts.items:
++                    wtext = item.text.strip()
++                    if wtext:
++                        words.append({
++                            "word": wtext,
++                            "start": round(float(item.start_time) + seg_start, 3),
++                            "end": round(float(item.end_time) + seg_start, 3),
++                            "score": 1.0,
++                        })
++                words = _merge_punctuation(text, words)
++
++            segment: dict = {
++                "text": text,
++                "start": round(seg["start"], 3),
++                "end": round(seg["end"], 3),
++            }
++            if words:
++                segment["words"] = words
++            segments.append(segment)
+ 
+         if whisper_lang_code is not None:
+             out_language = whisper_lang_code
+@@ -294,6 +346,9 @@
+     use_auth_token: Optional[Union[str, bool]] = None,
+     qwen_dtype: str = "float16",
+     qwen_device_map: Optional[str] = None,
++    qwen_forced_aligner: Optional[str] = None,
++    max_inference_batch_size: Optional[int] = None,
++    max_new_tokens: Optional[int] = None,
+ ) -> QwenAsrPipeline:
+     del device_index, compute_type, asr_options, download_root, threads
+     if task != "transcribe":
+@@ -315,8 +370,14 @@
+             qwen_device_map=qwen_device_map,
+             local_files_only=local_files_only,
+             use_auth_token=use_auth_token,
++            max_inference_batch_size=max_inference_batch_size,
++            max_new_tokens=max_new_tokens,
++        )
++        qwen_model = Qwen3ASRModel.from_pretrained(
++            model_name,
++            forced_aligner=qwen_forced_aligner,
++            **qwen_kwargs,
+         )
+-        qwen_model = Qwen3ASRModel.from_pretrained(model_name, **qwen_kwargs)
+ 
+         if not _uses_hf_device_map(qwen_device_map):
+             explicit_device = _to_explicit_device(device=device, qwen_device_map=qwen_device_map)
+@@ -328,6 +389,15 @@
+                     explicit_device,
+                     exc,
+                 )
++            try:
++                if qwen_model.forced_aligner is not None and hasattr(qwen_model.forced_aligner, "model"):
++                    qwen_model.forced_aligner.model.to(explicit_device)
++            except Exception as exc:
++                logger.warning(
++                    "Could not move forced aligner to device %s (%s). Keeping default device.",
++                    explicit_device,
++                    exc,
++                )
+ 
+     default_vad_options = {
+         "chunk_size": 30,
+@@ -355,4 +425,5 @@
+         vad=vad_model,
+         vad_params=default_vad_options,
+         language=language,
++        return_time_stamps=qwen_forced_aligner is not None,
+     )

@@ -424,6 +424,18 @@ Women's Sports
 Baking
 Performing Arts
 Obituaries
+Visual impairment
+Assistive technology
+Smart glasses
+Guide dogs
+Independence and daily living
+Blindness and visual impairment
+Personal lived experience
+Informal review
+Human connection
+AI and smart glasses
+Daily living
+Historical sites
 
 [TAGS]
 #BreakingNews
@@ -1058,11 +1070,60 @@ Obituaries
 #Review
 #Tutorial
 #Explainer
+#accessibility-visual-impairment
+#accessibility-visual-impairment-assistive-technology
+#accessibility-visual-impairment-assistive-technology-smart-glasses
+#accessibility-guide-dogs
+#accessibility-independence-and-daily-living
+#accessibility-blindness-and-visual-impairment
+#personal-lived-experience
+#product-experience-informal-review
+#human-connection
+#ai-and-smart-glasses
+#daily-living
 #news
 #breaking
 #exclusive
-#interview
 #report
+#guidedogs
+#funeral
+#castle
+#smartglasses
+#assistive-technology
+#hospitality
+#obituaries
+#gunnersonline
+#personallivedexperience
+#marine
+#road
+#organ-donation
+#assistivetechnology
+#women
+#volunteering
+#treeplanting
+#communityeffort
+#ecology
+#humanconnection
+#workplacesafety
+#organdonation
+#clinical-trials
+#pets
+#recruitment
+#leadership
+#referendum
+#dairy
+#farmer
+#management
+#dogfriendly
+#pubs
+#workplace
+#farmers
+#lung-transplant
+#stem-cell-donation
+#guide-dogs
+#drone
+#biblestudy
+#publicsafety
 
 [KEYWORDS]
 election|vote|voting|council|parliament|government|minister|MP|mayor|political|party|referendum|ballot|constituency|legislation|senator|congress|president|governor|primary|caucus|swing.state|gerrymandering|filibuster|bipartisan|lobby = #Politics

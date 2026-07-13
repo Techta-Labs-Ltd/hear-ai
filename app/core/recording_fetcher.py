@@ -68,6 +68,9 @@ class TrackData:
     content_description: str | None = None
     speaker: str | None = None
     source: str | None = None
+    published_at: str | None = None
+    latest_at: str | None = None
+    trending_score: float | None = None
 
     def __post_init__(self):
         if self.tags is None:
@@ -76,7 +79,7 @@ class TrackData:
 
 async def fetch_track(track_id: str) -> TrackData:
     url = f"{settings.HEAR_BACKEND_URL}/api/v1/internal/tracks/{track_id}/for-ai"
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=5) as client:
         response = await client.get(
             url,
             headers={"X-Service-Key": settings.AI_SERVICE_SECRET},
@@ -124,6 +127,16 @@ async def fetch_track(track_id: str) -> TrackData:
     speaker = sp.strip() if isinstance(sp, str) and sp.strip() else None
     src = track_payload.get("source")
     source = src.strip() if isinstance(src, str) and src.strip() else None
+    pub = track_payload.get("published_at") or track_payload.get("latest_at")
+    published_at = pub.strip() if isinstance(pub, str) and pub.strip() else None
+    latest_at = published_at
+    trend_raw = track_payload.get("trending_score")
+    trending_score = None
+    if trend_raw is not None:
+        try:
+            trending_score = float(trend_raw)
+        except (TypeError, ValueError):
+            trending_score = None
 
     return TrackData(
         track_id=track_payload.get("id", track_id),
@@ -148,6 +161,9 @@ async def fetch_track(track_id: str) -> TrackData:
         content_description=content_desc,
         speaker=speaker,
         source=source,
+        published_at=published_at,
+        latest_at=latest_at,
+        trending_score=trending_score,
     )
 
 

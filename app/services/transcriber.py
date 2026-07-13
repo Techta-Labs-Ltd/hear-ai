@@ -1,37 +1,22 @@
 import asyncio
-import os
 import tempfile
-from typing import AsyncGenerator
 
 import torch
-from faster_whisper import WhisperModel
 
 from app.config import settings
+from app.core.gpu import cuda_inference_lock
 from app.core.hear_temp import (
     drop_temp_standalone,
     hear_temp_directory,
     hear_temp_job_dir,
     register_temp_standalone,
 )
+from app.services.triton_client import get_triton_client
 
 
 class TranscriptionService:
     def __init__(self):
-        self._model = None
         self._lock = asyncio.Lock()
-
-    def load(self):
-        self._model = WhisperModel(
-            settings.WHISPER_MODEL_SIZE,
-            device="cuda" if torch.cuda.is_available() else "cpu",
-            compute_type="float16" if torch.cuda.is_available() else "int8",
-            num_workers=2,
-            download_root=f"{settings.MODEL_CACHE_DIR}/whisper",
-        )
-
-    @property
-    def is_loaded(self) -> bool:
-        return self._model is not None
 
     async def transcribe(
         self,
@@ -41,113 +26,61 @@ class TranscriptionService:
         run_id: str | None = None,
         track_id: str | None = None,
         short_utterance: bool = False,
+        language: str | None = None,
     ) -> dict:
-        directory = (
-            hear_temp_job_dir(job_id, run_id) if job_id and run_id else hear_temp_directory()
-        )
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=directory) as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-        register_temp_standalone(
-            tmp_path,
-            purpose="transcribe_input",
-            job_id=job_id,
-            run_id=run_id,
-            track_id=track_id,
-        )
-        try:
-            loop = asyncio.get_event_loop()
-            async with self._lock:
-                if short_utterance:
-                    return await loop.run_in_executor(
-                        None, lambda: self._run_pass(tmp_path, relaxed=True)
-                    )
-                return await loop.run_in_executor(None, self._run, tmp_path)
-        finally:
-            drop_temp_standalone(tmp_path)
+        client = get_triton_client()
+        loop = asyncio.get_event_loop()
+        async with self._lock:
+            result = await loop.run_in_executor(
+                None, client.transcribe_sync, audio_bytes, settings.WHISPER_BATCH_SIZE,
+            )
+        return self._process_result(result, language=language)
 
-    _HALLUCINATION_PHRASES = {
-        "thank you", "thanks for watching", "thanks for listening",
-        "please subscribe", "subscribe", "like and subscribe",
-        "you're welcome", "you are welcome", "welcome back",
-        "see you next time", "see you later", "bye", "goodbye",
-        "good morning", "good evening", "good afternoon", "good night",
-        "hello", "hi there", "hey there", "what's up",
-        "uh", "um", "hmm", "hm", "ah", "oh",
-        ".", "..", "...", "[music]", "[applause]", "[laughter]",
-        "[noise]", "[silence]", "[inaudible]", "[blank_audio]",
-    }
-    _MIN_WORD_CONFIDENCE = 0.05
-    _MIN_TRANSCRIPT_CONFIDENCE = 0.05
-    _MIN_REAL_WORDS = 1
-
-    def _run(self, path: str) -> dict:
-        strict = self._run_pass(path, relaxed=False)
-        relaxed = self._run_pass(path, relaxed=True)
-        if strict.get("silent") and relaxed.get("silent"):
-            return strict
-        if strict.get("silent"):
-            return relaxed
-        if relaxed.get("silent"):
-            return strict
-        strict_words = len(strict.get("transcript", "").split())
-        relaxed_words = len(relaxed.get("transcript", "").split())
-        return relaxed if relaxed_words > strict_words else strict
-
-    def _run_pass(self, path: str, relaxed: bool) -> dict:
+    def _process_result(self, result: dict, language: str | None = None) -> dict:
         _silent = {
             "transcript": "", "segments": [], "language": None,
             "language_probability": 0.0, "duration": 0.0,
             "confidence": 0.0, "silent": True,
         }
-        try:
-            kwargs = {
-                "beam_size": max(1, settings.WHISPER_BEAM_SIZE),
-                "language": None,
-                "word_timestamps": settings.WHISPER_WORD_TIMESTAMPS,
-                "condition_on_previous_text": True,
-            }
-            if relaxed:
-                kwargs["vad_filter"] = False
-            else:
-                kwargs["vad_filter"] = True
-                kwargs["vad_parameters"] = dict(min_silence_duration_ms=2000, speech_pad_ms=600)
-            segments_gen, info = self._model.transcribe(path, **kwargs)
-        except ValueError:
+        if not result:
             return _silent
+
+        segments_list = result.get("segments", [])
+        detected_language = result.get("language", language or "en")
 
         segments = []
         full_text_parts = []
         total_conf = 0.0
         word_count = 0
-        min_word_conf = 0.05 if relaxed else self._MIN_WORD_CONFIDENCE
 
-        for seg in segments_gen:
-            if not relaxed and getattr(seg, "no_speech_prob", 0) > 0.95:
-                continue
-            text = seg.text.strip()
-            if not text or all(c in " \t\n.,-!?;:" for c in text):
+        for seg in segments_list:
+            text = seg.get("text", "").strip()
+            if not text:
                 continue
             words = []
-            for w in (seg.words or []):
-                word_text = w.word.strip()
+            for w in (seg.get("words") or []):
+                word_text = w.get("word", "").strip()
                 if not word_text:
                     continue
-                if w.probability < min_word_conf:
-                    continue
-                words.append({"word": w.word, "start": w.start, "end": w.end, "prob": w.probability})
-                total_conf += w.probability
-                word_count += 1
-            if not words and relaxed:
-                words = [{"word": text, "start": seg.start, "end": seg.end, "prob": max(float(getattr(seg, "avg_logprob", -1.0)) + 1.0, 0.1)}]
-                total_conf += words[0]["prob"]
+                words.append({
+                    "word": w["word"], "start": w["start"],
+                    "end": w["end"], "prob": w.get("score", 1.0),
+                })
+                total_conf += w.get("score", 1.0)
                 word_count += 1
             if not words:
-                continue
+                avg_logprob = seg.get("avg_logprob", -1.0)
+                prob = max(float(avg_logprob) + 1.0, 0.1)
+                words.append({
+                    "word": text, "start": seg.get("start", 0),
+                    "end": seg.get("end", 0), "prob": prob,
+                })
+                total_conf += prob
+                word_count += 1
             segments.append({
-                "id": seg.id,
-                "start": seg.start,
-                "end": seg.end,
+                "id": seg.get("id", len(segments)),
+                "start": seg.get("start", 0),
+                "end": seg.get("end", 0),
                 "text": text,
                 "words": words,
             })
@@ -158,92 +91,14 @@ class TranscriptionService:
 
         transcript = " ".join(full_text_parts)
         confidence = round(total_conf / max(word_count, 1), 4)
-        normalized = transcript.strip().lower().rstrip(".,!?")
-        if normalized in self._HALLUCINATION_PHRASES:
-            return _silent
-        if not relaxed and confidence < self._MIN_TRANSCRIPT_CONFIDENCE:
-            return _silent
-        if not relaxed and word_count < self._MIN_REAL_WORDS:
-            return _silent
+        duration = segments[-1]["end"] if segments else 0.0
         return {
             "transcript": transcript,
             "segments": segments,
-            "language": info.language,
-            "language_probability": round(info.language_probability, 4),
-            "duration": info.duration,
+            "word_segments": result.get("word_segments", []),
+            "language": detected_language,
+            "language_probability": 1.0,
+            "duration": duration,
             "confidence": confidence,
             "silent": False,
         }
-
-    async def stream(
-        self,
-        audio_bytes: bytes,
-        *,
-        job_id: str | None = None,
-        run_id: str | None = None,
-        track_id: str | None = None,
-    ) -> AsyncGenerator[dict, None]:
-        directory = (
-            hear_temp_job_dir(job_id, run_id) if job_id and run_id else hear_temp_directory()
-        )
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=directory) as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-        register_temp_standalone(
-            tmp_path,
-            purpose="transcribe_stream",
-            job_id=job_id,
-            run_id=run_id,
-            track_id=track_id,
-        )
-
-        loop = asyncio.get_event_loop()
-        queue: asyncio.Queue = asyncio.Queue()
-        await self._lock.acquire()
-
-        def _worker():
-            try:
-                segments_gen, info = self._model.transcribe(
-                    tmp_path,
-                    beam_size=max(1, settings.WHISPER_BEAM_SIZE),
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=1000, speech_pad_ms=400),
-                    word_timestamps=settings.WHISPER_WORD_TIMESTAMPS,
-                    condition_on_previous_text=True,
-                )
-                for seg in segments_gen:
-                    text = seg.text.strip()
-                    if not text or all(c in " \t\n.,-!?;:" for c in text):
-                        continue
-                    words = [
-                        {"word": w.word, "start": w.start, "end": w.end, "prob": w.probability}
-                        for w in (seg.words or [])
-                        if w.word.strip()
-                    ]
-                    if not words:
-                        continue
-                    loop.call_soon_threadsafe(queue.put_nowait, {
-                        "type": "segment",
-                        "id": seg.id,
-                        "start": seg.start,
-                        "end": seg.end,
-                        "text": text,
-                        "words": words,
-                        "language": info.language,
-                    })
-                loop.call_soon_threadsafe(queue.put_nowait, {"type": "done", "language": info.language})
-            except ValueError:
-                loop.call_soon_threadsafe(queue.put_nowait, {"type": "done", "language": None, "silent": True})
-            except Exception as e:
-                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(e)})
-            finally:
-                drop_temp_standalone(tmp_path)
-                loop.call_soon_threadsafe(self._lock.release)
-
-        loop.run_in_executor(None, _worker)
-
-        while True:
-            item = await queue.get()
-            yield item
-            if item["type"] in ("done", "error"):
-                break

@@ -69,4 +69,11 @@ class B2Storage:
         return deleted
 
 
-storage = B2Storage()
+_storage = None
+
+
+def get_storage():
+    global _storage
+    if _storage is None:
+        _storage = B2Storage()
+    return _storage

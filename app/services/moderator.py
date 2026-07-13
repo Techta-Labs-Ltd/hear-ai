@@ -2,17 +2,14 @@ import asyncio
 import logging
 import re
 
-import torch
-from transformers import pipeline as hf_pipeline
-
 from app.config import settings
 from app.core.keyword_loader import harm_keyword_loader
-from app.services.llm_service import llm_service
+from app.services.llm_service import get_llm_service
+from app.services.triton_client import get_triton_client
 
 logger = logging.getLogger(__name__)
 
 MODERATION_MODEL = "unitary/toxic-bert"
-INTENT_MODEL = "cross-encoder/nli-distilroberta-base"
 
 SEVERITY_NONE = "none"
 SEVERITY_LOW = "low"
@@ -97,28 +94,6 @@ _HIGH_THRESHOLD = 0.80
 
 
 class ModerationService:
-    def __init__(self):
-        self._classifier = None
-        self._intent = None
-        self._device = 0 if torch.cuda.is_available() else -1
-
-    def load(self):
-        self._classifier = hf_pipeline(
-            "text-classification",
-            model=MODERATION_MODEL,
-            device=self._device,
-            top_k=None,
-        )
-        self._intent = hf_pipeline(
-            "zero-shot-classification",
-            model=INTENT_MODEL,
-            device=self._device,
-            multi_label=True,
-        )
-
-    @property
-    def is_loaded(self) -> bool:
-        return self._classifier is not None
 
     async def moderate(self, text: str, blocked_keywords: list[str] = None) -> dict:
         if not text or not text.strip():
@@ -166,11 +141,11 @@ class ModerationService:
             }
 
         if max_score < _HIGH_THRESHOLD:
-            if llm_service.is_available:
+            if get_llm_service().is_available:
                 try:
                     result = await loop.run_in_executor(
                         None,
-                        lambda: llm_service.moderate(
+                        lambda: get_llm_service().moderate(
                             text,
                             detoxify_scores=scores,
                             harm_keywords=list(all_keywords),
@@ -204,11 +179,11 @@ class ModerationService:
             }
 
         severity = self._score_to_severity(max_score, local_result)
-        if llm_service.is_available:
+        if get_llm_service().is_available:
             try:
                 result = await loop.run_in_executor(
                     None,
-                    lambda: llm_service.moderate(
+                    lambda: get_llm_service().moderate(
                         text,
                         detoxify_scores=scores,
                         harm_keywords=list(all_keywords),
@@ -237,14 +212,20 @@ class ModerationService:
         }
 
     def _classify_local(self, text: str) -> dict:
-        results = self._classifier(text[:512])
-        if isinstance(results, list) and results and isinstance(results[0], list):
-            results = results[0]
-
+        results = get_triton_client().moderate_sync(text[:512])
         scores = {}
-        for item in results:
-            label = item["label"].lower()
-            scores[label] = round(item["score"], 4)
+        if isinstance(results, dict):
+            labels = results.get("labels", [])
+            scores_list = results.get("scores", [])
+            for label, score in zip(labels, scores_list):
+                scores[label.lower()] = round(score, 4)
+        elif isinstance(results, list):
+            if results and isinstance(results[0], list):
+                results = results[0]
+            for item in results:
+                if isinstance(item, dict):
+                    label = item.get("label", "").lower()
+                    scores[label] = round(item.get("score", 0), 4)
 
         high_scores = {k: v for k, v in scores.items() if v >= 0.5}
         flagged = any(
@@ -283,7 +264,7 @@ class ModerationService:
 
     def _classify_intent(self, text: str) -> dict:
         try:
-            output = self._intent(text[:1024], INTENT_LABELS, multi_label=True)
+            output = get_triton_client().nli_sync(text[:1024], INTENT_LABELS)
             label_scores = dict(zip(output["labels"], output["scores"]))
 
             harmful_score = max(

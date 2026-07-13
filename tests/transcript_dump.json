@@ -1,0 +1,5648 @@
+{
+  "transcript": "More than 10,000 trees planted across North Northamptonshire this season. A huge team effort has resulted in more than 10,000 trees being planted across the north of the county. As this year's tree planting season comes to an end, North Northamptonshire Council is celebrating delivery of its annual planting programme. It has been made possible through support from schools, volunteers, community groups and local businesses who join council teams in planting 10,177 trees across the area. More than 202 volunteer hours have been contributed this season, showing the strong community support behind the programme and the shared commitment to nature, recovery and enhancing much-loved local spaces across North Northamptonshire. The highlights show just some of the many community-led and council-led planting events delivered through the season. Students at Icebrook School in Kettering who planted 300 trees, as part of their new forest school area. A 12-strong volunteer team from local design and manufacturing business Haddenstone joined council offices at Desborough Greenspace to help replant trees affected by last summer's dry weather. Significant planting across the country parks, including nearly 3,000 whips at East Carlton Park to form a new native hedgerow. Continued work with the Wellingborough Eco Group, helping to plant trees in local parks and community spaces. A popular tree giveaway, supported by the Woodland, which saw 2,000 trees shared with 36 schools, community groups, residents and parish stroke town councils. The council's tree team have planted 1,550 standard trees throughout North Northamptonshire. A key focus this year was replacing young trees that didn't survive last summer's prolonged dry spells. Whips can be vulnerable in extreme weather, so replanting helps ensure previous year's efforts continue to grow into healthy woodlands and wildlife corridors. Alongside this, the team has planted new native hedgerows and continued to use native species chosen to support local wildlife and help increase canopy cover over time. As they grow, these young trees will create important habitats, boost biodiversity, enhance parks and public spaces and provide wellbeing and volunteering benefits for local communities, while also helping to build long-term climate resilience. As part of the planting, 305 trees have been planted, planted across the Corby area as part of ongoing improvements connected to the town centre to train station link route. The new trees, carefully selected to thrive in local conditions, have been planted along the project route and in areas across Corby, including in the grounds of Tresham College and West Glebe Park. 25 trees were also planted in Coronation as part of the scheme in the last planting season. Councillor Ken Harrington, Executive Member for Assets, Waste and Environmental Services said, I'm delighted to see so many new native trees planted across Northamptonshire this season. This has been a genuine community effort with schools, volunteers, local groups and council teams all coming together to make a real difference. Every single tree planted will help improve our parks and green spaces, support local wildlife and strengthen our natural environment for years to come. I'm incredibly grateful to everyone who has taken the time to get involved and I'm proud of what we've achieved together. Campsite reopens at Portsmouth. This is the perfect spot for a forest getaway near Corby. A new era is dawning at Fineshade Wood with an overnight parking area becoming a campsite as of this month. Forestry England has announced that the overnight parking area at Fineshade Wood will reopen as a fully operated campsite under the Forestry England banner. It follows a competitive tender process that saw Camping New Forest Limited appointed as the new operator. Camping New Forest currently manages 11 campsites across the New Forest National Park. Located in the north of the county and part of the former Royal Hunting Forest of Rockingham Forest, Fineshade Wood can be found between Stamford and Corby on the A43 and is widely considered by locals to be a hidden gem. Following a short temporary closure of the overnight offer to prepare the site, visitors will soon be welcomed back to enjoy upgraded facilities and the reassurance of friendly on-site wardens. The location, previously run by Forestry England as a motorhome parking area, is beginning an exciting new chapter with improvements planned to enhance the experience even further over time. Dennis Dooley, Chief Executive Officer of Camping New Forest said, It is an exciting opportunity for us to expand and take on the running of another campsite. Our primary remit is education and visitor experience. Environment and community are at the heart of everything we do. Our vision is to create high quality, authentic campsites that communities can be proud of. Places that improve local sustainability and give visitors unforgettable experiences, learning about, exploring and embracing nature through camping. We are excited to work with Forestry England and the Fineshade Wood Visitor Centre to build on the existing experience and enhance what this special woodland site can offer. Campers can stay at Fineshade Wood campsite from \u00a313.60 from April 1st and can book at www.fineshadewood.com. www.fineshade-campsite.co.uk",
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.0,
+      "end": 4.6,
+      "text": "More than 10,000 trees planted across North Northamptonshire this season.",
+      "words": [
+        {
+          "word": " More",
+          "start": 0.0,
+          "end": 0.62,
+          "prob": 0.92333984375
+        },
+        {
+          "word": " than",
+          "start": 0.62,
+          "end": 0.84,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " 10",
+          "start": 0.84,
+          "end": 1.12,
+          "prob": 0.99365234375
+        },
+        {
+          "word": ",000",
+          "start": 1.12,
+          "end": 1.52,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " trees",
+          "start": 1.52,
+          "end": 1.8,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " planted",
+          "start": 1.8,
+          "end": 2.12,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " across",
+          "start": 2.12,
+          "end": 2.56,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " North",
+          "start": 2.56,
+          "end": 3.04,
+          "prob": 0.8505859375
+        },
+        {
+          "word": " Northamptonshire",
+          "start": 3.04,
+          "end": 3.92,
+          "prob": 0.9859375
+        },
+        {
+          "word": " this",
+          "start": 3.92,
+          "end": 4.24,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " season.",
+          "start": 4.24,
+          "end": 4.6,
+          "prob": 0.9931640625
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "start": 4.64,
+      "end": 10.06,
+      "text": "A huge team effort has resulted in more than 10,000 trees being planted across the north of the county.",
+      "words": [
+        {
+          "word": " A",
+          "start": 4.64,
+          "end": 4.76,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " huge",
+          "start": 4.76,
+          "end": 5.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " team",
+          "start": 5.06,
+          "end": 5.36,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " effort",
+          "start": 5.36,
+          "end": 5.66,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " has",
+          "start": 5.66,
+          "end": 5.96,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " resulted",
+          "start": 5.96,
+          "end": 6.34,
+          "prob": 1.0
+        },
+        {
+          "word": " in",
+          "start": 6.34,
+          "end": 6.62,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " more",
+          "start": 6.62,
+          "end": 6.82,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " than",
+          "start": 6.82,
+          "end": 7.0,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " 10",
+          "start": 7.0,
+          "end": 7.28,
+          "prob": 1.0
+        },
+        {
+          "word": ",000",
+          "start": 7.28,
+          "end": 7.72,
+          "prob": 1.0
+        },
+        {
+          "word": " trees",
+          "start": 7.72,
+          "end": 8.02,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " being",
+          "start": 8.02,
+          "end": 8.34,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " planted",
+          "start": 8.34,
+          "end": 8.66,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " across",
+          "start": 8.66,
+          "end": 9.02,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " the",
+          "start": 9.02,
+          "end": 9.26,
+          "prob": 1.0
+        },
+        {
+          "word": " north",
+          "start": 9.26,
+          "end": 9.52,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " of",
+          "start": 9.52,
+          "end": 9.74,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 9.74,
+          "end": 9.82,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " county.",
+          "start": 9.82,
+          "end": 10.06,
+          "prob": 0.99169921875
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "start": 10.3,
+      "end": 12.98,
+      "text": "As this year's tree planting season comes to an end,",
+      "words": [
+        {
+          "word": " As",
+          "start": 10.3,
+          "end": 10.6,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " this",
+          "start": 10.6,
+          "end": 10.74,
+          "prob": 1.0
+        },
+        {
+          "word": " year's",
+          "start": 10.74,
+          "end": 11.14,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " tree",
+          "start": 11.14,
+          "end": 11.3,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " planting",
+          "start": 11.3,
+          "end": 11.62,
+          "prob": 0.99609375
+        },
+        {
+          "word": " season",
+          "start": 11.62,
+          "end": 12.0,
+          "prob": 1.0
+        },
+        {
+          "word": " comes",
+          "start": 12.0,
+          "end": 12.4,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 12.4,
+          "end": 12.58,
+          "prob": 1.0
+        },
+        {
+          "word": " an",
+          "start": 12.58,
+          "end": 12.7,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " end,",
+          "start": 12.7,
+          "end": 12.98,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "start": 13.16,
+      "end": 18.46,
+      "text": "North Northamptonshire Council is celebrating delivery of its annual planting programme.",
+      "words": [
+        {
+          "word": " North",
+          "start": 13.16,
+          "end": 13.56,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " Northamptonshire",
+          "start": 13.56,
+          "end": 14.38,
+          "prob": 0.9998046875
+        },
+        {
+          "word": " Council",
+          "start": 14.38,
+          "end": 14.84,
+          "prob": 0.98974609375
+        },
+        {
+          "word": " is",
+          "start": 14.84,
+          "end": 15.4,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " celebrating",
+          "start": 15.4,
+          "end": 15.82,
+          "prob": 1.0
+        },
+        {
+          "word": " delivery",
+          "start": 15.82,
+          "end": 16.3,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " of",
+          "start": 16.3,
+          "end": 17.06,
+          "prob": 1.0
+        },
+        {
+          "word": " its",
+          "start": 17.06,
+          "end": 17.24,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " annual",
+          "start": 17.24,
+          "end": 17.54,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " planting",
+          "start": 17.54,
+          "end": 17.96,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " programme.",
+          "start": 17.96,
+          "end": 18.46,
+          "prob": 0.70166015625
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "start": 18.74,
+      "end": 23.32,
+      "text": "It has been made possible through support from schools, volunteers, community groups",
+      "words": [
+        {
+          "word": " It",
+          "start": 18.74,
+          "end": 18.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " has",
+          "start": 18.96,
+          "end": 19.1,
+          "prob": 1.0
+        },
+        {
+          "word": " been",
+          "start": 19.1,
+          "end": 19.26,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " made",
+          "start": 19.26,
+          "end": 19.56,
+          "prob": 1.0
+        },
+        {
+          "word": " possible",
+          "start": 19.56,
+          "end": 19.94,
+          "prob": 1.0
+        },
+        {
+          "word": " through",
+          "start": 19.94,
+          "end": 20.32,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " support",
+          "start": 20.32,
+          "end": 20.66,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " from",
+          "start": 20.66,
+          "end": 20.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " schools,",
+          "start": 20.96,
+          "end": 21.26,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " volunteers,",
+          "start": 21.48,
+          "end": 21.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " community",
+          "start": 22.52,
+          "end": 22.88,
+          "prob": 1.0
+        },
+        {
+          "word": " groups",
+          "start": 22.88,
+          "end": 23.32,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "start": 23.32,
+      "end": 30.24,
+      "text": "and local businesses who join council teams in planting 10,177 trees across the area.",
+      "words": [
+        {
+          "word": " and",
+          "start": 23.32,
+          "end": 23.62,
+          "prob": 0.488037109375
+        },
+        {
+          "word": " local",
+          "start": 23.62,
+          "end": 24.04,
+          "prob": 0.9755859375
+        },
+        {
+          "word": " businesses",
+          "start": 24.04,
+          "end": 24.5,
+          "prob": 0.986328125
+        },
+        {
+          "word": " who",
+          "start": 24.5,
+          "end": 24.86,
+          "prob": 0.98193359375
+        },
+        {
+          "word": " join",
+          "start": 24.86,
+          "end": 25.14,
+          "prob": 0.6708984375
+        },
+        {
+          "word": " council",
+          "start": 25.14,
+          "end": 25.58,
+          "prob": 0.865234375
+        },
+        {
+          "word": " teams",
+          "start": 25.58,
+          "end": 26.04,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " in",
+          "start": 26.04,
+          "end": 26.66,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " planting",
+          "start": 26.66,
+          "end": 27.08,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " 10",
+          "start": 27.08,
+          "end": 27.38,
+          "prob": 0.966796875
+        },
+        {
+          "word": ",177",
+          "start": 27.38,
+          "end": 29.06,
+          "prob": 0.9669596354166666
+        },
+        {
+          "word": " trees",
+          "start": 29.06,
+          "end": 29.42,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " across",
+          "start": 29.42,
+          "end": 29.74,
+          "prob": 0.99267578125
+        },
+        {
+          "word": " the",
+          "start": 29.74,
+          "end": 30.0,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " area.",
+          "start": 30.0,
+          "end": 30.24,
+          "prob": 0.99267578125
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "start": 30.42,
+      "end": 34.0,
+      "text": "More than 202 volunteer hours have been contributed this season,",
+      "words": [
+        {
+          "word": " More",
+          "start": 30.42,
+          "end": 30.62,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " than",
+          "start": 30.62,
+          "end": 30.84,
+          "prob": 0.998046875
+        },
+        {
+          "word": " 202",
+          "start": 30.84,
+          "end": 31.54,
+          "prob": 0.996337890625
+        },
+        {
+          "word": " volunteer",
+          "start": 31.54,
+          "end": 31.92,
+          "prob": 0.93701171875
+        },
+        {
+          "word": " hours",
+          "start": 31.92,
+          "end": 32.34,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " have",
+          "start": 32.34,
+          "end": 32.54,
+          "prob": 0.9677734375
+        },
+        {
+          "word": " been",
+          "start": 32.54,
+          "end": 32.66,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " contributed",
+          "start": 32.66,
+          "end": 33.22,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " this",
+          "start": 33.22,
+          "end": 33.58,
+          "prob": 0.998046875
+        },
+        {
+          "word": " season,",
+          "start": 33.58,
+          "end": 34.0,
+          "prob": 0.998046875
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "start": 34.14,
+      "end": 36.86,
+      "text": "showing the strong community support behind the programme",
+      "words": [
+        {
+          "word": " showing",
+          "start": 34.14,
+          "end": 34.58,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " the",
+          "start": 34.58,
+          "end": 34.78,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " strong",
+          "start": 34.78,
+          "end": 35.08,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " community",
+          "start": 35.08,
+          "end": 35.44,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " support",
+          "start": 35.44,
+          "end": 35.84,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " behind",
+          "start": 35.84,
+          "end": 36.32,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " the",
+          "start": 36.32,
+          "end": 36.58,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " programme",
+          "start": 36.58,
+          "end": 36.86,
+          "prob": 0.5791015625
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "start": 36.86,
+      "end": 43.52,
+      "text": "and the shared commitment to nature, recovery and enhancing much-loved local spaces across North Northamptonshire.",
+      "words": [
+        {
+          "word": " and",
+          "start": 36.86,
+          "end": 37.34,
+          "prob": 0.95068359375
+        },
+        {
+          "word": " the",
+          "start": 37.34,
+          "end": 37.44,
+          "prob": 0.9921875
+        },
+        {
+          "word": " shared",
+          "start": 37.44,
+          "end": 37.7,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " commitment",
+          "start": 37.7,
+          "end": 38.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 38.06,
+          "end": 38.36,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " nature,",
+          "start": 38.36,
+          "end": 38.72,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " recovery",
+          "start": 38.88,
+          "end": 39.44,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " and",
+          "start": 39.44,
+          "end": 39.94,
+          "prob": 0.9560546875
+        },
+        {
+          "word": " enhancing",
+          "start": 39.94,
+          "end": 40.3,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " much",
+          "start": 40.3,
+          "end": 40.92,
+          "prob": 0.99658203125
+        },
+        {
+          "word": "-loved",
+          "start": 40.92,
+          "end": 41.22,
+          "prob": 0.8802083333333334
+        },
+        {
+          "word": " local",
+          "start": 41.22,
+          "end": 41.5,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " spaces",
+          "start": 41.5,
+          "end": 41.92,
+          "prob": 0.998046875
+        },
+        {
+          "word": " across",
+          "start": 41.92,
+          "end": 42.34,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " North",
+          "start": 42.34,
+          "end": 42.76,
+          "prob": 0.89013671875
+        },
+        {
+          "word": " Northamptonshire.",
+          "start": 42.76,
+          "end": 43.52,
+          "prob": 0.5167198181152344
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "start": 43.54,
+      "end": 49.02,
+      "text": "The highlights show just some of the many community-led and council-led planting events delivered through the season.",
+      "words": [
+        {
+          "word": " The",
+          "start": 43.54,
+          "end": 43.86,
+          "prob": 0.99609375
+        },
+        {
+          "word": " highlights",
+          "start": 43.86,
+          "end": 44.16,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " show",
+          "start": 44.16,
+          "end": 44.56,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " just",
+          "start": 44.56,
+          "end": 44.92,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " some",
+          "start": 44.92,
+          "end": 45.08,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " of",
+          "start": 45.08,
+          "end": 45.24,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " the",
+          "start": 45.24,
+          "end": 45.28,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " many",
+          "start": 45.28,
+          "end": 45.46,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " community",
+          "start": 45.46,
+          "end": 45.92,
+          "prob": 0.9990234375
+        },
+        {
+          "word": "-led",
+          "start": 45.92,
+          "end": 46.14,
+          "prob": 0.978515625
+        },
+        {
+          "word": " and",
+          "start": 46.14,
+          "end": 46.42,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " council",
+          "start": 46.42,
+          "end": 46.84,
+          "prob": 0.9990234375
+        },
+        {
+          "word": "-led",
+          "start": 46.84,
+          "end": 47.14,
+          "prob": 0.998046875
+        },
+        {
+          "word": " planting",
+          "start": 47.14,
+          "end": 47.46,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " events",
+          "start": 47.46,
+          "end": 47.9,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " delivered",
+          "start": 47.9,
+          "end": 48.2,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " through",
+          "start": 48.2,
+          "end": 48.48,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " the",
+          "start": 48.48,
+          "end": 48.62,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " season.",
+          "start": 48.62,
+          "end": 49.02,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "start": 49.22,
+      "end": 52.78,
+      "text": "Students at Icebrook School in Kettering who planted 300 trees,",
+      "words": [
+        {
+          "word": " Students",
+          "start": 49.22,
+          "end": 49.72,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " at",
+          "start": 49.72,
+          "end": 49.94,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Icebrook",
+          "start": 49.94,
+          "end": 50.4,
+          "prob": 0.72802734375
+        },
+        {
+          "word": " School",
+          "start": 50.4,
+          "end": 50.62,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " in",
+          "start": 50.62,
+          "end": 50.94,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " Kettering",
+          "start": 50.94,
+          "end": 51.34,
+          "prob": 0.9949544270833334
+        },
+        {
+          "word": " who",
+          "start": 51.34,
+          "end": 51.48,
+          "prob": 0.61767578125
+        },
+        {
+          "word": " planted",
+          "start": 51.48,
+          "end": 51.78,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " 300",
+          "start": 51.78,
+          "end": 52.18,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " trees,",
+          "start": 52.18,
+          "end": 52.78,
+          "prob": 0.9990234375
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "start": 52.78,
+      "end": 54.98,
+      "text": "as part of their new forest school area.",
+      "words": [
+        {
+          "word": " as",
+          "start": 52.78,
+          "end": 53.06,
+          "prob": 0.320556640625
+        },
+        {
+          "word": " part",
+          "start": 53.06,
+          "end": 53.32,
+          "prob": 1.0
+        },
+        {
+          "word": " of",
+          "start": 53.32,
+          "end": 53.54,
+          "prob": 1.0
+        },
+        {
+          "word": " their",
+          "start": 53.54,
+          "end": 53.66,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " new",
+          "start": 53.66,
+          "end": 53.84,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " forest",
+          "start": 53.84,
+          "end": 54.24,
+          "prob": 0.763671875
+        },
+        {
+          "word": " school",
+          "start": 54.24,
+          "end": 54.54,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " area.",
+          "start": 54.54,
+          "end": 54.98,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "start": 55.22,
+      "end": 60.1,
+      "text": "A 12-strong volunteer team from local design and manufacturing business Haddenstone",
+      "words": [
+        {
+          "word": " A",
+          "start": 55.22,
+          "end": 55.58,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " 12",
+          "start": 55.58,
+          "end": 55.82,
+          "prob": 0.98583984375
+        },
+        {
+          "word": "-strong",
+          "start": 55.82,
+          "end": 56.18,
+          "prob": 0.89990234375
+        },
+        {
+          "word": " volunteer",
+          "start": 56.18,
+          "end": 56.62,
+          "prob": 1.0
+        },
+        {
+          "word": " team",
+          "start": 56.62,
+          "end": 57.06,
+          "prob": 1.0
+        },
+        {
+          "word": " from",
+          "start": 57.06,
+          "end": 57.36,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " local",
+          "start": 57.36,
+          "end": 57.66,
+          "prob": 0.99560546875
+        },
+        {
+          "word": " design",
+          "start": 57.66,
+          "end": 58.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " and",
+          "start": 58.06,
+          "end": 58.38,
+          "prob": 1.0
+        },
+        {
+          "word": " manufacturing",
+          "start": 58.38,
+          "end": 58.82,
+          "prob": 1.0
+        },
+        {
+          "word": " business",
+          "start": 58.82,
+          "end": 59.36,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Haddenstone",
+          "start": 59.36,
+          "end": 60.1,
+          "prob": 0.88232421875
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "start": 60.1,
+      "end": 66.4,
+      "text": "joined council offices at Desborough Greenspace to help replant trees affected by last summer's dry weather.",
+      "words": [
+        {
+          "word": " joined",
+          "start": 60.1,
+          "end": 60.86,
+          "prob": 0.98828125
+        },
+        {
+          "word": " council",
+          "start": 60.86,
+          "end": 61.36,
+          "prob": 0.96923828125
+        },
+        {
+          "word": " offices",
+          "start": 61.36,
+          "end": 61.86,
+          "prob": 0.65576171875
+        },
+        {
+          "word": " at",
+          "start": 61.86,
+          "end": 62.26,
+          "prob": 1.0
+        },
+        {
+          "word": " Desborough",
+          "start": 62.26,
+          "end": 62.64,
+          "prob": 0.93212890625
+        },
+        {
+          "word": " Greenspace",
+          "start": 62.64,
+          "end": 63.16,
+          "prob": 0.860107421875
+        },
+        {
+          "word": " to",
+          "start": 63.16,
+          "end": 63.48,
+          "prob": 1.0
+        },
+        {
+          "word": " help",
+          "start": 63.48,
+          "end": 63.7,
+          "prob": 1.0
+        },
+        {
+          "word": " replant",
+          "start": 63.7,
+          "end": 64.2,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " trees",
+          "start": 64.2,
+          "end": 64.42,
+          "prob": 1.0
+        },
+        {
+          "word": " affected",
+          "start": 64.42,
+          "end": 64.84,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " by",
+          "start": 64.84,
+          "end": 65.24,
+          "prob": 1.0
+        },
+        {
+          "word": " last",
+          "start": 65.24,
+          "end": 65.5,
+          "prob": 1.0
+        },
+        {
+          "word": " summer's",
+          "start": 65.5,
+          "end": 65.94,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " dry",
+          "start": 65.94,
+          "end": 66.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " weather.",
+          "start": 66.06,
+          "end": 66.4,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "start": 66.68,
+      "end": 68.88,
+      "text": "Significant planting across the country parks,",
+      "words": [
+        {
+          "word": " Significant",
+          "start": 66.68,
+          "end": 67.32,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " planting",
+          "start": 67.32,
+          "end": 67.7,
+          "prob": 1.0
+        },
+        {
+          "word": " across",
+          "start": 67.7,
+          "end": 68.04,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " the",
+          "start": 68.04,
+          "end": 68.3,
+          "prob": 1.0
+        },
+        {
+          "word": " country",
+          "start": 68.3,
+          "end": 68.54,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " parks,",
+          "start": 68.54,
+          "end": 68.88,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "start": 69.02,
+      "end": 73.78,
+      "text": "including nearly 3,000 whips at East Carlton Park to form a new native hedgerow.",
+      "words": [
+        {
+          "word": " including",
+          "start": 69.02,
+          "end": 69.28,
+          "prob": 1.0
+        },
+        {
+          "word": " nearly",
+          "start": 69.28,
+          "end": 69.72,
+          "prob": 1.0
+        },
+        {
+          "word": " 3",
+          "start": 69.72,
+          "end": 70.06,
+          "prob": 0.9951171875
+        },
+        {
+          "word": ",000",
+          "start": 70.06,
+          "end": 70.58,
+          "prob": 1.0
+        },
+        {
+          "word": " whips",
+          "start": 70.58,
+          "end": 70.88,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " at",
+          "start": 70.88,
+          "end": 71.08,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " East",
+          "start": 71.08,
+          "end": 71.26,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " Carlton",
+          "start": 71.26,
+          "end": 71.64,
+          "prob": 0.989501953125
+        },
+        {
+          "word": " Park",
+          "start": 71.64,
+          "end": 71.94,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 71.94,
+          "end": 72.28,
+          "prob": 0.83740234375
+        },
+        {
+          "word": " form",
+          "start": 72.28,
+          "end": 72.52,
+          "prob": 1.0
+        },
+        {
+          "word": " a",
+          "start": 72.52,
+          "end": 72.68,
+          "prob": 1.0
+        },
+        {
+          "word": " new",
+          "start": 72.68,
+          "end": 72.82,
+          "prob": 1.0
+        },
+        {
+          "word": " native",
+          "start": 72.82,
+          "end": 73.26,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " hedgerow.",
+          "start": 73.26,
+          "end": 73.78,
+          "prob": 0.9970703125
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "start": 74.06,
+      "end": 76.54,
+      "text": "Continued work with the Wellingborough Eco Group,",
+      "words": [
+        {
+          "word": " Continued",
+          "start": 74.06,
+          "end": 74.7,
+          "prob": 0.9912109375
+        },
+        {
+          "word": " work",
+          "start": 74.7,
+          "end": 74.92,
+          "prob": 1.0
+        },
+        {
+          "word": " with",
+          "start": 74.92,
+          "end": 75.26,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 75.26,
+          "end": 75.32,
+          "prob": 1.0
+        },
+        {
+          "word": " Wellingborough",
+          "start": 75.32,
+          "end": 75.76,
+          "prob": 0.8865559895833334
+        },
+        {
+          "word": " Eco",
+          "start": 75.76,
+          "end": 76.12,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " Group,",
+          "start": 76.12,
+          "end": 76.54,
+          "prob": 0.98583984375
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "start": 76.68,
+      "end": 79.6,
+      "text": "helping to plant trees in local parks and community spaces.",
+      "words": [
+        {
+          "word": " helping",
+          "start": 76.68,
+          "end": 77.0,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 77.0,
+          "end": 77.16,
+          "prob": 1.0
+        },
+        {
+          "word": " plant",
+          "start": 77.16,
+          "end": 77.36,
+          "prob": 1.0
+        },
+        {
+          "word": " trees",
+          "start": 77.36,
+          "end": 77.68,
+          "prob": 1.0
+        },
+        {
+          "word": " in",
+          "start": 77.68,
+          "end": 78.02,
+          "prob": 1.0
+        },
+        {
+          "word": " local",
+          "start": 78.02,
+          "end": 78.2,
+          "prob": 1.0
+        },
+        {
+          "word": " parks",
+          "start": 78.2,
+          "end": 78.7,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 78.7,
+          "end": 78.92,
+          "prob": 1.0
+        },
+        {
+          "word": " community",
+          "start": 78.92,
+          "end": 79.2,
+          "prob": 1.0
+        },
+        {
+          "word": " spaces.",
+          "start": 79.2,
+          "end": 79.6,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "start": 80.1,
+      "end": 82.76,
+      "text": "A popular tree giveaway, supported by the Woodland,",
+      "words": [
+        {
+          "word": " A",
+          "start": 80.1,
+          "end": 80.42,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " popular",
+          "start": 80.42,
+          "end": 80.7,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " tree",
+          "start": 80.7,
+          "end": 81.0,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " giveaway,",
+          "start": 81.0,
+          "end": 81.4,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " supported",
+          "start": 81.58,
+          "end": 81.92,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " by",
+          "start": 81.92,
+          "end": 82.32,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 82.32,
+          "end": 82.48,
+          "prob": 0.95947265625
+        },
+        {
+          "word": " Woodland,",
+          "start": 82.48,
+          "end": 82.76,
+          "prob": 0.768798828125
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "start": 82.78,
+      "end": 90.26,
+      "text": "which saw 2,000 trees shared with 36 schools, community groups, residents and parish stroke town councils.",
+      "words": [
+        {
+          "word": " which",
+          "start": 82.78,
+          "end": 83.14,
+          "prob": 0.05902099609375
+        },
+        {
+          "word": " saw",
+          "start": 83.14,
+          "end": 83.62,
+          "prob": 0.99609375
+        },
+        {
+          "word": " 2",
+          "start": 83.62,
+          "end": 83.92,
+          "prob": 0.83154296875
+        },
+        {
+          "word": ",000",
+          "start": 83.92,
+          "end": 84.4,
+          "prob": 0.995849609375
+        },
+        {
+          "word": " trees",
+          "start": 84.4,
+          "end": 84.66,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " shared",
+          "start": 84.66,
+          "end": 85.06,
+          "prob": 0.98974609375
+        },
+        {
+          "word": " with",
+          "start": 85.06,
+          "end": 85.62,
+          "prob": 0.947265625
+        },
+        {
+          "word": " 36",
+          "start": 85.62,
+          "end": 86.04,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " schools,",
+          "start": 86.04,
+          "end": 86.48,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " community",
+          "start": 86.74,
+          "end": 87.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " groups,",
+          "start": 87.06,
+          "end": 87.48,
+          "prob": 1.0
+        },
+        {
+          "word": " residents",
+          "start": 87.62,
+          "end": 87.98,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " and",
+          "start": 87.98,
+          "end": 88.32,
+          "prob": 0.9482421875
+        },
+        {
+          "word": " parish",
+          "start": 88.32,
+          "end": 88.6,
+          "prob": 0.998046875
+        },
+        {
+          "word": " stroke",
+          "start": 88.6,
+          "end": 89.3,
+          "prob": 0.473876953125
+        },
+        {
+          "word": " town",
+          "start": 89.3,
+          "end": 89.62,
+          "prob": 0.9921875
+        },
+        {
+          "word": " councils.",
+          "start": 89.62,
+          "end": 90.26,
+          "prob": 0.9990234375
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "start": 90.54,
+      "end": 96.56,
+      "text": "The council's tree team have planted 1,550 standard trees throughout North Northamptonshire.",
+      "words": [
+        {
+          "word": " The",
+          "start": 90.54,
+          "end": 90.88,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " council's",
+          "start": 90.88,
+          "end": 91.4,
+          "prob": 0.969482421875
+        },
+        {
+          "word": " tree",
+          "start": 91.4,
+          "end": 91.56,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " team",
+          "start": 91.56,
+          "end": 91.9,
+          "prob": 1.0
+        },
+        {
+          "word": " have",
+          "start": 91.9,
+          "end": 92.12,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " planted",
+          "start": 92.12,
+          "end": 92.44,
+          "prob": 1.0
+        },
+        {
+          "word": " 1",
+          "start": 92.44,
+          "end": 92.78,
+          "prob": 0.99951171875
+        },
+        {
+          "word": ",550",
+          "start": 92.78,
+          "end": 94.24,
+          "prob": 0.9996744791666666
+        },
+        {
+          "word": " standard",
+          "start": 94.24,
+          "end": 94.6,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " trees",
+          "start": 94.6,
+          "end": 95.02,
+          "prob": 1.0
+        },
+        {
+          "word": " throughout",
+          "start": 95.02,
+          "end": 95.32,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " North",
+          "start": 95.32,
+          "end": 95.76,
+          "prob": 0.728515625
+        },
+        {
+          "word": " Northamptonshire.",
+          "start": 95.76,
+          "end": 96.56,
+          "prob": 0.9880859375
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "start": 96.7,
+      "end": 102.24,
+      "text": "A key focus this year was replacing young trees that didn't survive last summer's prolonged dry spells.",
+      "words": [
+        {
+          "word": " A",
+          "start": 96.7,
+          "end": 96.88,
+          "prob": 0.9814453125
+        },
+        {
+          "word": " key",
+          "start": 96.88,
+          "end": 97.06,
+          "prob": 1.0
+        },
+        {
+          "word": " focus",
+          "start": 97.06,
+          "end": 97.46,
+          "prob": 1.0
+        },
+        {
+          "word": " this",
+          "start": 97.46,
+          "end": 97.72,
+          "prob": 1.0
+        },
+        {
+          "word": " year",
+          "start": 97.72,
+          "end": 97.96,
+          "prob": 1.0
+        },
+        {
+          "word": " was",
+          "start": 97.96,
+          "end": 98.16,
+          "prob": 1.0
+        },
+        {
+          "word": " replacing",
+          "start": 98.16,
+          "end": 98.6,
+          "prob": 1.0
+        },
+        {
+          "word": " young",
+          "start": 98.6,
+          "end": 98.92,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " trees",
+          "start": 98.92,
+          "end": 99.26,
+          "prob": 1.0
+        },
+        {
+          "word": " that",
+          "start": 99.26,
+          "end": 99.74,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " didn't",
+          "start": 99.74,
+          "end": 100.04,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " survive",
+          "start": 100.04,
+          "end": 100.3,
+          "prob": 1.0
+        },
+        {
+          "word": " last",
+          "start": 100.3,
+          "end": 100.68,
+          "prob": 1.0
+        },
+        {
+          "word": " summer's",
+          "start": 100.68,
+          "end": 101.26,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " prolonged",
+          "start": 101.26,
+          "end": 101.5,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " dry",
+          "start": 101.5,
+          "end": 101.88,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " spells.",
+          "start": 101.88,
+          "end": 102.24,
+          "prob": 0.9921875
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "start": 102.78,
+      "end": 105.06,
+      "text": "Whips can be vulnerable in extreme weather,",
+      "words": [
+        {
+          "word": " Whips",
+          "start": 102.78,
+          "end": 103.22,
+          "prob": 0.987548828125
+        },
+        {
+          "word": " can",
+          "start": 103.22,
+          "end": 103.36,
+          "prob": 1.0
+        },
+        {
+          "word": " be",
+          "start": 103.36,
+          "end": 103.5,
+          "prob": 1.0
+        },
+        {
+          "word": " vulnerable",
+          "start": 103.5,
+          "end": 103.84,
+          "prob": 1.0
+        },
+        {
+          "word": " in",
+          "start": 103.84,
+          "end": 104.28,
+          "prob": 1.0
+        },
+        {
+          "word": " extreme",
+          "start": 104.28,
+          "end": 104.62,
+          "prob": 1.0
+        },
+        {
+          "word": " weather,",
+          "start": 104.62,
+          "end": 105.06,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "start": 105.12,
+      "end": 111.4,
+      "text": "so replanting helps ensure previous year's efforts continue to grow into healthy woodlands and wildlife corridors.",
+      "words": [
+        {
+          "word": " so",
+          "start": 105.12,
+          "end": 105.36,
+          "prob": 1.0
+        },
+        {
+          "word": " replanting",
+          "start": 105.36,
+          "end": 105.94,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " helps",
+          "start": 105.94,
+          "end": 106.36,
+          "prob": 1.0
+        },
+        {
+          "word": " ensure",
+          "start": 106.36,
+          "end": 106.76,
+          "prob": 1.0
+        },
+        {
+          "word": " previous",
+          "start": 106.76,
+          "end": 107.24,
+          "prob": 1.0
+        },
+        {
+          "word": " year's",
+          "start": 107.24,
+          "end": 107.7,
+          "prob": 0.9228515625
+        },
+        {
+          "word": " efforts",
+          "start": 107.7,
+          "end": 107.9,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " continue",
+          "start": 107.9,
+          "end": 108.34,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 108.34,
+          "end": 108.64,
+          "prob": 1.0
+        },
+        {
+          "word": " grow",
+          "start": 108.64,
+          "end": 108.84,
+          "prob": 1.0
+        },
+        {
+          "word": " into",
+          "start": 108.84,
+          "end": 109.44,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " healthy",
+          "start": 109.44,
+          "end": 109.82,
+          "prob": 1.0
+        },
+        {
+          "word": " woodlands",
+          "start": 109.82,
+          "end": 110.36,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " and",
+          "start": 110.36,
+          "end": 110.54,
+          "prob": 1.0
+        },
+        {
+          "word": " wildlife",
+          "start": 110.54,
+          "end": 110.9,
+          "prob": 0.998046875
+        },
+        {
+          "word": " corridors.",
+          "start": 110.9,
+          "end": 111.4,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "start": 111.4,
+      "end": 117.46,
+      "text": "Alongside this, the team has planted new native hedgerows and continued to use native species",
+      "words": [
+        {
+          "word": " Alongside",
+          "start": 111.4,
+          "end": 112.6,
+          "prob": 0.780029296875
+        },
+        {
+          "word": " this,",
+          "start": 112.6,
+          "end": 112.92,
+          "prob": 0.98828125
+        },
+        {
+          "word": " the",
+          "start": 113.06,
+          "end": 113.16,
+          "prob": 0.9892578125
+        },
+        {
+          "word": " team",
+          "start": 113.16,
+          "end": 113.46,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " has",
+          "start": 113.46,
+          "end": 113.6,
+          "prob": 0.97998046875
+        },
+        {
+          "word": " planted",
+          "start": 113.6,
+          "end": 113.9,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " new",
+          "start": 113.9,
+          "end": 114.22,
+          "prob": 0.98779296875
+        },
+        {
+          "word": " native",
+          "start": 114.22,
+          "end": 114.8,
+          "prob": 0.92529296875
+        },
+        {
+          "word": " hedgerows",
+          "start": 114.8,
+          "end": 115.38,
+          "prob": 0.98291015625
+        },
+        {
+          "word": " and",
+          "start": 115.38,
+          "end": 115.6,
+          "prob": 0.91015625
+        },
+        {
+          "word": " continued",
+          "start": 115.6,
+          "end": 115.96,
+          "prob": 0.318359375
+        },
+        {
+          "word": " to",
+          "start": 115.96,
+          "end": 116.3,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " use",
+          "start": 116.3,
+          "end": 116.54,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " native",
+          "start": 116.54,
+          "end": 116.92,
+          "prob": 0.98828125
+        },
+        {
+          "word": " species",
+          "start": 116.92,
+          "end": 117.46,
+          "prob": 0.99609375
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "start": 117.96000000000001,
+      "end": 123.06,
+      "text": "chosen to support local wildlife and help increase canopy cover over time.",
+      "words": [
+        {
+          "word": " chosen",
+          "start": 117.96000000000001,
+          "end": 118.4,
+          "prob": 0.9755859375
+        },
+        {
+          "word": " to",
+          "start": 118.4,
+          "end": 118.72,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " support",
+          "start": 118.72,
+          "end": 119.08,
+          "prob": 0.99072265625
+        },
+        {
+          "word": " local",
+          "start": 119.08,
+          "end": 119.46,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " wildlife",
+          "start": 119.46,
+          "end": 120.1,
+          "prob": 0.9853515625
+        },
+        {
+          "word": " and",
+          "start": 120.1,
+          "end": 120.58,
+          "prob": 0.9404296875
+        },
+        {
+          "word": " help",
+          "start": 120.58,
+          "end": 120.92,
+          "prob": 0.97021484375
+        },
+        {
+          "word": " increase",
+          "start": 120.92,
+          "end": 121.32,
+          "prob": 0.98583984375
+        },
+        {
+          "word": " canopy",
+          "start": 121.32,
+          "end": 122.1,
+          "prob": 0.994140625
+        },
+        {
+          "word": " cover",
+          "start": 122.1,
+          "end": 122.46,
+          "prob": 0.990234375
+        },
+        {
+          "word": " over",
+          "start": 122.46,
+          "end": 122.78,
+          "prob": 0.97509765625
+        },
+        {
+          "word": " time.",
+          "start": 122.78,
+          "end": 123.06,
+          "prob": 0.9990234375
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "start": 123.28,
+      "end": 128.02,
+      "text": "As they grow, these young trees will create important habitats, boost biodiversity,",
+      "words": [
+        {
+          "word": " As",
+          "start": 123.28,
+          "end": 123.5,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " they",
+          "start": 123.5,
+          "end": 123.64,
+          "prob": 0.990234375
+        },
+        {
+          "word": " grow,",
+          "start": 123.64,
+          "end": 123.92,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " these",
+          "start": 124.14,
+          "end": 124.44,
+          "prob": 0.9833984375
+        },
+        {
+          "word": " young",
+          "start": 124.44,
+          "end": 124.68,
+          "prob": 0.98828125
+        },
+        {
+          "word": " trees",
+          "start": 124.68,
+          "end": 125.0,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " will",
+          "start": 125.0,
+          "end": 125.28,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " create",
+          "start": 125.28,
+          "end": 125.58,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " important",
+          "start": 125.58,
+          "end": 125.96,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " habitats,",
+          "start": 125.96,
+          "end": 126.62,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " boost",
+          "start": 126.92,
+          "end": 127.34,
+          "prob": 0.99267578125
+        },
+        {
+          "word": " biodiversity,",
+          "start": 127.34,
+          "end": 128.02,
+          "prob": 0.9814453125
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "start": 128.82,
+      "end": 134.52,
+      "text": "enhance parks and public spaces and provide wellbeing and volunteering benefits for local communities,",
+      "words": [
+        {
+          "word": " enhance",
+          "start": 128.82,
+          "end": 129.36,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " parks",
+          "start": 129.36,
+          "end": 129.92,
+          "prob": 0.99560546875
+        },
+        {
+          "word": " and",
+          "start": 129.92,
+          "end": 130.14,
+          "prob": 0.9912109375
+        },
+        {
+          "word": " public",
+          "start": 130.14,
+          "end": 130.38,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " spaces",
+          "start": 130.38,
+          "end": 130.92,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " and",
+          "start": 130.92,
+          "end": 131.2,
+          "prob": 0.7578125
+        },
+        {
+          "word": " provide",
+          "start": 131.2,
+          "end": 131.44,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " wellbeing",
+          "start": 131.44,
+          "end": 131.98,
+          "prob": 0.64501953125
+        },
+        {
+          "word": " and",
+          "start": 131.98,
+          "end": 132.44,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " volunteering",
+          "start": 132.44,
+          "end": 132.88,
+          "prob": 0.98876953125
+        },
+        {
+          "word": " benefits",
+          "start": 132.88,
+          "end": 133.42,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " for",
+          "start": 133.42,
+          "end": 133.74,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " local",
+          "start": 133.74,
+          "end": 133.96,
+          "prob": 0.99609375
+        },
+        {
+          "word": " communities,",
+          "start": 133.96,
+          "end": 134.52,
+          "prob": 0.998046875
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "start": 134.8,
+      "end": 137.82,
+      "text": "while also helping to build long-term climate resilience.",
+      "words": [
+        {
+          "word": " while",
+          "start": 134.8,
+          "end": 135.18,
+          "prob": 0.98486328125
+        },
+        {
+          "word": " also",
+          "start": 135.18,
+          "end": 135.48,
+          "prob": 0.98779296875
+        },
+        {
+          "word": " helping",
+          "start": 135.48,
+          "end": 135.94,
+          "prob": 0.99609375
+        },
+        {
+          "word": " to",
+          "start": 135.94,
+          "end": 136.16,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " build",
+          "start": 136.16,
+          "end": 136.4,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " long",
+          "start": 136.4,
+          "end": 136.76,
+          "prob": 0.99560546875
+        },
+        {
+          "word": "-term",
+          "start": 136.76,
+          "end": 137.02,
+          "prob": 0.83837890625
+        },
+        {
+          "word": " climate",
+          "start": 137.02,
+          "end": 137.38,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " resilience.",
+          "start": 137.38,
+          "end": 137.82,
+          "prob": 0.99609375
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "start": 138.24,
+      "end": 139.38,
+      "text": "As part of the planting,",
+      "words": [
+        {
+          "word": " As",
+          "start": 138.24,
+          "end": 138.62,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " part",
+          "start": 138.62,
+          "end": 138.78,
+          "prob": 0.998046875
+        },
+        {
+          "word": " of",
+          "start": 138.78,
+          "end": 139.02,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " the",
+          "start": 139.02,
+          "end": 139.06,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " planting,",
+          "start": 139.06,
+          "end": 139.38,
+          "prob": 0.9970703125
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "start": 139.56,
+      "end": 141.32,
+      "text": "305 trees have been planted,",
+      "words": [
+        {
+          "word": " 305",
+          "start": 139.56,
+          "end": 140.16,
+          "prob": 0.9921875
+        },
+        {
+          "word": " trees",
+          "start": 140.16,
+          "end": 140.62,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " have",
+          "start": 140.62,
+          "end": 140.84,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " been",
+          "start": 140.84,
+          "end": 141.0,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " planted,",
+          "start": 141.0,
+          "end": 141.32,
+          "prob": 0.9951171875
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "start": 141.32,
+      "end": 147.42,
+      "text": "planted across the Corby area as part of ongoing improvements connected to the town centre to train station link route.",
+      "words": [
+        {
+          "word": " planted",
+          "start": 141.32,
+          "end": 141.32,
+          "prob": 0.0008330345153808594
+        },
+        {
+          "word": " across",
+          "start": 141.32,
+          "end": 141.6,
+          "prob": 0.96044921875
+        },
+        {
+          "word": " the",
+          "start": 141.6,
+          "end": 141.9,
+          "prob": 0.9912109375
+        },
+        {
+          "word": " Corby",
+          "start": 141.9,
+          "end": 142.2,
+          "prob": 0.917724609375
+        },
+        {
+          "word": " area",
+          "start": 142.2,
+          "end": 142.4,
+          "prob": 0.947265625
+        },
+        {
+          "word": " as",
+          "start": 142.4,
+          "end": 143.06,
+          "prob": 0.81640625
+        },
+        {
+          "word": " part",
+          "start": 143.06,
+          "end": 143.22,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " of",
+          "start": 143.22,
+          "end": 143.46,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " ongoing",
+          "start": 143.46,
+          "end": 143.74,
+          "prob": 0.94970703125
+        },
+        {
+          "word": " improvements",
+          "start": 143.74,
+          "end": 144.22,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " connected",
+          "start": 144.22,
+          "end": 144.82,
+          "prob": 0.962890625
+        },
+        {
+          "word": " to",
+          "start": 144.82,
+          "end": 145.24,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " the",
+          "start": 145.24,
+          "end": 145.36,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " town",
+          "start": 145.36,
+          "end": 145.56,
+          "prob": 0.51611328125
+        },
+        {
+          "word": " centre",
+          "start": 145.56,
+          "end": 146.0,
+          "prob": 0.93896484375
+        },
+        {
+          "word": " to",
+          "start": 146.0,
+          "end": 146.2,
+          "prob": 0.9521484375
+        },
+        {
+          "word": " train",
+          "start": 146.2,
+          "end": 146.48,
+          "prob": 0.966796875
+        },
+        {
+          "word": " station",
+          "start": 146.48,
+          "end": 146.9,
+          "prob": 0.998046875
+        },
+        {
+          "word": " link",
+          "start": 146.9,
+          "end": 147.22,
+          "prob": 0.9609375
+        },
+        {
+          "word": " route.",
+          "start": 147.22,
+          "end": 147.42,
+          "prob": 0.99267578125
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "start": 147.7,
+      "end": 151.14,
+      "text": "The new trees, carefully selected to thrive in local conditions,",
+      "words": [
+        {
+          "word": " The",
+          "start": 147.7,
+          "end": 148.02,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " new",
+          "start": 148.02,
+          "end": 148.2,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " trees,",
+          "start": 148.2,
+          "end": 148.58,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " carefully",
+          "start": 148.72,
+          "end": 149.06,
+          "prob": 0.998046875
+        },
+        {
+          "word": " selected",
+          "start": 149.06,
+          "end": 149.5,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 149.5,
+          "end": 149.84,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " thrive",
+          "start": 149.84,
+          "end": 150.14,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " in",
+          "start": 150.14,
+          "end": 150.38,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " local",
+          "start": 150.38,
+          "end": 150.64,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " conditions,",
+          "start": 150.64,
+          "end": 151.14,
+          "prob": 0.9990234375
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "start": 151.48,
+      "end": 155.2,
+      "text": "have been planted along the project route and in areas across Corby,",
+      "words": [
+        {
+          "word": " have",
+          "start": 151.48,
+          "end": 151.86,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " been",
+          "start": 151.86,
+          "end": 152.02,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " planted",
+          "start": 152.02,
+          "end": 152.48,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " along",
+          "start": 152.48,
+          "end": 152.72,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " the",
+          "start": 152.72,
+          "end": 152.88,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " project",
+          "start": 152.88,
+          "end": 153.24,
+          "prob": 0.982421875
+        },
+        {
+          "word": " route",
+          "start": 153.24,
+          "end": 153.62,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " and",
+          "start": 153.62,
+          "end": 153.9,
+          "prob": 0.99267578125
+        },
+        {
+          "word": " in",
+          "start": 153.9,
+          "end": 154.06,
+          "prob": 0.998046875
+        },
+        {
+          "word": " areas",
+          "start": 154.06,
+          "end": 154.4,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " across",
+          "start": 154.4,
+          "end": 154.68,
+          "prob": 0.998046875
+        },
+        {
+          "word": " Corby,",
+          "start": 154.68,
+          "end": 155.2,
+          "prob": 0.99609375
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "start": 155.26,
+      "end": 159.0,
+      "text": "including in the grounds of Tresham College and West Glebe Park.",
+      "words": [
+        {
+          "word": " including",
+          "start": 155.26,
+          "end": 155.74,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " in",
+          "start": 155.74,
+          "end": 156.12,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " the",
+          "start": 156.12,
+          "end": 156.22,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " grounds",
+          "start": 156.22,
+          "end": 156.56,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " of",
+          "start": 156.56,
+          "end": 156.84,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Tresham",
+          "start": 156.84,
+          "end": 157.2,
+          "prob": 0.9840494791666666
+        },
+        {
+          "word": " College",
+          "start": 157.2,
+          "end": 157.5,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " and",
+          "start": 157.5,
+          "end": 158.16,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " West",
+          "start": 158.16,
+          "end": 158.38,
+          "prob": 0.9052734375
+        },
+        {
+          "word": " Glebe",
+          "start": 158.38,
+          "end": 158.72,
+          "prob": 0.7123209635416666
+        },
+        {
+          "word": " Park.",
+          "start": 158.72,
+          "end": 159.0,
+          "prob": 0.94775390625
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "start": 159.22,
+      "end": 164.14,
+      "text": "25 trees were also planted in Coronation as part of the scheme in the last planting season.",
+      "words": [
+        {
+          "word": " 25",
+          "start": 159.22,
+          "end": 159.52,
+          "prob": 0.69189453125
+        },
+        {
+          "word": " trees",
+          "start": 159.52,
+          "end": 160.0,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " were",
+          "start": 160.0,
+          "end": 160.32,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " also",
+          "start": 160.32,
+          "end": 160.56,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " planted",
+          "start": 160.56,
+          "end": 161.02,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " in",
+          "start": 161.02,
+          "end": 161.3,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Coronation",
+          "start": 161.3,
+          "end": 161.86,
+          "prob": 0.88916015625
+        },
+        {
+          "word": " as",
+          "start": 161.86,
+          "end": 162.2,
+          "prob": 0.97216796875
+        },
+        {
+          "word": " part",
+          "start": 162.2,
+          "end": 162.4,
+          "prob": 1.0
+        },
+        {
+          "word": " of",
+          "start": 162.4,
+          "end": 162.66,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 162.66,
+          "end": 162.7,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " scheme",
+          "start": 162.7,
+          "end": 162.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " in",
+          "start": 162.96,
+          "end": 163.18,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " the",
+          "start": 163.18,
+          "end": 163.24,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " last",
+          "start": 163.24,
+          "end": 163.42,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " planting",
+          "start": 163.42,
+          "end": 163.84,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " season.",
+          "start": 163.84,
+          "end": 164.14,
+          "prob": 0.79248046875
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "start": 164.3,
+      "end": 169.22,
+      "text": "Councillor Ken Harrington, Executive Member for Assets, Waste and Environmental Services said,",
+      "words": [
+        {
+          "word": " Councillor",
+          "start": 164.3,
+          "end": 164.64,
+          "prob": 0.984375
+        },
+        {
+          "word": " Ken",
+          "start": 164.64,
+          "end": 164.9,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " Harrington,",
+          "start": 164.9,
+          "end": 165.38,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " Executive",
+          "start": 165.66,
+          "end": 165.94,
+          "prob": 0.8515625
+        },
+        {
+          "word": " Member",
+          "start": 165.94,
+          "end": 166.46,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " for",
+          "start": 166.46,
+          "end": 166.74,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Assets,",
+          "start": 166.74,
+          "end": 167.18,
+          "prob": 0.996826171875
+        },
+        {
+          "word": " Waste",
+          "start": 167.18,
+          "end": 167.56,
+          "prob": 0.999267578125
+        },
+        {
+          "word": " and",
+          "start": 167.56,
+          "end": 167.74,
+          "prob": 0.998046875
+        },
+        {
+          "word": " Environmental",
+          "start": 167.74,
+          "end": 168.18,
+          "prob": 0.998046875
+        },
+        {
+          "word": " Services",
+          "start": 168.18,
+          "end": 168.8,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " said,",
+          "start": 168.8,
+          "end": 169.22,
+          "prob": 0.5615234375
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "start": 169.22,
+      "end": 174.52,
+      "text": "I'm delighted to see so many new native trees planted across Northamptonshire this season.",
+      "words": [
+        {
+          "word": " I'm",
+          "start": 169.22,
+          "end": 169.78,
+          "prob": 0.922119140625
+        },
+        {
+          "word": " delighted",
+          "start": 169.78,
+          "end": 169.96,
+          "prob": 0.9912109375
+        },
+        {
+          "word": " to",
+          "start": 169.96,
+          "end": 170.32,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " see",
+          "start": 170.32,
+          "end": 170.54,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " so",
+          "start": 170.54,
+          "end": 170.72,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " many",
+          "start": 170.72,
+          "end": 170.94,
+          "prob": 1.0
+        },
+        {
+          "word": " new",
+          "start": 170.94,
+          "end": 171.16,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " native",
+          "start": 171.16,
+          "end": 171.52,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " trees",
+          "start": 171.52,
+          "end": 171.84,
+          "prob": 0.994140625
+        },
+        {
+          "word": " planted",
+          "start": 171.84,
+          "end": 172.22,
+          "prob": 0.982421875
+        },
+        {
+          "word": " across",
+          "start": 172.22,
+          "end": 172.52,
+          "prob": 0.99609375
+        },
+        {
+          "word": " Northamptonshire",
+          "start": 172.52,
+          "end": 173.86,
+          "prob": 0.948046875
+        },
+        {
+          "word": " this",
+          "start": 173.86,
+          "end": 174.1,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " season.",
+          "start": 174.1,
+          "end": 174.52,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "start": 174.64,
+      "end": 182.02,
+      "text": "This has been a genuine community effort with schools, volunteers, local groups and council teams all coming together to make a real difference.",
+      "words": [
+        {
+          "word": " This",
+          "start": 174.64,
+          "end": 174.92,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " has",
+          "start": 174.92,
+          "end": 175.06,
+          "prob": 1.0
+        },
+        {
+          "word": " been",
+          "start": 175.06,
+          "end": 175.26,
+          "prob": 1.0
+        },
+        {
+          "word": " a",
+          "start": 175.26,
+          "end": 175.4,
+          "prob": 1.0
+        },
+        {
+          "word": " genuine",
+          "start": 175.4,
+          "end": 175.72,
+          "prob": 1.0
+        },
+        {
+          "word": " community",
+          "start": 175.72,
+          "end": 176.04,
+          "prob": 1.0
+        },
+        {
+          "word": " effort",
+          "start": 176.04,
+          "end": 176.5,
+          "prob": 1.0
+        },
+        {
+          "word": " with",
+          "start": 176.5,
+          "end": 176.76,
+          "prob": 0.93017578125
+        },
+        {
+          "word": " schools,",
+          "start": 176.76,
+          "end": 177.22,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " volunteers,",
+          "start": 177.26,
+          "end": 177.62,
+          "prob": 1.0
+        },
+        {
+          "word": " local",
+          "start": 178.02,
+          "end": 178.2,
+          "prob": 1.0
+        },
+        {
+          "word": " groups",
+          "start": 178.2,
+          "end": 178.66,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 178.66,
+          "end": 179.24,
+          "prob": 0.97412109375
+        },
+        {
+          "word": " council",
+          "start": 179.24,
+          "end": 179.66,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " teams",
+          "start": 179.66,
+          "end": 179.98,
+          "prob": 1.0
+        },
+        {
+          "word": " all",
+          "start": 179.98,
+          "end": 180.3,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " coming",
+          "start": 180.3,
+          "end": 180.5,
+          "prob": 1.0
+        },
+        {
+          "word": " together",
+          "start": 180.5,
+          "end": 180.8,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 180.8,
+          "end": 181.12,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " make",
+          "start": 181.12,
+          "end": 181.28,
+          "prob": 1.0
+        },
+        {
+          "word": " a",
+          "start": 181.28,
+          "end": 181.42,
+          "prob": 1.0
+        },
+        {
+          "word": " real",
+          "start": 181.42,
+          "end": 181.64,
+          "prob": 1.0
+        },
+        {
+          "word": " difference.",
+          "start": 181.64,
+          "end": 182.02,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "start": 182.38,
+      "end": 191.04,
+      "text": "Every single tree planted will help improve our parks and green spaces, support local wildlife and strengthen our natural environment for years to come.",
+      "words": [
+        {
+          "word": " Every",
+          "start": 182.38,
+          "end": 182.76,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " single",
+          "start": 182.76,
+          "end": 183.12,
+          "prob": 1.0
+        },
+        {
+          "word": " tree",
+          "start": 183.12,
+          "end": 183.42,
+          "prob": 1.0
+        },
+        {
+          "word": " planted",
+          "start": 183.42,
+          "end": 183.84,
+          "prob": 1.0
+        },
+        {
+          "word": " will",
+          "start": 183.84,
+          "end": 184.2,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " help",
+          "start": 184.2,
+          "end": 184.46,
+          "prob": 0.97607421875
+        },
+        {
+          "word": " improve",
+          "start": 184.46,
+          "end": 184.9,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " our",
+          "start": 184.9,
+          "end": 185.14,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " parks",
+          "start": 185.14,
+          "end": 185.62,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 185.62,
+          "end": 185.76,
+          "prob": 1.0
+        },
+        {
+          "word": " green",
+          "start": 185.76,
+          "end": 185.94,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " spaces,",
+          "start": 185.94,
+          "end": 186.32,
+          "prob": 1.0
+        },
+        {
+          "word": " support",
+          "start": 186.78,
+          "end": 187.28,
+          "prob": 1.0
+        },
+        {
+          "word": " local",
+          "start": 187.28,
+          "end": 187.64,
+          "prob": 1.0
+        },
+        {
+          "word": " wildlife",
+          "start": 187.64,
+          "end": 188.18,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 188.18,
+          "end": 188.6,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " strengthen",
+          "start": 188.6,
+          "end": 189.06,
+          "prob": 1.0
+        },
+        {
+          "word": " our",
+          "start": 189.06,
+          "end": 189.3,
+          "prob": 1.0
+        },
+        {
+          "word": " natural",
+          "start": 189.3,
+          "end": 189.6,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " environment",
+          "start": 189.6,
+          "end": 190.22,
+          "prob": 1.0
+        },
+        {
+          "word": " for",
+          "start": 190.22,
+          "end": 190.46,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " years",
+          "start": 190.46,
+          "end": 190.64,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 190.64,
+          "end": 190.82,
+          "prob": 1.0
+        },
+        {
+          "word": " come.",
+          "start": 190.82,
+          "end": 191.04,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "start": 191.18,
+      "end": 197.5,
+      "text": "I'm incredibly grateful to everyone who has taken the time to get involved and I'm proud of what we've achieved together.",
+      "words": [
+        {
+          "word": " I'm",
+          "start": 191.18,
+          "end": 191.58,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " incredibly",
+          "start": 191.58,
+          "end": 191.82,
+          "prob": 1.0
+        },
+        {
+          "word": " grateful",
+          "start": 191.82,
+          "end": 192.34,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 192.34,
+          "end": 192.8,
+          "prob": 1.0
+        },
+        {
+          "word": " everyone",
+          "start": 192.8,
+          "end": 193.08,
+          "prob": 1.0
+        },
+        {
+          "word": " who",
+          "start": 193.08,
+          "end": 193.42,
+          "prob": 1.0
+        },
+        {
+          "word": " has",
+          "start": 193.42,
+          "end": 193.58,
+          "prob": 1.0
+        },
+        {
+          "word": " taken",
+          "start": 193.58,
+          "end": 193.84,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 193.84,
+          "end": 194.0,
+          "prob": 1.0
+        },
+        {
+          "word": " time",
+          "start": 194.0,
+          "end": 194.24,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 194.24,
+          "end": 194.36,
+          "prob": 1.0
+        },
+        {
+          "word": " get",
+          "start": 194.36,
+          "end": 194.5,
+          "prob": 1.0
+        },
+        {
+          "word": " involved",
+          "start": 194.5,
+          "end": 194.76,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 194.76,
+          "end": 195.46,
+          "prob": 0.96533203125
+        },
+        {
+          "word": " I'm",
+          "start": 195.46,
+          "end": 195.7,
+          "prob": 1.0
+        },
+        {
+          "word": " proud",
+          "start": 195.7,
+          "end": 195.98,
+          "prob": 1.0
+        },
+        {
+          "word": " of",
+          "start": 195.98,
+          "end": 196.36,
+          "prob": 1.0
+        },
+        {
+          "word": " what",
+          "start": 196.36,
+          "end": 196.58,
+          "prob": 1.0
+        },
+        {
+          "word": " we've",
+          "start": 196.58,
+          "end": 196.86,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " achieved",
+          "start": 196.86,
+          "end": 197.12,
+          "prob": 1.0
+        },
+        {
+          "word": " together.",
+          "start": 197.12,
+          "end": 197.5,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "start": 197.64,
+      "end": 199.2,
+      "text": "Campsite reopens at Portsmouth.",
+      "words": [
+        {
+          "word": " Campsite",
+          "start": 197.64,
+          "end": 198.16,
+          "prob": 0.92822265625
+        },
+        {
+          "word": " reopens",
+          "start": 198.16,
+          "end": 198.94,
+          "prob": 0.9619140625
+        },
+        {
+          "word": " at",
+          "start": 198.94,
+          "end": 199.08,
+          "prob": 0.99267578125
+        },
+        {
+          "word": " Portsmouth.",
+          "start": 199.08,
+          "end": 199.2,
+          "prob": 0.3906046549479167
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "start": 199.22,
+      "end": 201.72,
+      "text": "This is the perfect spot for a forest getaway near Corby.",
+      "words": [
+        {
+          "word": " This",
+          "start": 199.22,
+          "end": 199.34,
+          "prob": 0.038818359375
+        },
+        {
+          "word": " is",
+          "start": 199.34,
+          "end": 199.34,
+          "prob": 0.78369140625
+        },
+        {
+          "word": " the",
+          "start": 199.34,
+          "end": 199.34,
+          "prob": 0.70703125
+        },
+        {
+          "word": " perfect",
+          "start": 199.34,
+          "end": 199.34,
+          "prob": 0.9765625
+        },
+        {
+          "word": " spot",
+          "start": 199.34,
+          "end": 199.72,
+          "prob": 0.97900390625
+        },
+        {
+          "word": " for",
+          "start": 199.72,
+          "end": 199.98,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " a",
+          "start": 199.98,
+          "end": 200.16,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " forest",
+          "start": 200.16,
+          "end": 200.52,
+          "prob": 0.82421875
+        },
+        {
+          "word": " getaway",
+          "start": 200.52,
+          "end": 200.94,
+          "prob": 0.948974609375
+        },
+        {
+          "word": " near",
+          "start": 200.94,
+          "end": 201.3,
+          "prob": 0.98828125
+        },
+        {
+          "word": " Corby.",
+          "start": 201.3,
+          "end": 201.72,
+          "prob": 0.529541015625
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "start": 201.8,
+      "end": 207.92,
+      "text": "A new era is dawning at Fineshade Wood with an overnight parking area becoming a campsite as of this month.",
+      "words": [
+        {
+          "word": " A",
+          "start": 201.8,
+          "end": 202.1,
+          "prob": 0.9892578125
+        },
+        {
+          "word": " new",
+          "start": 202.1,
+          "end": 202.22,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " era",
+          "start": 202.22,
+          "end": 202.56,
+          "prob": 0.9873046875
+        },
+        {
+          "word": " is",
+          "start": 202.56,
+          "end": 202.86,
+          "prob": 0.99560546875
+        },
+        {
+          "word": " dawning",
+          "start": 202.86,
+          "end": 203.2,
+          "prob": 0.998291015625
+        },
+        {
+          "word": " at",
+          "start": 203.2,
+          "end": 203.38,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " Fineshade",
+          "start": 203.38,
+          "end": 203.94,
+          "prob": 0.8817138671875
+        },
+        {
+          "word": " Wood",
+          "start": 203.94,
+          "end": 204.12,
+          "prob": 0.9697265625
+        },
+        {
+          "word": " with",
+          "start": 204.12,
+          "end": 204.38,
+          "prob": 0.9267578125
+        },
+        {
+          "word": " an",
+          "start": 204.38,
+          "end": 204.5,
+          "prob": 0.998046875
+        },
+        {
+          "word": " overnight",
+          "start": 204.5,
+          "end": 204.86,
+          "prob": 0.99609375
+        },
+        {
+          "word": " parking",
+          "start": 204.86,
+          "end": 205.26,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " area",
+          "start": 205.26,
+          "end": 205.58,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " becoming",
+          "start": 205.58,
+          "end": 206.06,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " a",
+          "start": 206.06,
+          "end": 206.34,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " campsite",
+          "start": 206.34,
+          "end": 206.88,
+          "prob": 0.998291015625
+        },
+        {
+          "word": " as",
+          "start": 206.88,
+          "end": 207.32,
+          "prob": 0.98681640625
+        },
+        {
+          "word": " of",
+          "start": 207.32,
+          "end": 207.48,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " this",
+          "start": 207.48,
+          "end": 207.64,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " month.",
+          "start": 207.64,
+          "end": 207.92,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "start": 208.12,
+      "end": 212.2,
+      "text": "Forestry England has announced that the overnight parking area at Fineshade Wood",
+      "words": [
+        {
+          "word": " Forestry",
+          "start": 208.12,
+          "end": 208.6,
+          "prob": 0.989013671875
+        },
+        {
+          "word": " England",
+          "start": 208.6,
+          "end": 208.82,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " has",
+          "start": 208.82,
+          "end": 209.26,
+          "prob": 0.998046875
+        },
+        {
+          "word": " announced",
+          "start": 209.26,
+          "end": 209.64,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " that",
+          "start": 209.64,
+          "end": 209.84,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " the",
+          "start": 209.84,
+          "end": 209.9,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " overnight",
+          "start": 209.9,
+          "end": 210.3,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " parking",
+          "start": 210.3,
+          "end": 210.74,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " area",
+          "start": 210.74,
+          "end": 211.16,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " at",
+          "start": 211.16,
+          "end": 211.4,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " Fineshade",
+          "start": 211.4,
+          "end": 212.0,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Wood",
+          "start": 212.0,
+          "end": 212.2,
+          "prob": 0.99658203125
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "start": 212.2,
+      "end": 216.88,
+      "text": "will reopen as a fully operated campsite under the Forestry England banner.",
+      "words": [
+        {
+          "word": " will",
+          "start": 212.2,
+          "end": 212.62,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " reopen",
+          "start": 212.62,
+          "end": 213.0,
+          "prob": 0.9921875
+        },
+        {
+          "word": " as",
+          "start": 213.0,
+          "end": 213.42,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " a",
+          "start": 213.42,
+          "end": 213.54,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " fully",
+          "start": 213.54,
+          "end": 213.72,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " operated",
+          "start": 213.72,
+          "end": 214.14,
+          "prob": 0.99267578125
+        },
+        {
+          "word": " campsite",
+          "start": 214.14,
+          "end": 214.84,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " under",
+          "start": 214.84,
+          "end": 215.24,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " the",
+          "start": 215.24,
+          "end": 215.44,
+          "prob": 1.0
+        },
+        {
+          "word": " Forestry",
+          "start": 215.44,
+          "end": 216.0,
+          "prob": 0.999267578125
+        },
+        {
+          "word": " England",
+          "start": 216.0,
+          "end": 216.32,
+          "prob": 1.0
+        },
+        {
+          "word": " banner.",
+          "start": 216.32,
+          "end": 216.88,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "start": 217.02,
+      "end": 222.92,
+      "text": "It follows a competitive tender process that saw Camping New Forest Limited appointed as the new operator.",
+      "words": [
+        {
+          "word": " It",
+          "start": 217.02,
+          "end": 217.32,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " follows",
+          "start": 217.32,
+          "end": 217.64,
+          "prob": 1.0
+        },
+        {
+          "word": " a",
+          "start": 217.64,
+          "end": 217.88,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " competitive",
+          "start": 217.88,
+          "end": 218.34,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " tender",
+          "start": 218.34,
+          "end": 218.72,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " process",
+          "start": 218.72,
+          "end": 219.2,
+          "prob": 1.0
+        },
+        {
+          "word": " that",
+          "start": 219.2,
+          "end": 219.58,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " saw",
+          "start": 219.58,
+          "end": 219.72,
+          "prob": 1.0
+        },
+        {
+          "word": " Camping",
+          "start": 219.72,
+          "end": 220.38,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " New",
+          "start": 220.38,
+          "end": 220.48,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " Forest",
+          "start": 220.48,
+          "end": 220.8,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " Limited",
+          "start": 220.8,
+          "end": 221.12,
+          "prob": 0.482177734375
+        },
+        {
+          "word": " appointed",
+          "start": 221.12,
+          "end": 221.86,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " as",
+          "start": 221.86,
+          "end": 222.32,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 222.32,
+          "end": 222.44,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " new",
+          "start": 222.44,
+          "end": 222.62,
+          "prob": 1.0
+        },
+        {
+          "word": " operator.",
+          "start": 222.62,
+          "end": 222.92,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "start": 223.32,
+      "end": 228.36,
+      "text": "Camping New Forest currently manages 11 campsites across the New Forest National Park.",
+      "words": [
+        {
+          "word": " Camping",
+          "start": 223.32,
+          "end": 223.94,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " New",
+          "start": 223.94,
+          "end": 224.08,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Forest",
+          "start": 224.08,
+          "end": 224.46,
+          "prob": 1.0
+        },
+        {
+          "word": " currently",
+          "start": 224.46,
+          "end": 224.74,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " manages",
+          "start": 224.74,
+          "end": 225.42,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " 11",
+          "start": 225.42,
+          "end": 225.92,
+          "prob": 0.9921875
+        },
+        {
+          "word": " campsites",
+          "start": 225.92,
+          "end": 226.7,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " across",
+          "start": 226.7,
+          "end": 226.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " the",
+          "start": 226.96,
+          "end": 227.22,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " New",
+          "start": 227.22,
+          "end": 227.36,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " Forest",
+          "start": 227.36,
+          "end": 227.68,
+          "prob": 1.0
+        },
+        {
+          "word": " National",
+          "start": 227.68,
+          "end": 227.96,
+          "prob": 0.9697265625
+        },
+        {
+          "word": " Park.",
+          "start": 227.96,
+          "end": 228.36,
+          "prob": 0.97216796875
+        }
+      ]
+    },
+    {
+      "id": 49,
+      "start": 228.36,
+      "end": 233.56,
+      "text": "Located in the north of the county and part of the former Royal Hunting Forest of Rockingham Forest,",
+      "words": [
+        {
+          "word": " Located",
+          "start": 228.36,
+          "end": 229.28,
+          "prob": 0.91455078125
+        },
+        {
+          "word": " in",
+          "start": 229.28,
+          "end": 229.44,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " the",
+          "start": 229.44,
+          "end": 229.54,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " north",
+          "start": 229.54,
+          "end": 229.84,
+          "prob": 0.95654296875
+        },
+        {
+          "word": " of",
+          "start": 229.84,
+          "end": 230.08,
+          "prob": 0.99609375
+        },
+        {
+          "word": " the",
+          "start": 230.08,
+          "end": 230.18,
+          "prob": 0.986328125
+        },
+        {
+          "word": " county",
+          "start": 230.18,
+          "end": 230.5,
+          "prob": 0.9794921875
+        },
+        {
+          "word": " and",
+          "start": 230.5,
+          "end": 230.84,
+          "prob": 0.93359375
+        },
+        {
+          "word": " part",
+          "start": 230.84,
+          "end": 231.1,
+          "prob": 0.99609375
+        },
+        {
+          "word": " of",
+          "start": 231.1,
+          "end": 231.3,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " the",
+          "start": 231.3,
+          "end": 231.42,
+          "prob": 0.9970703125
+        },
+        {
+          "word": " former",
+          "start": 231.42,
+          "end": 231.66,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " Royal",
+          "start": 231.66,
+          "end": 231.92,
+          "prob": 0.88427734375
+        },
+        {
+          "word": " Hunting",
+          "start": 231.92,
+          "end": 232.2,
+          "prob": 0.8681640625
+        },
+        {
+          "word": " Forest",
+          "start": 232.2,
+          "end": 232.52,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " of",
+          "start": 232.52,
+          "end": 232.88,
+          "prob": 0.9873046875
+        },
+        {
+          "word": " Rockingham",
+          "start": 232.88,
+          "end": 233.26,
+          "prob": 0.9957682291666666
+        },
+        {
+          "word": " Forest,",
+          "start": 233.26,
+          "end": 233.56,
+          "prob": 0.9892578125
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "start": 234.36,
+      "end": 240.86,
+      "text": "Fineshade Wood can be found between Stamford and Corby on the A43 and is widely considered by locals to be a hidden gem.",
+      "words": [
+        {
+          "word": " Fineshade",
+          "start": 234.28,
+          "end": 234.56,
+          "prob": 0.7311859130859375
+        },
+        {
+          "word": " Wood",
+          "start": 234.56,
+          "end": 234.76,
+          "prob": 0.91943359375
+        },
+        {
+          "word": " can",
+          "start": 234.76,
+          "end": 234.94,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " be",
+          "start": 234.94,
+          "end": 235.12,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " found",
+          "start": 235.12,
+          "end": 235.32,
+          "prob": 1.0
+        },
+        {
+          "word": " between",
+          "start": 235.32,
+          "end": 235.6,
+          "prob": 0.998046875
+        },
+        {
+          "word": " Stamford",
+          "start": 235.6,
+          "end": 236.22,
+          "prob": 0.9777018229166666
+        },
+        {
+          "word": " and",
+          "start": 236.22,
+          "end": 236.4,
+          "prob": 0.98046875
+        },
+        {
+          "word": " Corby",
+          "start": 236.4,
+          "end": 236.76,
+          "prob": 0.98291015625
+        },
+        {
+          "word": " on",
+          "start": 236.76,
+          "end": 236.92,
+          "prob": 0.99072265625
+        },
+        {
+          "word": " the",
+          "start": 236.92,
+          "end": 237.06,
+          "prob": 0.9951171875
+        },
+        {
+          "word": " A43",
+          "start": 237.06,
+          "end": 237.54,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " and",
+          "start": 237.54,
+          "end": 238.22,
+          "prob": 0.80322265625
+        },
+        {
+          "word": " is",
+          "start": 238.22,
+          "end": 238.48,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " widely",
+          "start": 238.48,
+          "end": 238.8,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " considered",
+          "start": 238.8,
+          "end": 239.24,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " by",
+          "start": 239.24,
+          "end": 239.54,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " locals",
+          "start": 239.54,
+          "end": 239.92,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " to",
+          "start": 239.92,
+          "end": 240.18,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " be",
+          "start": 240.18,
+          "end": 240.3,
+          "prob": 1.0
+        },
+        {
+          "word": " a",
+          "start": 240.3,
+          "end": 240.44,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " hidden",
+          "start": 240.44,
+          "end": 240.6,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " gem.",
+          "start": 240.6,
+          "end": 240.86,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 51,
+      "start": 241.06,
+      "end": 245.1,
+      "text": "Following a short temporary closure of the overnight offer to prepare the site,",
+      "words": [
+        {
+          "word": " Following",
+          "start": 241.06,
+          "end": 241.4,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " a",
+          "start": 241.4,
+          "end": 241.56,
+          "prob": 0.63134765625
+        },
+        {
+          "word": " short",
+          "start": 241.56,
+          "end": 241.84,
+          "prob": 1.0
+        },
+        {
+          "word": " temporary",
+          "start": 241.84,
+          "end": 242.18,
+          "prob": 0.962890625
+        },
+        {
+          "word": " closure",
+          "start": 242.18,
+          "end": 242.56,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " of",
+          "start": 242.56,
+          "end": 242.96,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " the",
+          "start": 242.96,
+          "end": 243.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " overnight",
+          "start": 243.06,
+          "end": 243.42,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " offer",
+          "start": 243.42,
+          "end": 243.8,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 243.8,
+          "end": 244.36,
+          "prob": 0.8583984375
+        },
+        {
+          "word": " prepare",
+          "start": 244.36,
+          "end": 244.62,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " the",
+          "start": 244.62,
+          "end": 244.88,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " site,",
+          "start": 244.88,
+          "end": 245.1,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "start": 245.16,
+      "end": 251.64,
+      "text": "visitors will soon be welcomed back to enjoy upgraded facilities and the reassurance of friendly on-site wardens.",
+      "words": [
+        {
+          "word": " visitors",
+          "start": 245.16,
+          "end": 245.44,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " will",
+          "start": 245.44,
+          "end": 245.8,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " soon",
+          "start": 245.8,
+          "end": 246.04,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " be",
+          "start": 246.04,
+          "end": 246.22,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " welcomed",
+          "start": 246.22,
+          "end": 246.54,
+          "prob": 0.86767578125
+        },
+        {
+          "word": " back",
+          "start": 246.54,
+          "end": 246.88,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " to",
+          "start": 246.88,
+          "end": 247.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " enjoy",
+          "start": 247.06,
+          "end": 247.38,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " upgraded",
+          "start": 247.38,
+          "end": 247.96,
+          "prob": 0.98876953125
+        },
+        {
+          "word": " facilities",
+          "start": 247.96,
+          "end": 248.5,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " and",
+          "start": 248.5,
+          "end": 249.14,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " the",
+          "start": 249.14,
+          "end": 249.24,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " reassurance",
+          "start": 249.24,
+          "end": 249.84,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " of",
+          "start": 249.84,
+          "end": 250.1,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " friendly",
+          "start": 250.1,
+          "end": 250.42,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " on",
+          "start": 250.42,
+          "end": 250.92,
+          "prob": 0.89990234375
+        },
+        {
+          "word": "-site",
+          "start": 250.92,
+          "end": 251.18,
+          "prob": 0.993896484375
+        },
+        {
+          "word": " wardens.",
+          "start": 251.18,
+          "end": 251.64,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 53,
+      "start": 251.96,
+      "end": 256.36,
+      "text": "The location, previously run by Forestry England as a motorhome parking area,",
+      "words": [
+        {
+          "word": " The",
+          "start": 251.96,
+          "end": 252.24,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " location,",
+          "start": 252.24,
+          "end": 252.78,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " previously",
+          "start": 252.84,
+          "end": 253.12,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " run",
+          "start": 253.12,
+          "end": 253.62,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " by",
+          "start": 253.62,
+          "end": 253.86,
+          "prob": 1.0
+        },
+        {
+          "word": " Forestry",
+          "start": 253.86,
+          "end": 254.38,
+          "prob": 0.511688232421875
+        },
+        {
+          "word": " England",
+          "start": 254.38,
+          "end": 254.68,
+          "prob": 0.99365234375
+        },
+        {
+          "word": " as",
+          "start": 254.68,
+          "end": 255.02,
+          "prob": 0.99609375
+        },
+        {
+          "word": " a",
+          "start": 255.02,
+          "end": 255.12,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " motorhome",
+          "start": 255.12,
+          "end": 255.58,
+          "prob": 0.97412109375
+        },
+        {
+          "word": " parking",
+          "start": 255.58,
+          "end": 255.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " area,",
+          "start": 255.96,
+          "end": 256.36,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 54,
+      "start": 256.36,
+      "end": 264.0,
+      "text": "is beginning an exciting new chapter with improvements planned to enhance the experience even further over time.",
+      "words": [
+        {
+          "word": " is",
+          "start": 256.36,
+          "end": 256.88,
+          "prob": 0.9404296875
+        },
+        {
+          "word": " beginning",
+          "start": 256.88,
+          "end": 257.16,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " an",
+          "start": 257.16,
+          "end": 257.56,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " exciting",
+          "start": 257.56,
+          "end": 258.06,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " new",
+          "start": 258.06,
+          "end": 258.56,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " chapter",
+          "start": 258.56,
+          "end": 258.94,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " with",
+          "start": 258.94,
+          "end": 259.58,
+          "prob": 0.91943359375
+        },
+        {
+          "word": " improvements",
+          "start": 259.58,
+          "end": 259.92,
+          "prob": 0.9443359375
+        },
+        {
+          "word": " planned",
+          "start": 259.92,
+          "end": 260.44,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " to",
+          "start": 260.44,
+          "end": 260.72,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " enhance",
+          "start": 260.72,
+          "end": 260.98,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 260.98,
+          "end": 261.86,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " experience",
+          "start": 261.86,
+          "end": 262.54,
+          "prob": 1.0
+        },
+        {
+          "word": " even",
+          "start": 262.54,
+          "end": 263.04,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " further",
+          "start": 263.04,
+          "end": 263.34,
+          "prob": 1.0
+        },
+        {
+          "word": " over",
+          "start": 263.34,
+          "end": 263.7,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " time.",
+          "start": 263.7,
+          "end": 264.0,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 55,
+      "start": 264.24,
+      "end": 268.14,
+      "text": "Dennis Dooley, Chief Executive Officer of Camping New Forest said,",
+      "words": [
+        {
+          "word": " Dennis",
+          "start": 264.24,
+          "end": 264.52,
+          "prob": 0.90625
+        },
+        {
+          "word": " Dooley,",
+          "start": 264.52,
+          "end": 265.0,
+          "prob": 0.995361328125
+        },
+        {
+          "word": " Chief",
+          "start": 265.2,
+          "end": 265.64,
+          "prob": 0.90673828125
+        },
+        {
+          "word": " Executive",
+          "start": 265.64,
+          "end": 266.1,
+          "prob": 1.0
+        },
+        {
+          "word": " Officer",
+          "start": 266.1,
+          "end": 266.54,
+          "prob": 1.0
+        },
+        {
+          "word": " of",
+          "start": 266.54,
+          "end": 266.96,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " Camping",
+          "start": 266.96,
+          "end": 267.42,
+          "prob": 0.998779296875
+        },
+        {
+          "word": " New",
+          "start": 267.42,
+          "end": 267.52,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " Forest",
+          "start": 267.52,
+          "end": 267.82,
+          "prob": 0.9775390625
+        },
+        {
+          "word": " said,",
+          "start": 267.82,
+          "end": 268.14,
+          "prob": 0.71044921875
+        }
+      ]
+    },
+    {
+      "id": 56,
+      "start": 268.3,
+      "end": 273.04,
+      "text": "It is an exciting opportunity for us to expand and take on the running of another campsite.",
+      "words": [
+        {
+          "word": " It",
+          "start": 268.3,
+          "end": 268.62,
+          "prob": 0.71142578125
+        },
+        {
+          "word": " is",
+          "start": 268.62,
+          "end": 268.8,
+          "prob": 1.0
+        },
+        {
+          "word": " an",
+          "start": 268.8,
+          "end": 268.94,
+          "prob": 1.0
+        },
+        {
+          "word": " exciting",
+          "start": 268.94,
+          "end": 269.34,
+          "prob": 1.0
+        },
+        {
+          "word": " opportunity",
+          "start": 269.34,
+          "end": 269.74,
+          "prob": 1.0
+        },
+        {
+          "word": " for",
+          "start": 269.74,
+          "end": 270.24,
+          "prob": 1.0
+        },
+        {
+          "word": " us",
+          "start": 270.24,
+          "end": 270.38,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 270.38,
+          "end": 270.5,
+          "prob": 1.0
+        },
+        {
+          "word": " expand",
+          "start": 270.5,
+          "end": 270.86,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 270.86,
+          "end": 271.14,
+          "prob": 1.0
+        },
+        {
+          "word": " take",
+          "start": 271.14,
+          "end": 271.32,
+          "prob": 1.0
+        },
+        {
+          "word": " on",
+          "start": 271.32,
+          "end": 271.52,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 271.52,
+          "end": 271.62,
+          "prob": 1.0
+        },
+        {
+          "word": " running",
+          "start": 271.62,
+          "end": 271.88,
+          "prob": 1.0
+        },
+        {
+          "word": " of",
+          "start": 271.88,
+          "end": 272.18,
+          "prob": 1.0
+        },
+        {
+          "word": " another",
+          "start": 272.18,
+          "end": 272.38,
+          "prob": 1.0
+        },
+        {
+          "word": " campsite.",
+          "start": 272.38,
+          "end": 273.04,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 57,
+      "start": 273.14,
+      "end": 276.28,
+      "text": "Our primary remit is education and visitor experience.",
+      "words": [
+        {
+          "word": " Our",
+          "start": 273.14,
+          "end": 273.54,
+          "prob": 1.0
+        },
+        {
+          "word": " primary",
+          "start": 273.54,
+          "end": 274.0,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " remit",
+          "start": 274.0,
+          "end": 274.54,
+          "prob": 0.999267578125
+        },
+        {
+          "word": " is",
+          "start": 274.54,
+          "end": 274.76,
+          "prob": 1.0
+        },
+        {
+          "word": " education",
+          "start": 274.76,
+          "end": 275.1,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 275.1,
+          "end": 275.58,
+          "prob": 1.0
+        },
+        {
+          "word": " visitor",
+          "start": 275.58,
+          "end": 275.88,
+          "prob": 1.0
+        },
+        {
+          "word": " experience.",
+          "start": 275.88,
+          "end": 276.28,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 58,
+      "start": 276.88,
+      "end": 280.06,
+      "text": "Environment and community are at the heart of everything we do.",
+      "words": [
+        {
+          "word": " Environment",
+          "start": 276.88,
+          "end": 277.48,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " and",
+          "start": 277.48,
+          "end": 277.88,
+          "prob": 1.0
+        },
+        {
+          "word": " community",
+          "start": 277.88,
+          "end": 278.18,
+          "prob": 1.0
+        },
+        {
+          "word": " are",
+          "start": 278.18,
+          "end": 278.6,
+          "prob": 1.0
+        },
+        {
+          "word": " at",
+          "start": 278.6,
+          "end": 278.78,
+          "prob": 0.99853515625
+        },
+        {
+          "word": " the",
+          "start": 278.78,
+          "end": 278.88,
+          "prob": 1.0
+        },
+        {
+          "word": " heart",
+          "start": 278.88,
+          "end": 279.12,
+          "prob": 1.0
+        },
+        {
+          "word": " of",
+          "start": 279.12,
+          "end": 279.3,
+          "prob": 1.0
+        },
+        {
+          "word": " everything",
+          "start": 279.3,
+          "end": 279.52,
+          "prob": 1.0
+        },
+        {
+          "word": " we",
+          "start": 279.52,
+          "end": 279.82,
+          "prob": 1.0
+        },
+        {
+          "word": " do.",
+          "start": 279.82,
+          "end": 280.06,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 59,
+      "start": 280.26,
+      "end": 285.34,
+      "text": "Our vision is to create high quality, authentic campsites that communities can be proud of.",
+      "words": [
+        {
+          "word": " Our",
+          "start": 280.26,
+          "end": 280.56,
+          "prob": 1.0
+        },
+        {
+          "word": " vision",
+          "start": 280.56,
+          "end": 280.88,
+          "prob": 0.99609375
+        },
+        {
+          "word": " is",
+          "start": 280.88,
+          "end": 281.08,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 281.08,
+          "end": 281.22,
+          "prob": 1.0
+        },
+        {
+          "word": " create",
+          "start": 281.22,
+          "end": 281.5,
+          "prob": 1.0
+        },
+        {
+          "word": " high",
+          "start": 281.5,
+          "end": 281.78,
+          "prob": 1.0
+        },
+        {
+          "word": " quality,",
+          "start": 281.78,
+          "end": 282.16,
+          "prob": 0.71826171875
+        },
+        {
+          "word": " authentic",
+          "start": 282.32,
+          "end": 282.8,
+          "prob": 1.0
+        },
+        {
+          "word": " campsites",
+          "start": 282.8,
+          "end": 283.64,
+          "prob": 1.0
+        },
+        {
+          "word": " that",
+          "start": 283.64,
+          "end": 283.86,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " communities",
+          "start": 283.86,
+          "end": 284.3,
+          "prob": 1.0
+        },
+        {
+          "word": " can",
+          "start": 284.3,
+          "end": 284.68,
+          "prob": 1.0
+        },
+        {
+          "word": " be",
+          "start": 284.68,
+          "end": 284.84,
+          "prob": 1.0
+        },
+        {
+          "word": " proud",
+          "start": 284.84,
+          "end": 285.14,
+          "prob": 1.0
+        },
+        {
+          "word": " of.",
+          "start": 285.14,
+          "end": 285.34,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "start": 285.34,
+      "end": 290.22,
+      "text": "Places that improve local sustainability and give visitors unforgettable experiences,",
+      "words": [
+        {
+          "word": " Places",
+          "start": 285.34,
+          "end": 285.84,
+          "prob": 0.5694580078125
+        },
+        {
+          "word": " that",
+          "start": 285.84,
+          "end": 286.04,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " improve",
+          "start": 286.04,
+          "end": 286.36,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " local",
+          "start": 286.36,
+          "end": 286.76,
+          "prob": 0.994140625
+        },
+        {
+          "word": " sustainability",
+          "start": 286.76,
+          "end": 287.3,
+          "prob": 0.9892578125
+        },
+        {
+          "word": " and",
+          "start": 287.3,
+          "end": 288.1,
+          "prob": 0.82861328125
+        },
+        {
+          "word": " give",
+          "start": 288.1,
+          "end": 288.34,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " visitors",
+          "start": 288.34,
+          "end": 288.78,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " unforgettable",
+          "start": 288.78,
+          "end": 289.32,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " experiences,",
+          "start": 289.32,
+          "end": 290.22,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 61,
+      "start": 290.62,
+      "end": 294.88,
+      "text": "learning about, exploring and embracing nature through camping.",
+      "words": [
+        {
+          "word": " learning",
+          "start": 290.62,
+          "end": 291.08,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " about,",
+          "start": 291.08,
+          "end": 291.4,
+          "prob": 1.0
+        },
+        {
+          "word": " exploring",
+          "start": 291.6,
+          "end": 292.32,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 292.32,
+          "end": 292.82,
+          "prob": 0.97314453125
+        },
+        {
+          "word": " embracing",
+          "start": 292.82,
+          "end": 293.42,
+          "prob": 1.0
+        },
+        {
+          "word": " nature",
+          "start": 293.42,
+          "end": 294.12,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " through",
+          "start": 294.12,
+          "end": 294.48,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " camping.",
+          "start": 294.48,
+          "end": 294.88,
+          "prob": 1.0
+        }
+      ]
+    },
+    {
+      "id": 62,
+      "start": 295.06,
+      "end": 299.96,
+      "text": "We are excited to work with Forestry England and the Fineshade Wood Visitor Centre",
+      "words": [
+        {
+          "word": " We",
+          "start": 295.06,
+          "end": 295.34,
+          "prob": 1.0
+        },
+        {
+          "word": " are",
+          "start": 295.34,
+          "end": 295.46,
+          "prob": 1.0
+        },
+        {
+          "word": " excited",
+          "start": 295.46,
+          "end": 295.78,
+          "prob": 1.0
+        },
+        {
+          "word": " to",
+          "start": 295.78,
+          "end": 296.14,
+          "prob": 1.0
+        },
+        {
+          "word": " work",
+          "start": 296.14,
+          "end": 296.44,
+          "prob": 1.0
+        },
+        {
+          "word": " with",
+          "start": 296.44,
+          "end": 296.92,
+          "prob": 1.0
+        },
+        {
+          "word": " Forestry",
+          "start": 296.92,
+          "end": 297.44,
+          "prob": 0.992431640625
+        },
+        {
+          "word": " England",
+          "start": 297.44,
+          "end": 297.64,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " and",
+          "start": 297.64,
+          "end": 298.32,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " the",
+          "start": 298.32,
+          "end": 298.62,
+          "prob": 0.99658203125
+        },
+        {
+          "word": " Fineshade",
+          "start": 298.62,
+          "end": 299.18,
+          "prob": 0.8232421875
+        },
+        {
+          "word": " Wood",
+          "start": 299.18,
+          "end": 299.34,
+          "prob": 0.978515625
+        },
+        {
+          "word": " Visitor",
+          "start": 299.34,
+          "end": 299.72,
+          "prob": 0.9931640625
+        },
+        {
+          "word": " Centre",
+          "start": 299.72,
+          "end": 299.96,
+          "prob": 0.99609375
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "start": 299.96,
+      "end": 306.06,
+      "text": "to build on the existing experience and enhance what this special woodland site can offer.",
+      "words": [
+        {
+          "word": " to",
+          "start": 299.96,
+          "end": 300.46,
+          "prob": 0.99609375
+        },
+        {
+          "word": " build",
+          "start": 300.46,
+          "end": 300.68,
+          "prob": 1.0
+        },
+        {
+          "word": " on",
+          "start": 300.68,
+          "end": 301.24,
+          "prob": 1.0
+        },
+        {
+          "word": " the",
+          "start": 301.24,
+          "end": 301.62,
+          "prob": 1.0
+        },
+        {
+          "word": " existing",
+          "start": 301.62,
+          "end": 302.3,
+          "prob": 1.0
+        },
+        {
+          "word": " experience",
+          "start": 302.3,
+          "end": 302.92,
+          "prob": 1.0
+        },
+        {
+          "word": " and",
+          "start": 302.92,
+          "end": 303.26,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " enhance",
+          "start": 303.26,
+          "end": 303.96,
+          "prob": 1.0
+        },
+        {
+          "word": " what",
+          "start": 303.96,
+          "end": 304.3,
+          "prob": 1.0
+        },
+        {
+          "word": " this",
+          "start": 304.3,
+          "end": 304.54,
+          "prob": 1.0
+        },
+        {
+          "word": " special",
+          "start": 304.54,
+          "end": 304.84,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " woodland",
+          "start": 304.84,
+          "end": 305.34,
+          "prob": 0.99462890625
+        },
+        {
+          "word": " site",
+          "start": 305.34,
+          "end": 305.66,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " can",
+          "start": 305.66,
+          "end": 305.86,
+          "prob": 1.0
+        },
+        {
+          "word": " offer.",
+          "start": 305.86,
+          "end": 306.06,
+          "prob": 0.99951171875
+        }
+      ]
+    },
+    {
+      "id": 64,
+      "start": 306.2,
+      "end": 315.32,
+      "text": "Campers can stay at Fineshade Wood campsite from \u00a313.60 from April 1st and can book at www.fineshadewood.com.",
+      "words": [
+        {
+          "word": " Campers",
+          "start": 306.2,
+          "end": 306.68,
+          "prob": 0.99169921875
+        },
+        {
+          "word": " can",
+          "start": 306.68,
+          "end": 306.82,
+          "prob": 1.0
+        },
+        {
+          "word": " stay",
+          "start": 306.82,
+          "end": 307.06,
+          "prob": 1.0
+        },
+        {
+          "word": " at",
+          "start": 307.06,
+          "end": 307.24,
+          "prob": 1.0
+        },
+        {
+          "word": " Fineshade",
+          "start": 307.24,
+          "end": 307.92,
+          "prob": 0.9964599609375
+        },
+        {
+          "word": " Wood",
+          "start": 307.92,
+          "end": 308.22,
+          "prob": 0.99951171875
+        },
+        {
+          "word": " campsite",
+          "start": 308.22,
+          "end": 308.88,
+          "prob": 0.84130859375
+        },
+        {
+          "word": " from",
+          "start": 308.88,
+          "end": 309.18,
+          "prob": 0.9990234375
+        },
+        {
+          "word": " \u00a313",
+          "start": 309.18,
+          "end": 309.82,
+          "prob": 0.9912109375
+        },
+        {
+          "word": ".60",
+          "start": 309.82,
+          "end": 310.44,
+          "prob": 0.999755859375
+        },
+        {
+          "word": " from",
+          "start": 310.44,
+          "end": 311.16,
+          "prob": 0.99755859375
+        },
+        {
+          "word": " April",
+          "start": 311.16,
+          "end": 311.46,
+          "prob": 0.97802734375
+        },
+        {
+          "word": " 1st",
+          "start": 311.46,
+          "end": 312.04,
+          "prob": 0.978515625
+        },
+        {
+          "word": " and",
+          "start": 312.04,
+          "end": 312.1,
+          "prob": 0.99560546875
+        },
+        {
+          "word": " can",
+          "start": 312.1,
+          "end": 312.3,
+          "prob": 1.0
+        },
+        {
+          "word": " book",
+          "start": 312.3,
+          "end": 312.58,
+          "prob": 1.0
+        },
+        {
+          "word": " at",
+          "start": 312.58,
+          "end": 312.78,
+          "prob": 1.0
+        },
+        {
+          "word": " www",
+          "start": 312.78,
+          "end": 313.68,
+          "prob": 0.9970703125
+        },
+        {
+          "word": ".fineshadewood",
+          "start": 313.68,
+          "end": 315.32,
+          "prob": 0.8971354166666666
+        },
+        {
+          "word": ".com.",
+          "start": 315.32,
+          "end": 315.32,
+          "prob": 0.76806640625
+        }
+      ]
+    },
+    {
+      "id": 65,
+      "start": 315.34,
+      "end": 320.3,
+      "text": "www.fineshade-campsite.co.uk",
+      "words": [
+        {
+          "word": " www",
+          "start": 315.34,
+          "end": 315.58,
+          "prob": 0.005847930908203125
+        },
+        {
+          "word": ".fineshade",
+          "start": 315.58,
+          "end": 316.76,
+          "prob": 0.94873046875
+        },
+        {
+          "word": "-campsite",
+          "start": 316.76,
+          "end": 318.54,
+          "prob": 0.7982177734375
+        },
+        {
+          "word": ".co",
+          "start": 318.54,
+          "end": 319.36,
+          "prob": 0.99853515625
+        },
+        {
+          "word": ".uk",
+          "start": 319.36,
+          "end": 320.3,
+          "prob": 0.999755859375
+        }
+      ]
+    }
+  ],
+  "language": "en",
+  "language_probability": 1,
+  "duration": 320.68025,
+  "confidence": 0.9699,
+  "silent": false
+}

@@ -10,9 +10,33 @@ from app.config import settings
 from app.core.db_gate import commit_with_retry, is_transient_db_error
 from app.models.schemas import TranscribeRequest, JobAccepted
 from app.models.database import SessionLocal, AiJob
-from app.services.registry import worker
+from ray import serve as _ray_serve
+
+def _get_orchestrator():
+    return _ray_serve.get_deployment_handle("orchestrator", "default")
 
 router = APIRouter(prefix="/api/v1", tags=["Transcription"])
+
+def _find_dup(db, track_id: str, exclude_job_id: str | None = None) -> str | None:
+    existing = db.query(AiJob.id).filter(
+        AiJob.track_id == track_id,
+        AiJob.job_type == "transcription",
+        AiJob.status.in_(["queued", "running"]),
+        AiJob.id != (exclude_job_id or ""),
+    ).first()
+    return existing[0] if existing else None
+
+def _submit(job_id: str, run_id: str, user_id: str | None = None):
+    try:
+        ref = _get_orchestrator().process.remote(job_id, run_id)
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+        loop.create_task(asyncio.ensure_future(asyncio.sleep(0)))
+    except Exception as exc:
+        print(f"[TRANS] _submit FAIL: {exc}")
 
 
 @router.post(
@@ -24,9 +48,15 @@ router = APIRouter(prefix="/api/v1", tags=["Transcription"])
 )
 async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_service_key)):
     run_id = str(uuid.uuid4())
+    user_id = body.user_id if hasattr(body, "user_id") else None
     for attempt in range(5):
         db = SessionLocal()
         try:
+            if body.track_id:
+                dup_id = _find_dup(db, body.track_id, exclude_job_id=body.job_id)
+                if dup_id:
+                    return JobAccepted(job_id=dup_id)
+
             existing = db.query(AiJob).filter(AiJob.id == body.job_id).first()
             if existing:
                 existing.run_id = run_id
@@ -37,11 +67,10 @@ async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_serv
                 existing.completed_at = None
                 existing.error = None
                 existing.result_json = None
-                existing.callback_delivered = False
                 existing.job_type = "transcription"
                 existing.track_id = body.track_id
                 await commit_with_retry(db)
-                worker.enqueue(body.job_id, run_id=run_id)
+                _submit(body.job_id, run_id, user_id)
                 return JobAccepted(job_id=body.job_id)
 
             job = AiJob(
@@ -50,17 +79,21 @@ async def transcribe(body: TranscribeRequest, _auth: bool = Security(verify_serv
                 job_type="transcription",
                 track_id=body.track_id,
                 status="queued",
-                callback_url=settings.HEAR_CALLBACK_URL or None,
+                
                 skip_enhancement=True,
                 created_at=datetime.utcnow(),
             )
             db.add(job)
             await commit_with_retry(db)
-            worker.enqueue(body.job_id, run_id=run_id)
+            _submit(body.job_id, run_id, user_id)
             return JobAccepted(job_id=body.job_id)
         except IntegrityError:
             db.rollback()
-            worker.enqueue(body.job_id, run_id=run_id)
+            if body.track_id:
+                dup_id = _find_dup(db, body.track_id, exclude_job_id=body.job_id)
+                if dup_id:
+                    return JobAccepted(job_id=dup_id)
+            _submit(body.job_id, run_id, user_id)
             return JobAccepted(job_id=body.job_id)
         except (OperationalError, DBAPIError) as exc:
             db.rollback()

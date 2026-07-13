@@ -1,68 +1,41 @@
-import asyncio
-from contextlib import asynccontextmanager
-
 import torch
 
-from app.config import settings
+_cuda_inference_lock = None
 
-ml_job_lock = asyncio.Lock()
+def _get_lock():
+    global _cuda_inference_lock
+    if _cuda_inference_lock is None:
+        import threading
+        _cuda_inference_lock = threading.Lock()
+    return _cuda_inference_lock
 
+cuda_inference_lock = None
 
-class GPUManager:
-    def __init__(self):
-        self._semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_GPU_JOBS)
-        self._active_jobs = 0
-        self._queued_jobs = 0
+def __getattr__(name):
+    if name == "cuda_inference_lock":
+        return _get_lock()
+    raise AttributeError(name)
 
-    @property
-    def device(self) -> torch.device:
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    @property
-    def is_available(self) -> bool:
-        return torch.cuda.is_available()
-
-    @property
-    def gpu_name(self) -> str:
+class _GpuStub:
+    def log_memory(self, tag: str = ""):
         if torch.cuda.is_available():
-            return torch.cuda.get_device_name(0)
-        return "CPU"
+            free, total = torch.cuda.mem_get_info()
+            used = total - free
+            gb = 1024**3
+            print(f"[GPU:{tag}] used={used/gb:.1f}GB free={free/gb:.1f}GB total={total/gb:.1f}GB")
 
-    @property
-    def active_jobs(self) -> int:
-        return self._active_jobs
+    def acquire(self):
+        pass
 
-    @property
-    def queued_jobs(self) -> int:
-        return self._queued_jobs
+    def release(self):
+        pass
 
-    async def acquire(self):
-        self._queued_jobs += 1
-        await self._semaphore.acquire()
-        self._queued_jobs -= 1
-        self._active_jobs += 1
+    def exclusive(self):
+        return _get_lock()
 
-    async def release(self):
-        self._active_jobs -= 1
-        self._semaphore.release()
-
-    def idle_sync(self) -> None:
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
-
-    @asynccontextmanager
-    async def exclusive(self):
-        async with ml_job_lock:
-            await self.acquire()
-            try:
-                yield
-            finally:
-                self.idle_sync()
-                await self.release()
+    def idle_sync(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
 
-gpu = GPUManager()
+gpu = _GpuStub()

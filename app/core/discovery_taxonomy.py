@@ -16,6 +16,32 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
+def _hierarchical_segments(key: str) -> list[str]:
+    return [_norm(part) for part in (key or "").split(" > ") if part.strip()]
+
+
+def _topic_matches_taxonomy_path(topic: str, key: str) -> bool:
+    """Avoid matching generic words (e.g. technology) inside longer path segments."""
+    nt = _norm(topic)
+    if not nt or len(nt) < 3:
+        return False
+    if nt == key:
+        return True
+    if " > " in key:
+        segments = _hierarchical_segments(key)
+        if nt in segments:
+            return True
+        if len(nt) >= 5 and any(nt == seg for seg in segments):
+            return True
+        if any(len(seg) >= 5 and seg in nt for seg in segments):
+            return True
+        return False
+    if nt in key or key in nt:
+        return True
+    tokens = [t for t in re.findall(r"[a-z]{4,}", key)]
+    return bool(tokens) and sum(1 for t in tokens if t in nt) >= min(2, len(tokens))
+
+
 class DiscoveryTaxonomyLoader:
     def __init__(self):
         self._data = DiscoveryTaxonomyData()
@@ -57,7 +83,7 @@ class DiscoveryTaxonomyLoader:
             for key, path in self.data.path_lookup.items():
                 if key in seen:
                     continue
-                if nt in key or key in nt or any(part in nt for part in key.split(" > ")):
+                if _topic_matches_taxonomy_path(nt, key):
                     matched.append(path)
                     seen.add(key)
         return matched[:12]
@@ -77,7 +103,7 @@ class DiscoveryTaxonomyLoader:
         if hit:
             return hit
         for k, canonical in self.data.path_lookup.items():
-            if key == k or key in k or k in key:
+            if _topic_matches_taxonomy_path(key, k):
                 return canonical
         return cleaned
 

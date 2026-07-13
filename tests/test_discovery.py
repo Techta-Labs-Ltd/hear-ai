@@ -71,7 +71,16 @@ def test_discovery_callback_matches_backend_schema():
 def test_coerce_discovery_source_ignores_categorization_dict():
     cat = {"categories": ["Music"], "tags": ["#rock"]}
     assert coerce_discovery_source(cat) == ""
-    profile = ContentDiscoveryProfile(content_id="x")
+    profile = ContentDiscoveryProfile(
+        content_id="x",
+        main_topic="Assistive technology",
+        one_line_description="One line",
+        key_themes=["Independence"],
+        audience_relevance=["Blind listeners"],
+        entities=DiscoveryEntities(people=["Alex"], animals=["Rocco"]),
+        confidence={"main_topic": 0.92},
+        speaker="Alex",
+    )
     data = discovery_to_callback_dict(profile, source=cat)
     assert data["source"] == ""
     assert data["speaker"] == "Alex"
@@ -105,10 +114,11 @@ def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader, monkeypatc
     )
     cat = {"categories": ["Personal lived experience"], "tags": ["#Blindness"]}
     qwen_tags = ["Accessibility > Guide dogs", "Human connection"]
-    tags = svc.merge_controlled_tags(profile, qwen_tags, cat)
+    tags = svc.merge_controlled_tags(
+        profile, qwen_tags, cat, transcript="guide dogs for blind users in Glasgow"
+    )
     assert tags[0] == "Accessibility > Guide dogs"
-    assert "Human connection" in tags
-    assert "Personal lived experience" in tags
+    assert "Human connection" not in tags
 
 
 def test_canonicalize_path(taxonomy_loader):

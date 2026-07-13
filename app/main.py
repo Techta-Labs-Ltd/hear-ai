@@ -1,12 +1,11 @@
 import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_DATASETS_OFFLINE"] = "1"
 
-from contextlib import asynccontextmanager
+os.environ["HF_HUB_OFFLINE"] = os.getenv("HF_HUB_OFFLINE", "0")
+os.environ["TRANSFORMERS_OFFLINE"] = os.getenv("TRANSFORMERS_OFFLINE", "0")
+os.environ["HF_DATASETS_OFFLINE"] = os.getenv("HF_DATASETS_OFFLINE", "0")
 
+import logging
 
-import uvicorn
 import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,24 +14,43 @@ from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
-from app.config import settings
-from app.core.category_loader import category_loader
-from app.core.discovery_taxonomy import discovery_taxonomy_loader
-from app.core.keyword_loader import harm_keyword_loader
-from app.models.database import init_db
-from app.services.registry import (
-    transcriber,
-    enhancer,
-    categorizer,
-    moderator,
-    synthesizer,
-    worker,
-    llm_service,
-)
 from app.api.router import api_router
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+OPENAPI_DESCRIPTION = """
+## Hear AI – Audio Intelligence Service
+
+Hear AI provides a complete audio processing pipeline including:
+
+- **Pipeline** – transcription, moderation, categorization
+- **Magic Clean** – standalone vocal isolation & noise removal via Demucs
+- **Transcription** – standalone speech-to-text with WhisperX distil-large-v3
+- **Categorization** – standalone topic tagging
+- **Moderation** – standalone content safety analysis
+- **Reconstruction** – segment regeneration with Fish Speech voice cloning
+
+### Authentication
+All endpoints (except `/health`) require a service key via **either**:
+- `X-Service-Key` header
+- `Authorization: Bearer <key>` header
+"""
+
+TAGS_METADATA: list[dict] = [
+    {"name": "System", "description": "Health checks and system status"},
+    {"name": "Pipeline", "description": "Track-first pipeline"},
+    {"name": "Transcription", "description": "Standalone speech-to-text jobs"},
+    {"name": "Enhancement", "description": "Standalone audio enhancement"},
+    {"name": "Categorization", "description": "Text-based topic categorization"},
+    {"name": "Discovery", "description": "Discovery catalog"},
+    {"name": "Moderation", "description": "Content safety analysis"},
+    {"name": "Realtime", "description": "SSE and WebSocket streaming"},
+    {"name": "Jobs", "description": "Job status polling"},
+]
 
 
-def init_sentry():
+def _init_sentry() -> None:
     if not settings.SENTRY_DSN:
         return
     sentry_sdk.init(
@@ -47,109 +65,49 @@ def init_sentry():
     )
 
 
-@asynccontextmanager
-async def lifespan(application: FastAPI):
-    init_sentry()
-    init_db()
-    category_loader.load()
-    discovery_taxonomy_loader.load()
-    harm_keyword_loader.load()
-    print("[STARTUP] Loading ML models...")
-    transcriber.load()
-    enhancer.load()
-    categorizer.load()
-    moderator.load()
-    synthesizer.load()
-    print("[STARTUP] Loading optional Qwen LLM...")
-    llm_service.load()
-    if llm_service.is_available:
-        print("[STARTUP] Qwen2.5-7B ready — moderation + categorization use LLM")
-    else:
-        print("[STARTUP] Qwen off or unavailable — toxic-bert + NLI (fast path for single-GPU production)")
-    print("[STARTUP] Models loaded. Starting worker...")
-    await worker.start()
-    print("[STARTUP] Ready.")
-    yield
-    await worker.stop()
+def create_app() -> FastAPI:
+    _init_sentry()
 
-
-OPENAPI_DESCRIPTION = """
-## Hear AI – Audio Intelligence Service
-
-Hear AI provides a complete audio processing pipeline including:
-
-- **Pipeline** – transcription, moderation, categorization
-- **Magic Clean** – standalone vocal isolation & noise removal via Demucs
-- **Transcription** – standalone speech-to-text with Faster-Whisper (default distil-large-v3, tunable)
-- **Categorization** – standalone topic tagging
-- **Moderation** – standalone content safety analysis
-- **Reconstruction** – segment rebuild (optional Higgs when `HIGGS_AUDIO_ENABLED=true`)
-
-### Authentication
-All endpoints (except `/health`) require a service key via **either**:
-- `X-Service-Key` header
-- `Authorization: Bearer <key>` header
-"""
-
-TAGS_METADATA = [
-    {"name": "System", "description": "Health checks and system status"},
-    {"name": "Pipeline", "description": "Track-first pipeline (transcribe -> moderate -> categorize)"},
-    {"name": "Transcription", "description": "Standalone speech-to-text jobs"},
-    {"name": "Enhancement", "description": "Standalone audio enhancement / vocal isolation jobs"},
-    {"name": "Categorization", "description": "Text-based topic categorization"},
-    {"name": "Moderation", "description": "Content safety / moderation analysis"},
-    {"name": "Realtime", "description": "SSE and WebSocket streaming endpoints"},
-    {"name": "Jobs", "description": "Job status polling"},
-]
-
-app = FastAPI(
-    title="Hear AI Service",
-    version="2.0.0",
-    description=OPENAPI_DESCRIPTION,
-    lifespan=lifespan,
-    openapi_tags=TAGS_METADATA,
-    docs_url="/docs" if settings.ENABLE_DOCS else None,
-    redoc_url="/redoc" if settings.ENABLE_DOCS else None,
-    openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
-    contact={"name": "Techta Labs", "url": "https://techta.co"},
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    sentry_sdk.capture_exception(exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "type": type(exc).__name__},
+    app = FastAPI(
+        title="Hear AI Service",
+        version="3.0.0",
+        description=OPENAPI_DESCRIPTION,
+        openapi_tags=TAGS_METADATA,
+        docs_url="/docs" if settings.ENABLE_DOCS else None,
+        redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+        contact={"name": "Techta Labs", "url": "https://techta.co"},
     )
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-app.include_router(api_router)
+    @app.exception_handler(Exception)
+    async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        sentry_sdk.capture_exception(exc)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
+    app.include_router(api_router)
 
-def custom_openapi():
-    if app.openapi_schema:
+    def _custom_openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            tags=app.openapi_tags,
+            routes=app.routes,
+        )
+        app.openapi_schema = schema
         return app.openapi_schema
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        tags=app.openapi_tags,
-        routes=app.routes,
-    )
-    app.openapi_schema = schema
-    return app.openapi_schema
+
+    app.openapi = _custom_openapi
+    return app
 
 
-app.openapi = custom_openapi
-
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, workers=1, reload=False)
+app = create_app()

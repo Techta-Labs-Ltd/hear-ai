@@ -16,6 +16,7 @@ class SegmentChange(BaseModel):
     segment_start: float
     segment_end: float
     new_text: str
+    original_text: Optional[str] = None
 
 
 class PipelineRequest(BaseModel):
@@ -73,6 +74,18 @@ class EnhanceRequest(BaseModel):
     track_id: str
 
 
+class CategorizeResponse(BaseModel):
+    tags: list[str]
+    categories: list[str]
+    confidence_scores: dict[str, float] = Field(default_factory=dict)
+    sentiment: str = "neutral"
+    new_tags_added: list[str] = Field(default_factory=list)
+    new_categories_added: list[str] = Field(default_factory=list)
+    settings_applied: bool = False
+    llm_used: bool = False
+    categorizer_mode: str = "nli"
+
+
 class CategorizeRequest(BaseModel):
     text: str
     custom_tags: list[str] = Field(default_factory=list)
@@ -93,9 +106,56 @@ class ReconstructRequest(BaseModel):
     same_speaker: bool = True
 
 
+class EditTranscriptRequest(BaseModel):
+    job_id: str
+    track_id: str
+    edited_transcript: str
+    same_speaker: bool = True
+    user_id: Optional[str] = None
+
+
+class ReconstructConfirmRequest(BaseModel):
+    preview_id: str
+    track_id: str
+    user_id: Optional[str] = None
+
+
+class ReconstructRemoveRequest(BaseModel):
+    track_id: str
+    audio_url: str
+    segment_start: float
+    segment_end: float
+    user_id: Optional[str] = None
+
+
 class JobAccepted(BaseModel):
     job_id: str
     status: str = "accepted"
+
+
+class DiscoveryCatalogItem(BaseModel):
+    track_id: str
+    job_id: str
+    discovery: dict
+    latest_at: str = ""
+    published_at: str = ""
+    trending_score: float = 0.0
+    completed_at: str | None = None
+
+
+class DiscoveryCatalogResponse(BaseModel):
+    sort: str
+    limit: int
+    offset: int
+    total: int
+    items: list[DiscoveryCatalogItem]
+
+
+class TaxonomySyncResponse(BaseModel):
+    tags_added: list[str] = Field(default_factory=list)
+    categories_added: list[str] = Field(default_factory=list)
+    total_tags: int = 0
+    total_categories: int = 0
 
 
 class HealthResponse(BaseModel):
@@ -105,3 +165,5 @@ class HealthResponse(BaseModel):
     models_loaded: list[str]
     active_jobs: int
     queued_jobs: int
+    gpu_memory: dict[str, float] = {}
+    redis_status: str = "disabled"
