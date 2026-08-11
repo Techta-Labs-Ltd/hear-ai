@@ -4,15 +4,18 @@ No GPU or network needed — tests file I/O operations only.
 Uses a temp directory that is cleaned up after each test.
 """
 
+import datetime
+import io
 import json
 import os
 import shutil
 import tempfile
+import wave
 
 import numpy as np
 import pytest
 
-from app.services.voice_profile import (
+from hear.services.reconstruction.voice_profile import (
     _METADATA_FILENAME,
     _REFERENCE_AUDIO_FILENAME,
     _REFERENCE_TEXT_FILENAME,
@@ -31,9 +34,6 @@ def _generate_wav_bytes(
     frequency: float = 440.0,
 ) -> bytes:
     """Generate a minimal valid WAV file."""
-    import io
-    import wave
-
     n_samples = int(sample_rate * duration_s)
     t = np.linspace(0, duration_s, n_samples, endpoint=False)
     signal = (0.3 * np.sin(2 * np.pi * frequency * t) * 32767).astype(np.int16)
@@ -53,8 +53,8 @@ def temp_profiles_dir(monkeypatch, tmp_path):
     profiles_dir = str(tmp_path / "voice_profiles")
     os.makedirs(profiles_dir, exist_ok=True)
 
-    monkeypatch.setattr("app.services.voice_profile._profiles_root", lambda: profiles_dir)
-    monkeypatch.setattr("app.services.voice_profile._profile_dir", lambda user_id: (
+    monkeypatch.setattr("hear.services.reconstruction.voice_profile._profiles_root", lambda: profiles_dir)
+    monkeypatch.setattr("hear.services.reconstruction.voice_profile._profile_dir", lambda user_id: (
         lambda pd=profiles_dir, uid=user_id: (
             d := os.path.join(pd, uid.replace(os.sep, "_").replace("..", "_")),
             os.makedirs(d, exist_ok=True),
@@ -187,7 +187,6 @@ class TestCleanupProfiles:
         with open(meta_path) as f:
             meta = json.load(f)
 
-        import datetime
         old_ts = (datetime.datetime.utcnow() - datetime.timedelta(hours=200)).isoformat()
         meta["updated_at"] = old_ts
         meta["created_at"] = old_ts

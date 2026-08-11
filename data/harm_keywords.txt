@@ -1,6 +1,0 @@
-[HARM_KEYWORDS]
-
-[PLATFORM_KEYWORDS]
-spam
-scam
-fraud

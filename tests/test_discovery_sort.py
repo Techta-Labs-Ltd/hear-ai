@@ -1,5 +1,5 @@
-from app.core.discovery_sort import sort_discovery_items
-from app.models.discovery import discovery_to_callback_dict, ContentDiscoveryProfile
+from hear.core.discovery_sort import sort_discovery_items
+from hear.models.discovery import discovery_to_callback_dict, ContentDiscoveryProfile
 
 
 def test_discovery_callback_includes_latest_and_trending_fields():

@@ -1,154 +1,151 @@
-# Hear AI Service
+# Hear AI
 
-GPU-accelerated audio intelligence service for the [Hear](https://hear.surf) platform.
+Hear AI is one Python project containing the audio intelligence pipeline,
+and model deployments. Ray Serve owns model lifecycle,
+scheduling, the FastAPI ingress, and the built-in gRPC proxy.
 
-Current architecture is **track-first**:
-- pipeline and standalone jobs run on `track_id`
-- realtime payloads are run-scoped (`job_id`, `run_id`, `track_id`)
-- `magic_clean` is standalone enhancement only
-- rebuild supports edited transcript audio generation (self-hosted Higgs path)
+## Runtime architecture
 
-### Database and temp files
-
-- **PostgreSQL** is required for the API and worker, but it does **not** have to run on the same machine as Hear AI. On a **RunPod GPU template** there is usually no local Postgres; point `DATABASE_URL` at a **remote** database (managed Postgres, RDS, Neon, Supabase, a Hear-hosted instance, etc.) that this pod can reach over the network (TLS and firewall rules must allow it). Example shape: `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require` (the port must be a **number**, usually `5432`, never the literal word `PORT`). On first successful connection, `init_db()` creates tables, enables `pgcrypto`, and applies lightweight migrations.
-- **Temp audio** lives under `HEAR_TMP_DIR` (default OS temp `hear-ai/`) with per-job subfolders `jobs/{job_id}/{run_id}/`. Tracked paths are stored in `ai_temp_files` and cleaned when jobs finish, cancel, or fail, plus a periodic sweep.
-- **RunPod / bare metal**: use `start.sh` or `make start` so DNS, deps, env checks, a **network** Postgres ping (validates `DATABASE_URL`), and an initial temp sweep run before Supervisor starts the app. Use `make errors-tail`, `make migrate`, `make clean-temp`, `make psql` as needed.
-
----
-
-## Core Flow
-
-### Pipeline (`job_type=pipeline`)
-1. Fetch track: `GET /api/v1/internal/tracks/{track_id}/for-ai`
-2. Transcription (Whisper)
-3. Moderation (Toxic-BERT + optional Qwen)
-4. Categorization/tagging (keyword + NLI + optional Qwen/OpenAI)
-5. Callback delivery
-
-### Rebuild (`job_type=rebuild`)
-1. Accept edited transcript
-2. Generate rebuilt speech with self-hosted Higgs (`higgs_audio` module)
-3. Splice rebuilt speech into original track waveform
-4. Re-run moderation and categorization from edited text
-5. Return rebuilt audio metadata in result payload
-
-### Magic Clean (`job_type=magic_clean`)
-1. Fetch track
-2. Enhance via Demucs/noise pipeline
-3. Return enhancement payload only
-
----
-
-## Main Endpoints
-
-All endpoints require `X-Service-Key`.
-
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/v1/process` | Submit track-first async job (`pipeline`, `rebuild`, `transcription`, `categorization`) |
-| `POST` | `/api/v1/process-realtime` | Submit track-first realtime job |
-| `POST` | `/api/v1/transcribe` | Standalone transcription job |
-| `POST` | `/api/v1/enhance` | Standalone magic clean job |
-| `POST` | `/api/v1/reconstruct` | Segment-level reconstruction on a track audio URL |
-| `GET` | `/api/v1/jobs/{job_id}` | Job + run status |
-| `GET` | `/api/v1/events/{job_id}` | SSE stream |
-| `WS` | `/ws/{job_id}` | WebSocket stream |
-| `GET` | `/health` | Service health + model availability |
-
----
-
-## Request Examples
-
-### Track-first pipeline submit
-
-```json
-POST /api/v1/process
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "track_id": "3162d6ce-aa3a-473e-aa25-fc5679eb60c0",
-  "job_type": "pipeline",
-  "max_tags": 8
-}
+```text
+HTTP client -> Ray Serve HTTP proxy :8000 -> FastAPI ingress --+
+                                                               |
+gRPC client -> Ray Serve gRPC proxy :50051 --------------------+
+                                                               v
+                                                Gateway (application=hear)
+    |-- Orchestrator
+    |-- Whisper + Qwen aligner
+    |-- Qwen LLM
+    |-- Toxicity, sentiment, and NLI models
+    |-- DeepFilterNet and MossFormer2
+    `-- Fish Speech
 ```
 
-### Rebuild submit
+FastAPI runs inside the Ray Serve ingress; there is no separate Uvicorn
+process, gRPC server, model sidecar, or runtime installer. Internal calls use
+injected Ray Serve deployment handles.
+Required Python packages, native libraries, PostgreSQL, and model artifacts
+must be provisioned before the process starts.
 
-```json
-POST /api/v1/process
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440001",
-  "track_id": "3162d6ce-aa3a-473e-aa25-fc5679eb60c0",
-  "job_type": "rebuild",
-  "edited_transcript": "Corrected wording for this track"
-}
+## Package management
+
+The project uses `uv` and commits `uv.lock`; there is no `requirements.txt` or
+hand-managed virtual environment workflow. Resolve dependencies during a
+controlled development/build step:
+
+```bash
+uv lock
+uv sync --frozen
 ```
 
-### Segment reconstruct
+Production images should run `uv sync --frozen --no-dev` while being built.
+When the image already provides the locked packages in its system Python, run
+uv in no-project mode. This does not create a project environment or install
+anything during startup:
 
-```json
-POST /api/v1/reconstruct
-{
-  "audio_url": "https://media.hear.surf/uploads/...wav",
-  "track_id": "3162d6ce-aa3a-473e-aa25-fc5679eb60c0",
-  "segment_start": 12.5,
-  "segment_end": 15.8,
-  "new_text": "The corrected sentence goes here"
-}
+```bash
+uv run --no-project python main.py
 ```
 
----
+For KubeRay, use a Ray image that already contains `uv` and set
+`RAY_RUNTIME_ENV_HOOK=ray._private.runtime_env.uv_runtime_env_hook.hook` on
+every Ray pod. Keep the project directory as the working directory so Ray and
+`uv` discover the same lockfile. The dependency environment and local model
+artifacts must be present before the Serve application starts.
 
-## Qwen Usage
+## Start
 
-Qwen is integrated through `app/services/llm_service.py`:
-- model id: `Qwen/Qwen2.5-7B-Instruct`
-- loaded at startup in `app/main.py`
-- used by:
-  - `app/services/moderator.py` in borderline/high-confidence moderation paths
-  - `app/services/categorizer.py` in primary tagging/categorization paths
+Copy `.env.example` to the deployment secret store and set every required
+model path. Validate the immutable runtime without starting Ray:
 
-If Qwen is unavailable, service falls back to local moderation/tagging pipelines.
+```bash
+uv run --no-project python main.py --validate-only
+```
 
----
+Start the complete application:
 
-## Data Files
+```bash
+uv run --no-project python main.py
+```
 
-- `data/categories.txt`:
-  - categories
-  - tags
-  - keyword rules for categorization
-- `data/harm_keywords.txt`:
-  - moderation keyword list
+`main.py` connects to `RAY_ADDRESS` or creates a local Ray runtime, starts the
+Ray Serve HTTP and gRPC proxies, registers the generated protobuf servicers,
+and deploys the single `hear` application.
 
----
+## Availability and concurrency
 
-## Environment Variables
+The production defaults run two stateless gateway replicas. Ray Serve
+load-balances requests across them and performs rolling replacement. A small
+Ray deployment sweeps abandoned audio from `HEAR_TEMP_DIR` at the configured
+interval, while normal job completion and failure paths clean their own files.
 
-Key variables from `.env.example`:
+The orchestrator is intentionally a single stateful replica because it owns
+live `Subscribe` streams. It admits at most
+`ORCHESTRATOR_MAX_CONCURRENT_JOBS` jobs (three by default); additional work is
+reported as queued and starts when a slot becomes available. Durable job state
+remains in PostgreSQL, while coordination and request routing use Ray rather
+than Redis.
 
-| Variable | Purpose |
-|---|---|
-| `AI_SERVICE_SECRET` | Request authentication key |
-| `HEAR_BACKEND_URL` | Backend base URL |
-| `HEAR_CALLBACK_URL` | Job callback target |
-| `MAX_CONCURRENT_JOBS` | Global concurrency |
-| `MAX_CONCURRENT_PIPELINE_JOBS` | Pipeline/rebuild concurrency |
-| `MAX_CONCURRENT_MAGIC_CLEAN_JOBS` | Magic clean concurrency |
-| `JOB_MAX_RETRIES` | Re-queue processing after transient errors (before terminal `failed`) |
-| `CALLBACK_RETRY_POLL_SECONDS` | Background interval to POST undelivered completed/failed callbacks |
-| `WHISPER_MODEL_SIZE` | Whisper model id (default `distil-large-v3` for speed on one GPU) |
-| `WHISPER_BEAM_SIZE` | Decoder beam width (`1` = fastest, `5` = best accuracy) |
-| `WHISPER_WORD_TIMESTAMPS` | Word-level timestamps (`false` = faster) |
-| `QWEN_LLM_ENABLED` | Load Qwen for moderation/categorization (`false` = faster, BERT+NLI only) |
-| `DEMUCS_MODEL` | Enhancement model |
-| `MODERATION_AUTO_LEARN` | Enable/disable phrase auto-learning in moderation |
-| `HIGGS_AUDIO_ENABLED` | Enable self-hosted Higgs rebuild path |
-| `HIGGS_AUDIO_VOICE` | Higgs voice id |
-| `OPENAI_API_KEY` | Optional OpenAI fallback/enrichment |
+## FastAPI
 
----
+Ray Serve hosts these system endpoints on `HTTP_PORT` (default `8000`):
 
-## Notes
+- `GET /`: service identity
+- `GET /health`: aggregate pipeline health
+- `GET /ready`: pipeline readiness status
+- `POST /process`: idempotent submission for every asynchronous job type
 
-- This codebase is now **track-first**. Any old `recording_id` pipeline contract is deprecated.
-- Rebuild requires local `higgs_audio` module installed for self-hosted synthesis.
+`POST /process` requires `X-Service-Key` for the submitted `backend_id`.
+Every request must include that registered backend identity and a job-scoped
+`storage` object containing an allowed B2 endpoint/bucket, temporary credentials,
+a user/job folder prefix, public base URL, and expiry. Missing or mismatched
+backend/storage context is rejected. The request `job_id` is its idempotency key: an identical resend returns the original
+`run_id` and current status, while a different payload for the same key returns
+HTTP `409`. Deliberate reruns must use a new `job_id`.
+
+OpenAPI documentation is exposed at `/docs` and `/openapi.json` only when
+`ENABLE_DOCS=true`. Typed application operations remain on gRPC.
+
+## gRPC
+
+Contracts and checked-in client stubs live in `hear/proto`. Every call must
+include:
+
+- `application: hear` for Ray Serve application routing
+- `x-api-key: <registered backend service key>` for backend-bound authentication
+
+The Pipeline service covers progress streaming, results, cancellation, queue
+status, moderation, categorization, reconstruction, discovery, administration,
+and aggregate health. Hear submits over REST, then consumes `Subscribe` and
+`GetResult` over gRPC. Terminal results are persisted and replayed after a
+stream reconnect. Jobs and results are isolated by the backend identity resolved
+from `x-api-key`; one backend cannot read or cancel another backend's jobs.
+Artifact results contain `backend_id`, `bucket_name`, `b2_key`, and a URL joined
+from the submitted public base URL, but never storage credentials.
+
+Ray Serve provides the gRPC proxy. Do not start `grpc.aio.server`, install
+packages, generate stubs, or download models in `main.py`.
+
+To regenerate stubs during a controlled build/development step:
+
+```bash
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. \
+  hear/proto/pipeline.proto
+```
+
+The generator version must be compatible with the protobuf runtime baked into
+the deployment image.
+
+## Project layout
+
+- `main.py`: only production entry point
+- `hear/config.py`: unified settings
+- `hear/deployments/`: Ray models, audio cleanup, orchestrator, and FastAPI/gRPC gateway graph
+- `hear/proto/`: Pipeline and Resolver protobuf contracts/stubs
+- `hear/services/`: application and audio-processing services
+- `hear/resolver/`: resolver domain implementation
+- `tests/`: unit, contract, and integration tests
+
+Outbound HTTP/S3 integrations to the Hear backend, taxonomy CDN, and object
+storage remain supported. Job result callbacks are not used; Hear consumes
+results through gRPC. System probes and job submission use FastAPI, while typed
+result and operation traffic uses gRPC.

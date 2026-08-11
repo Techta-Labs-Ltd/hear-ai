@@ -1,7 +1,7 @@
 import asyncio
 import json
-from app.core.downloader import download_audio
-from app.services.registry import transcriber
+from hear.core.downloader import download_audio
+from hear.services.registry import transcriber
 
 AUDIO_URL = "https://media.hear.surf/pipeline-source-mp3/8ad18866-e1c4-4055-9064-151958b0f8c3/1faaf4fe-717c-4180-a304-1b13743b7d0f-824a7377-e31e-4858-86bb-2505bf2c659e.mp3"
 

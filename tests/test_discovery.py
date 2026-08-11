@@ -1,7 +1,8 @@
 import pytest
 
-from app.core.discovery_taxonomy import DiscoveryTaxonomyLoader
-from app.models.discovery import (
+from hear.config import settings
+from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
+from hear.models.discovery import (
     ContentDiscoveryProfile,
     DiscoveryEntities,
     content_description_from_discovery,
@@ -9,7 +10,9 @@ from app.models.discovery import (
     discovery_to_callback_dict,
     flatten_entities,
 )
-from app.services.discovery import DiscoveryService
+from hear.services.categorization.discovery import DiscoveryService
+from hear.services.categorization.service import CategorizationService
+from hear.services.llm import LLMService
 
 
 @pytest.fixture
@@ -105,7 +108,7 @@ def test_flatten_entities():
 def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader, monkeypatch):
     svc = DiscoveryService()
     monkeypatch.setattr(
-        "app.services.discovery.discovery_taxonomy_loader",
+        "hear.services.categorization.discovery.discovery_taxonomy_loader",
         taxonomy_loader,
     )
     profile = ContentDiscoveryProfile(
@@ -126,8 +129,6 @@ def test_canonicalize_path(taxonomy_loader):
 
 
 def test_extract_json_nested_object():
-    from app.services.llm_service import LLMService
-
     raw = (
         'Here is the result: {"title_suggestion":"Guide dogs story","speaker":"Paul",'
         '"entities":{"people":["Paul","Annie"],"animals":["Rocco"]},"search_phrases":["a","b"]} end'
@@ -173,8 +174,6 @@ def test_enrich_profile_fills_search_phrases():
 
 
 def test_context_category_shortlist_ranks_music_from_transcript():
-    from app.services.categorizer import CategorizationService
-
     svc = CategorizationService()
     tx = (
         "We discuss a remix of Joan of Arc by Orchestral Manoeuvres in the Dark, "
@@ -190,8 +189,6 @@ def test_context_category_shortlist_ranks_music_from_transcript():
 
 
 def test_finalize_categories_uses_nli_when_llm_empty():
-    from app.services.categorizer import CategorizationService
-
     svc = CategorizationService()
     tx = "A remix of Joan of Arc by Orchestral Manoeuvres in the Dark."
     zs = {"Music": 0.8, "Podcast": 0.4, "Entertainment": 0.5}
@@ -200,23 +197,17 @@ def test_finalize_categories_uses_nli_when_llm_empty():
     assert "Podcast" not in cats
 
 
-def test_categorizer_prefers_music_over_podcast():
-    from app.services.categorizer import CategorizationService
-
+def test_categorizer_does_not_inject_subject_labels():
     svc = CategorizationService()
-    tx = (
-        "This episode is a heartfelt discussion about a remix of Joan of Arc by "
-        "Orchestral Manoeuvres in the Dark. We talk about love, loss, and how the song feels."
-    )
     tags, cats = svc._rebalance_subject_over_format(
-        tx,
+        "A discussion about a song.",
         ["#podcast", "#gaming"],
         ["Podcast", "Entertainment"],
     )
-    assert "Music" in cats
-    assert "#music" in tags
-    assert "Podcast" not in cats
-    assert "#podcast" not in tags
+    assert tags == ["#gaming"]
+    assert cats == ["Podcast", "Entertainment"]
+    assert "#music" not in tags
+    assert "Music" not in cats
 
 
 def test_sanitize_speaker_rejects_taxonomy_device_terms():
@@ -264,8 +255,6 @@ def test_taxonomy_label_terms_includes_leaf_segments(taxonomy_loader):
 
 
 def test_fallback_profile_when_llm_disabled(monkeypatch):
-    from app.config import settings
-
     monkeypatch.setattr(settings, "DISCOVERY_METADATA_ENABLED", False)
     svc = DiscoveryService()
     profile = svc._fallback_from_categorization(

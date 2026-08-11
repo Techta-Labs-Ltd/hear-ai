@@ -1,15 +1,19 @@
-import sys
-sys.path.insert(0, '/workspace/hear-ai')
-
-import httpx
-import boto3
-import tempfile
 import os
 import subprocess
-from app.config import settings
+import tempfile
+from urllib.parse import quote
 
+import boto3
+import httpx
+
+from hear.config import settings
 
 FISH_SPEECH_URL = settings.FISH_SPEECH_TTS_SERVER_URL.rstrip("/")
+ALEXA_B2_ENDPOINT_URL = os.environ["ALEXA_B2_ENDPOINT_URL"].rstrip("/")
+ALEXA_B2_KEY_ID = os.environ["ALEXA_B2_KEY_ID"]
+ALEXA_B2_APPLICATION_KEY = os.environ["ALEXA_B2_APPLICATION_KEY"]
+ALEXA_B2_BUCKET_NAME = os.environ["ALEXA_B2_BUCKET_NAME"]
+ALEXA_PUBLIC_BASE_URL = os.environ["ALEXA_PUBLIC_BASE_URL"].rstrip("/")
 
 
 def generate_speech(text: str) -> bytes:
@@ -51,17 +55,17 @@ def wav_to_mp3(wav_path: str, title: str) -> str:
 def upload_to_b2(local_path: str, remote_key: str, content_type: str) -> str:
     client = boto3.client(
         "s3",
-        endpoint_url=settings.B2_ENDPOINT_URL,
-        aws_access_key_id=settings.B2_KEY_ID,
-        aws_secret_access_key=settings.B2_APPLICATION_KEY,
+        endpoint_url=ALEXA_B2_ENDPOINT_URL,
+        aws_access_key_id=ALEXA_B2_KEY_ID,
+        aws_secret_access_key=ALEXA_B2_APPLICATION_KEY,
     )
     client.upload_file(
         local_path,
-        settings.B2_BUCKET_NAME,
+        ALEXA_B2_BUCKET_NAME,
         remote_key,
         ExtraArgs={"ContentType": content_type},
     )
-    return f"{settings.B2_ENDPOINT_URL}/{settings.B2_BUCKET_NAME}/{remote_key}"
+    return f"{ALEXA_PUBLIC_BASE_URL}/{quote(remote_key, safe='/')}"
 
 
 feedback_text = (

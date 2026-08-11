@@ -1,15 +1,15 @@
---- /tmp/whisperx-orig/whisperx/asr_qwen.py	2026-07-08 17:38:10.700504236 +0000
-+++ /usr/local/lib/python3.11/dist-packages/whisperx/asr_qwen.py	2026-07-08 18:52:09.380197916 +0000
+--- a/whisperx/asr_qwen.py
++++ b/whisperx/asr_qwen.py
 @@ -1,4 +1,5 @@
  from typing import Any, List, Optional, Union
 +import re
- 
+
  import numpy as np
  import torch
 @@ -11,6 +12,33 @@
- 
+
  logger = get_logger(__name__)
- 
+
 +PUNCTUATION_RE = re.compile(r"[^\w']+")
 +
 +
@@ -38,7 +38,7 @@
 +    return result
 +
  DEFAULT_QWEN_ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
- 
+
  WHISPER_TO_QWEN_LANGUAGE = {
 @@ -146,10 +174,12 @@
      qwen_device_map: Optional[str],
@@ -63,8 +63,8 @@
 +    if max_new_tokens is not None:
 +        kwargs["max_new_tokens"] = max_new_tokens
      return kwargs
- 
- 
+
+
 @@ -169,11 +203,13 @@
          vad,
          vad_params: dict,
@@ -76,10 +76,48 @@
          self._vad_params = vad_params
          self.preset_language = normalize_whisper_language_code(language)
 +        self.return_time_stamps = return_time_stamps
- 
+
      def _get_vad_preprocess(self):
          if hasattr(self.vad_model, "preprocess_audio") and hasattr(self.vad_model, "merge_chunks"):
-@@ -234,7 +270,7 @@
+@@ -200,13 +236,17 @@
+         if isinstance(audio, str):
+             audio = load_audio(audio)
+         audio_np = np.asarray(audio, dtype=np.float32)
++        audio_duration = len(audio_np) / SAMPLE_RATE
+
+         preprocess_audio, merge_chunks = self._get_vad_preprocess()
+         waveform = preprocess_audio(audio_np)
+         vad_segments = self.vad_model({"waveform": waveform, "sample_rate": SAMPLE_RATE})
+         if len(vad_segments) == 0:
+             out_language = normalize_whisper_language_code(language) or self.preset_language or "en"
+-            return {"segments": [], "language": out_language}
++            return {
++                "segments": [], "language": out_language,
++                "audio_duration": audio_duration, "speech_duration": 0.0,
++            }
+
+         vad_segments = merge_chunks(
+             vad_segments,
+@@ -214,9 +254,17 @@
+             onset=self._vad_params["vad_onset"],
+             offset=self._vad_params["vad_offset"],
+         )
++        speech_duration = sum(
++            max(0.0, float(seg["end"]) - float(seg["start"]))
++            for seg in vad_segments
++        )
++
+         if len(vad_segments) == 0:
+             out_language = normalize_whisper_language_code(language) or self.preset_language or "en"
+-            return {"segments": [], "language": out_language}
++            return {
++                "segments": [], "language": out_language,
++                "audio_duration": audio_duration, "speech_duration": 0.0,
++            }
+
+         whisper_lang_code = normalize_whisper_language_code(language) or self.preset_language
+         qwen_lang = whisper_language_code_to_qwen(whisper_lang_code)
+@@ -234,7 +282,7 @@
              sub_result = self.model.transcribe(
                  audio=sub_audio,
                  language=qwen_lang,
@@ -87,11 +125,20 @@
 +                return_time_stamps=self.return_time_stamps,
              )
              all_results.extend(sub_result)
- 
-@@ -260,13 +296,29 @@
+
+@@ -250,6 +298,8 @@
+                 progress_callback(((idx + 1) / total_segments) * 100)
+
+             text = str(getattr(out, "text", "")).strip()
++            if not text:
++                continue
+             if verbose:
+                 print(
+                     f"Transcript: [{round(seg['start'], 3)} --> {round(seg['end'], 3)}] {text}"
+@@ -260,20 +310,41 @@
              if detected_code:
                  detected_language_codes.append(detected_code)
- 
+
 -            segments.append(
 -                {
 -                    "text": text,
@@ -122,10 +169,23 @@
 +            if words:
 +                segment["words"] = words
 +            segments.append(segment)
- 
+
          if whisper_lang_code is not None:
              out_language = whisper_lang_code
-@@ -294,6 +346,9 @@
+         else:
+             out_language = next((code for code in detected_language_codes if code), "en")
+
+-        return {"segments": segments, "language": out_language}
++        return {
++            "segments": segments,
++            "language": out_language,
++            "audio_duration": audio_duration,
++            "speech_duration": speech_duration,
++        }
+
+
+ def load_model(
+@@ -294,6 +365,9 @@
      use_auth_token: Optional[Union[str, bool]] = None,
      qwen_dtype: str = "float16",
      qwen_device_map: Optional[str] = None,
@@ -135,7 +195,7 @@
  ) -> QwenAsrPipeline:
      del device_index, compute_type, asr_options, download_root, threads
      if task != "transcribe":
-@@ -315,8 +370,14 @@
+@@ -315,8 +389,14 @@
              qwen_device_map=qwen_device_map,
              local_files_only=local_files_only,
              use_auth_token=use_auth_token,
@@ -148,10 +208,10 @@
 +            **qwen_kwargs,
          )
 -        qwen_model = Qwen3ASRModel.from_pretrained(model_name, **qwen_kwargs)
- 
+
          if not _uses_hf_device_map(qwen_device_map):
              explicit_device = _to_explicit_device(device=device, qwen_device_map=qwen_device_map)
-@@ -328,6 +389,15 @@
+@@ -328,6 +408,15 @@
                      explicit_device,
                      exc,
                  )
@@ -164,10 +224,10 @@
 +                    explicit_device,
 +                    exc,
 +                )
- 
+
      default_vad_options = {
          "chunk_size": 30,
-@@ -355,4 +425,5 @@
+@@ -355,4 +444,5 @@
          vad=vad_model,
          vad_params=default_vad_options,
          language=language,

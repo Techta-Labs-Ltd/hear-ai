@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package hear.resolver.v1;
+
+service Resolver {
+  rpc Resolve (ResolveRequest) returns (ResolveReply);
+  rpc ResolverHealth (HealthRequest) returns (HealthReply);
+  rpc Rebuild (RebuildRequest) returns (RebuildReply);
+  rpc Apply (RebuildRequest) returns (RebuildReply);
+}
+
+message ResolveRequest {
+  string utterance = 1;
+  string country_code = 2;
+}
+
+message Entity {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  string city = 4;
+  string lat = 5;
+  string lng = 6;
+  string post_code = 7;
+  double confidence = 8;
+  string resolution = 9;
+}
+
+message Temporal {
+  string type = 1;
+  string value = 2;
+  string date = 3;
+}
+
+message ResolveReply {
+  int32 version = 1;
+  Entity category = 2;
+  Entity creator = 3;
+  Entity organisation = 4;
+  Entity location = 5;
+  repeated Entity tags = 6;
+  Temporal temporal = 7;
+  string freetext = 8;
+  string action = 9;
+  bool cache_hit = 10;
+  double resolved_in_ms = 11;
+  repeated Entity candidates = 12;
+}
+
+message HealthRequest {}
+
+message HealthReply {
+  string status = 1;
+  int32 version = 2;
+  bool ready = 3;
+}
+
+message RebuildRequest {
+  optional int32 version = 1;
+}
+
+message RebuildReply {
+  string status = 1;
+  int32 current_version = 2;
+  string detail = 3;
+}

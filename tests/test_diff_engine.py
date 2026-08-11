@@ -7,8 +7,9 @@ network access required.
 
 import pytest
 
-from app.services.diff_engine import (
+from hear.services.reconstruction.diff import (
     EditSegment,
+    _WordToken,
     _compute_edited_text,
     _edit_distance,
     _expand_ranges,
@@ -96,7 +97,6 @@ class TestExpandRanges:
 
 class TestMergeOverlappingRanges:
     def _make_words(self, n: int, gap: float = 0.5):
-        from app.services.diff_engine import _WordToken
         return [_WordToken(word=f"w{i}", start=i * gap, end=i * gap + 0.3) for i in range(n)]
 
     def test_merge_adjacent(self):

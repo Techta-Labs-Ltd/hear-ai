@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from app.core.category_loader import CategoryLoader, _taxonomy_path_to_tag
+from hear.core.category_loader import CategoryLoader, _taxonomy_path_to_tag
 
 
 def test_taxonomy_path_to_tag():

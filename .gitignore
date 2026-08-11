@@ -26,8 +26,6 @@ build/
 *.safetensors
 
 .venv/
-venv/
-env/
 
 .idea/
 .vscode/

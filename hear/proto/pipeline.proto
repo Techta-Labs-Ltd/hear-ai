@@ -1,0 +1,435 @@
+syntax = "proto3";
+
+package hear.pipeline.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+service Pipeline {
+  rpc SubmitJob (SubmitJobRequest) returns (SubmitJobResponse);
+  rpc Subscribe (SubscribeRequest) returns (stream PipelineEvent);
+  rpc GetResult (GetResultRequest) returns (JobResult);
+  rpc CancelJob (GetResultRequest) returns (JobResult);
+  rpc GetQueueStats (google.protobuf.Empty) returns (QueueStatsReply);
+  rpc Moderate (TextRequest) returns (ModerationReply);
+  rpc Categorize (CategorizeRequest) returns (CategorizationReply);
+  rpc CreatePreview (ReconstructRequest) returns (CreatePreviewReply);
+  rpc ConfirmPreview (PreviewRequest) returns (ConfirmPreviewReply);
+  rpc RemoveSegment (RemoveSegmentRequest) returns (RemoveSegmentReply);
+  rpc RollbackPreview (PreviewRequest) returns (RollbackPreviewReply);
+  rpc GetPreview (PreviewRequest) returns (Preview);
+  rpc ListDiscovery (DiscoveryRequest) returns (ListDiscoveryReply);
+  rpc TrainCategorizer (TrainRequest) returns (TrainReply);
+  rpc IngestCategoryEvent (CategoryEvent) returns (IngestReply);
+  rpc UpdatePlatformSettings (PlatformSettingsRequest) returns (PlatformSettingsReply);
+  rpc Health (google.protobuf.Empty) returns (HealthReply);
+}
+
+message SegmentChange {
+  double segment_start = 1;
+  double segment_end = 2;
+  string new_text = 3;
+  optional string original_text = 4;
+}
+
+message StorageContext {
+  string endpoint_url = 1;
+  string bucket_name = 2;
+  string key_id = 3;
+  string application_key = 4;
+  string folder_prefix = 5;
+  string public_base_url = 6;
+  string expires_at = 7;
+}
+
+message SubmitJobRequest {
+  string job_id = 1;
+  string track_id = 2;
+  string job_type = 3;
+  int32 max_tags = 4;
+  optional string audio_url = 5;
+  optional string edited_transcript = 6;
+  repeated SegmentChange changes = 7;
+  bool same_speaker = 8;
+  bool grouped = 9;
+  optional string group_id = 10;
+  string kind = 11;
+  optional string source = 12;
+  int32 track_count = 13;
+  repeated double speed_multipliers = 14;
+  optional string playback_instruction = 15;
+  optional string user_id = 16;
+  reserved 17;
+  reserved "track_exists";
+  optional int32 speech = 18;
+  optional int32 music = 19;
+  optional int32 background = 20;
+  optional string type = 21;
+  optional string media_file_id = 22;
+  optional bool cut_silence = 23;
+  string backend_id = 24;
+  StorageContext storage = 25;
+}
+
+message SubmitJobResponse {
+  string job_id = 1;
+  string run_id = 2;
+  string status = 3;
+  string error = 4;
+  string backend_id = 5;
+}
+
+message SubscribeRequest {
+  string job_id = 1;
+}
+
+message PipelineEvent {
+  string event = 1;
+  string job_id = 2;
+  string run_id = 3;
+  string track_id = 4;
+  string job_type = 5;
+  string status = 6;
+  string current_stage = 7;
+  string label = 8;
+  string description = 9;
+  int32 progress_pct = 10;
+  float elapsed_seconds = 11;
+  float estimated_remaining = 12;
+  string error = 13;
+  google.protobuf.Struct result = 14;
+  string backend_id = 15;
+}
+
+message GetResultRequest {
+  string job_id = 1;
+}
+
+message Word {
+  string word = 1;
+  double start = 2;
+  double end = 3;
+  float score = 4;
+  string speaker = 5;
+}
+
+message Segment {
+  double start = 1;
+  double end = 2;
+  string text = 3;
+  string speaker = 4;
+  repeated Word words = 5;
+}
+
+message TranscriptionObject {
+  string transcript = 1;
+  repeated Segment segments = 2;
+  string language = 3;
+  float confidence = 4;
+}
+
+message QualityMetrics {
+  float dnsmos_ovr = 1;
+  float loudness_match_db = 2;
+  float duration_delta_ms = 3;
+  bool clipping_detected = 4;
+  bool passed = 5;
+}
+
+message EnhancedAudio {
+  string audio_url = 1;
+  string b2_key = 2;
+  string bucket_name = 3;
+  string backend_id = 4;
+}
+
+message AudioQuality {
+  float quality_score = 1;
+  float snr_db = 2;
+  float peak_db = 3;
+  float lufs = 4;
+  bool clipping_detected = 5;
+}
+
+message RebuiltAudio {
+  string audio_url = 1;
+  string b2_key = 2;
+  float duration = 3;
+  string bucket_name = 4;
+  string backend_id = 5;
+}
+
+message SegmentAudio {
+  double segment_start = 1;
+  double segment_end = 2;
+  string b2_key = 3;
+  string audio_url = 4;
+  float duration = 5;
+  bool is_deletion = 6;
+  string bucket_name = 7;
+  string backend_id = 8;
+}
+
+message PipelinePayload {
+  string source_audio_url = 1;
+  TranscriptionObject transcription = 2;
+  ModerationReply moderation = 3;
+  optional CategorizationReply categorization = 4;
+  optional string edited_transcript = 5;
+  google.protobuf.Struct discovery = 6;
+  string content_description = 7;
+  google.protobuf.Struct compressed_audio = 8;
+  google.protobuf.Struct report = 9;
+  bool flagged = 10;
+}
+
+message TranscriptionPayload {
+  string source_audio_url = 1;
+  TranscriptionObject transcription = 2;
+}
+
+message AudioTagPayload {
+  string source_audio_url = 1;
+  string transcription = 2;
+  repeated string suggestions = 3;
+}
+
+message MagicCleanPayload {
+  bool enhanced = 1;
+  EnhancedAudio enhanced_audio = 2;
+  AudioQuality quality = 3;
+  google.protobuf.Struct stage_times = 4;
+  TranscriptionObject transcription = 5;
+  ModerationReply moderation = 6;
+}
+
+message ReconstructPayload {
+  optional string edited_transcript = 1;
+  RebuiltAudio rebuilt_audio = 2;
+  bool is_regenerated = 3;
+  TranscriptionObject transcription = 4;
+  ModerationReply moderation = 5;
+  repeated SegmentAudio segments = 6;
+}
+
+message JobResult {
+  string backend_id = 9;
+  reserved "callback_delivered";
+  string job_id = 1;
+  string run_id = 2;
+  string track_id = 3;
+  string job_type = 4;
+  string status = 5;
+  string current_stage = 6;
+  string error = 7;
+  oneof payload {
+    PipelinePayload pipeline = 10;
+    TranscriptionPayload transcription = 11;
+    AudioTagPayload audio_tag = 12;
+    MagicCleanPayload magic_clean = 13;
+    ReconstructPayload reconstruct = 14;
+  }
+}
+
+message TextRequest {
+  string text = 1;
+}
+
+message CategorizeRequest {
+  string text = 1;
+  repeated string custom_tags = 2;
+  int32 max_tags = 3;
+}
+
+message ReconstructRequest {
+  string audio_url = 1;
+  string track_id = 2;
+  repeated SegmentChange changes = 3;
+  optional double segment_start = 4;
+  optional double segment_end = 5;
+  optional string new_text = 6;
+  bool same_speaker = 7;
+  string backend_id = 8;
+  StorageContext storage = 9;
+}
+
+message PreviewRequest {
+  string preview_id = 1;
+  optional string track_id = 2;
+  optional string user_id = 3;
+}
+
+message RemoveSegmentRequest {
+  string track_id = 1;
+  string audio_url = 2;
+  double segment_start = 3;
+  double segment_end = 4;
+  optional string user_id = 5;
+  string backend_id = 6;
+  StorageContext storage = 7;
+}
+
+message DiscoveryRequest {
+  string sort = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message TrainRequest {
+  string target = 1;
+}
+
+message CategoryEvent {
+  string event_type = 1;
+  string text = 2;
+  optional string category = 3;
+  repeated string tags = 4;
+  optional string label = 5;
+  optional string source_id = 6;
+}
+
+message PlatformSettingsRequest {
+  string blocked_keywords = 1;
+  string auto_tag_keywords = 2;
+}
+
+message QueueStatsReply {
+  int32 active = 1;
+  int32 queued = 2;
+  int32 total = 3;
+  float estimated_wait_s = 4;
+  float avg_job_duration_s = 5;
+}
+
+message ModerationReply {
+  bool flagged = 1;
+  string severity = 2;
+  string intent = 3;
+  string reason = 4;
+  repeated string flagged_categories = 5;
+  repeated string blocked_words_found = 6;
+}
+
+message CategorizationReply {
+  repeated string categories = 1;
+  repeated string tags = 2;
+  google.protobuf.Struct confidence_scores = 3;
+  string sentiment = 4;
+  repeated string new_tags_added = 5;
+  repeated string new_categories_added = 6;
+  bool settings_applied = 7;
+  bool llm_used = 8;
+  string categorizer_mode = 9;
+}
+
+message CreatePreviewReply {
+  string preview_id = 1;
+  string preview_audio_url = 2;
+  float preview_duration = 3;
+  QualityMetrics quality_metrics = 4;
+  string expires_at = 5;
+  int32 segments_applied = 6;
+  string track_id = 7;
+  repeated SegmentAudio segments = 8;
+  string b2_key = 9;
+  string bucket_name = 10;
+  string backend_id = 11;
+}
+
+message ConfirmPreviewReply {
+  string audio_url = 1;
+  string b2_key = 2;
+  float duration = 3;
+  string track_id = 4;
+  optional string user_id = 5;
+  string job_type = 6;
+  string action = 7;
+  string status = 8;
+  string bucket_name = 9;
+  string backend_id = 10;
+}
+
+message RemoveSegmentReply {
+  string audio_url = 1;
+  string b2_key = 2;
+  float duration = 3;
+  int32 segments_removed = 4;
+  float removed_duration = 5;
+  string track_id = 6;
+  optional string user_id = 7;
+  string job_type = 8;
+  string action = 9;
+  string status = 10;
+  string bucket_name = 11;
+  string backend_id = 12;
+}
+
+message RollbackPreviewReply {
+  string preview_id = 1;
+  string status = 2;
+}
+
+message Preview {
+  string preview_id = 1;
+  string track_id = 2;
+  string audio_url = 3;
+  string b2_key = 4;
+  string status = 5;
+  string expires_at = 6;
+  repeated SegmentChange changes = 7;
+  bool same_speaker = 8;
+  string created_at = 9;
+  optional string user_id = 10;
+  QualityMetrics quality_metrics = 11;
+  string bucket_name = 12;
+  string backend_id = 13;
+}
+
+message DiscoveryItem {
+  string track_id = 1;
+  string job_id = 2;
+  google.protobuf.Struct discovery = 3;
+  string latest_at = 4;
+  string published_at = 5;
+  float trending_score = 6;
+  string completed_at = 7;
+}
+
+message ListDiscoveryReply {
+  string sort = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  int32 total = 4;
+  repeated DiscoveryItem items = 5;
+}
+
+message TrainReply {
+  string status = 1;
+  string detail = 2;
+}
+
+message IngestReply {
+  string status = 1;
+  string example_id = 2;
+}
+
+message PlatformSettingsReply {
+  string status = 1;
+  int32 blocked_keywords_count = 2;
+  int32 auto_tag_keywords_count = 3;
+}
+
+message GpuMemory {
+  float free_mb = 1;
+  float used_mb = 2;
+  float total_mb = 3;
+}
+
+message HealthReply {
+  string status = 1;
+  bool gpu_available = 2;
+  string gpu_name = 3;
+  GpuMemory gpu_memory = 4;
+  int32 active_jobs = 5;
+  int32 queued_jobs = 6;
+}

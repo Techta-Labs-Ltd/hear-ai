@@ -1,11 +1,11 @@
-from app.core.discovery_taxonomy import DiscoveryTaxonomyLoader
-from app.core.content_context import (
+from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
+from hear.core.content_context import (
     assistive_tech_narrative,
     filter_controlled_taxonomy_paths,
     filter_freeform_tag_labels,
     tech_history_narrative,
 )
-from app.services.categorizer import CategorizationService
+from hear.services.categorization.service import CategorizationService
 
 
 MINIDISC_SNIPPET = (
@@ -56,3 +56,39 @@ def test_categorizer_strips_wildlife_from_minidisc_editorial():
     assert "#wildlife" not in tags
     assert "#accessibility" not in tags
     assert "Technology" in cats
+
+
+TREE_PLANTING_NEWS = (
+    "More than ten thousand trees were planted across North Northamptonshire. "
+    "The council thanked schools, volunteers, community groups, and local businesses "
+    "for supporting the annual tree planting programme."
+)
+
+
+def test_tree_planting_news_rejects_unrelated_assistive_labels():
+    svc = CategorizationService()
+    tags, categories = svc._apply_editorial_rules(
+        TREE_PLANTING_NEWS,
+        ["#guidedogs", "#community", "#communitydevelopment"],
+        ["Personal lived experience", "Environment", "News"],
+        5,
+    )
+    assert "#guidedogs" not in tags
+    assert "Personal lived experience" not in categories
+    assert tags == ["#community"]
+    assert categories == ["Environment", "News"]
+
+
+def test_editorial_rules_do_not_inject_hardcoded_subject_labels():
+    svc = CategorizationService()
+    tags, categories = svc._apply_editorial_rules(
+        TREE_PLANTING_NEWS, [], [], 5
+    )
+    assert tags == []
+    assert categories == []
+
+
+def test_long_spoken_search_tag_requires_word_separators():
+    svc = CategorizationService()
+    assert svc._normalize_tag("communitydevelopment") == ""
+    assert svc._normalize_tag("north northamptonshire") == "#north-northamptonshire"
