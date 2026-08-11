@@ -52,6 +52,39 @@ every Ray pod. Keep the project directory as the working directory so Ray and
 `uv` discover the same lockfile. The dependency environment and local model
 artifacts must be present before the Serve application starts.
 
+## RunPod persistent workspace
+
+RunPod treats `/root` as ephemeral. Before installing dependencies or downloading
+model artifacts, source the workspace environment helper:
+
+```bash
+cd /workspace/hear-ai
+source scripts/runpod-workspace-env.sh
+```
+
+The helper only creates persistent directories and exports cache paths. It does
+not install packages, copy existing assets, or contact Hugging Face. Model
+downloads remain an explicit operator action; when later authorized,
+`scripts/download_models_ray.py` stores them under `/workspace/models` by
+default. Keep `.env` model paths aligned with `.env.example`.
+
+After a CUDA or base-image maintenance event, rebuild the project environment
+from the committed lockfile instead of reusing a virtual environment created
+against the previous image:
+
+```bash
+cd /workspace/hear-ai
+source scripts/runpod-workspace-env.sh
+mv .venv .venv.pre-cuda13  # recoverable backup, if an old environment exists
+uv sync --frozen
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+uv run --no-project python main.py --validate-only
+```
+
+Do not run the removal command during preparation; it is a post-maintenance
+operator step. The locked CUDA 12.8 PyTorch build should be tested against the
+new NVIDIA driver before changing dependency versions.
+
 ## Start
 
 Copy `.env.example` to the deployment secret store and set every required

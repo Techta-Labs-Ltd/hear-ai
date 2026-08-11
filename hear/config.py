@@ -76,22 +76,22 @@ class Settings(BaseSettings):
     HEAR_TEMP_DIR: str = str(PROJECT_ROOT / "audio")
     AUDIO_CLEANUP_INTERVAL_SECONDS: float = 300.0
     AUDIO_MAX_AGE_SECONDS: float = 24 * 60 * 60
-    TRAINING_CHECKPOINT_DIR: str = "/var/lib/hear-ai/checkpoints"
-    MODEL_CACHE_DIR: str = "/opt/ml/models"
-    QWEN_ASR_MODEL_PATH: str = ""
-    ALIGNER_MODEL_PATH: str = ""
-    LLM_MODEL_PATH: str = ""
-    TOXIC_MODEL_PATH: str = ""
-    SENTIMENT_MODEL_PATH: str = ""
-    NLI_MODEL_PATH: str = ""
-    MOSSFORMER_MODEL_PATH: str = ""
+    TRAINING_CHECKPOINT_DIR: str = "/workspace/checkpoints"
+    MODEL_CACHE_DIR: str = "/workspace/models"
+    QWEN_ASR_MODEL_PATH: str = "/workspace/models/qwen3-asr-1.7b"
+    ALIGNER_MODEL_PATH: str = "/workspace/models/qwen3-forced-aligner"
+    LLM_MODEL_PATH: str = "/workspace/models/qwen2.5-7b-instruct"
+    TOXIC_MODEL_PATH: str = "/workspace/models/toxic-bert"
+    SENTIMENT_MODEL_PATH: str = "/workspace/models/twitter-roberta-sentiment"
+    NLI_MODEL_PATH: str = "/workspace/models/nli-distilroberta"
+    MOSSFORMER_MODEL_PATH: str = "/workspace/models/mossformer2-se-48k"
     DEMUCS_MODEL: str = "htdemucs"
 
     MODERATION_AUTO_LEARN: bool = False
     FISH_SPEECH_TTS_ENABLED: bool = True
-    FISH_SPEECH_HOME: str = "/root/fish-speech"
-    FISH_SPEECH_CHECKPOINT_PATH: str = "checkpoints/s2-pro"
-    FISH_SPEECH_CODEC_PATH: str = "checkpoints/s2-pro/codec.pth"
+    FISH_SPEECH_HOME: str = "/workspace/fish-speech"
+    FISH_SPEECH_CHECKPOINT_PATH: str = "/workspace/models/fish-speech/s2-pro"
+    FISH_SPEECH_CODEC_PATH: str = "/workspace/models/fish-speech/s2-pro/codec.pth"
     FISH_SPEECH_BNB_MODE: str = "nf4"
     REGENERATION_PREVIEW_TTL_SECONDS: int = 3600
 

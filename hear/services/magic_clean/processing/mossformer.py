@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchaudio
-
 from clearvoice import ClearVoice
 
 logger = logging.getLogger(__name__)
@@ -23,11 +22,11 @@ class MossFormer2Enhancer:
     def load(self):
         # ClearVoice hardcodes this relative checkpoint directory in its bundled
         # YAML. Resolve it through a lightweight runtime symlink so scale-to-zero
-        # replicas reuse the persistent model under /root instead of downloading
+        # replicas reuse the persistent workspace model instead of downloading
         # hundreds of MB into the workspace on every cold start.
         model_root = Path(
             os.environ.get(
-                "MOSSFORMER_MODEL_PATH", "/root/models/mossformer2-se-48k"
+                "MOSSFORMER_MODEL_PATH", "/workspace/models/mossformer2-se-48k"
             )
         )
         if not (model_root / "last_best_checkpoint").is_file():

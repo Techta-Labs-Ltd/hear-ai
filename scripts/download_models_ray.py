@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import argparse
 import json
 import os
 from pathlib import Path
+
 import ray
 from huggingface_hub import snapshot_download
 
@@ -34,13 +36,16 @@ def download_model(repo_id: str, destination: str) -> dict[str, str]:
     path = snapshot_download(
         repo_id=repo_id,
         local_dir=destination,
+        cache_dir=os.environ.get(
+            "HF_HUB_CACHE", "/workspace/.cache/huggingface/hub"
+        ),
         ignore_patterns=UNUSED_MODEL_FORMATS,
     )
     return {"repo_id": repo_id, "path": path}
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default="/root/models")
+    parser.add_argument("--root", default="/workspace/models")
     parser.add_argument("--ray-address", default="local")
     args = parser.parse_args()
 

@@ -72,6 +72,33 @@ def test_runtime_validation_rejects_invalid_storage_encryption_key(tmp_path):
         validate_runtime(settings)
 
 
+def test_durable_defaults_use_workspace():
+    defaults = Settings(_env_file=None)
+
+    assert defaults.MODEL_CACHE_DIR == "/workspace/models"
+    assert defaults.QWEN_ASR_MODEL_PATH == "/workspace/models/qwen3-asr-1.7b"
+    assert defaults.MOSSFORMER_MODEL_PATH == "/workspace/models/mossformer2-se-48k"
+    assert defaults.TRAINING_CHECKPOINT_DIR == "/workspace/checkpoints"
+    assert defaults.FISH_SPEECH_HOME == "/workspace/fish-speech"
+    assert defaults.FISH_SPEECH_CHECKPOINT_PATH.startswith("/workspace/models/")
+    assert defaults.FISH_SPEECH_CODEC_PATH.startswith("/workspace/models/")
+
+
+def test_durable_paths_allow_environment_overrides(monkeypatch, tmp_path):
+    model_root = tmp_path / "models"
+    fish_root = tmp_path / "fish-speech"
+    checkpoint_root = tmp_path / "checkpoints"
+    monkeypatch.setenv("MODEL_CACHE_DIR", str(model_root))
+    monkeypatch.setenv("FISH_SPEECH_HOME", str(fish_root))
+    monkeypatch.setenv("TRAINING_CHECKPOINT_DIR", str(checkpoint_root))
+
+    configured = Settings(_env_file=None)
+
+    assert configured.MODEL_CACHE_DIR == str(model_root)
+    assert configured.FISH_SPEECH_HOME == str(fish_root)
+    assert configured.TRAINING_CHECKPOINT_DIR == str(checkpoint_root)
+
+
 def test_magic_clean_has_a_demucs_model_default(tmp_path):
     assert configured_settings(tmp_path).DEMUCS_MODEL == "htdemucs"
 

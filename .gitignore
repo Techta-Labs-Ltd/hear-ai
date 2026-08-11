@@ -2,6 +2,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.orig
+*.pid
+*.tmp
 *.egg-info/
 *.egg
 dist/
@@ -20,15 +23,21 @@ build/
 
 /hear_model/
 /models/
+/checkpoints/
 *.pt
+*.pth
+*.ckpt
 *.bin
 *.onnx
 *.safetensors
 
 .venv/
+venv/
+env/
 
 .idea/
 .vscode/
+.agents/
 *.swp
 *.swo
 *~
@@ -43,5 +52,8 @@ implementation_plan.md
 logs/
 
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
 htmlcov/
 .coverage
