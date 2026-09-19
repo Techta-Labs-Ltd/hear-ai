@@ -257,7 +257,9 @@ class PipelineGrpcService:
                 ),
                 segment_end=request.segment_end if request.HasField("segment_end") else None,
                 new_text=request.new_text if request.HasField("new_text") else None,
-                same_speaker=request.same_speaker,
+                same_speaker=(
+                    request.same_speaker if request.HasField("same_speaker") else True
+                ),
                 backend_id=backend_id,
                 storage_context=self._storage_context(request.storage),
             ),

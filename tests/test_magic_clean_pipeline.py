@@ -11,9 +11,6 @@ class RecordingProcessor:
         self.calls = calls
         self._loaded = False
 
-    def load(self) -> None:
-        self.calls.append("mossformer.load")
-
     def enhance(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
         self.calls.append("mossformer")
         return waveform
@@ -59,7 +56,12 @@ class RecordingProcessor:
     def load_stem(self, model: str) -> None:
         self.calls.append("stem.load")
 
-    def load(self, model: str | None = None) -> None:
+    def load(
+        self,
+        model: str | None = None,
+        model_path: str | None = None,
+    ) -> None:
+        del model_path
         self._loaded = True
         self.calls.append("stem.load" if model else "mossformer.load")
 
@@ -97,9 +99,7 @@ def test_default_speech_pipeline_preserves_timeline_and_skips_stem_separation():
     assert result.shape == waveform.shape
     assert calls == [
         "mossformer",
-        "spectral:0.65",
-        "speech_eq",
-        "deesser",
+        "spectral:0.0",
         "compress",
         "normalise",
         "limit",
@@ -149,13 +149,13 @@ def test_silence_cutting_is_opt_in_and_runs_before_final_loudness():
     )
 
     assert result.shape == (1, 50)
-    assert calls[-4:] == ["compress", "cut_silence", "normalise", "limit"]
+    assert calls[-4:] == ["cut_silence", "compress", "normalise", "limit"]
 
 
 def test_user_stem_percentages_are_applied_to_the_mix():
     calls: list[str] = []
     pipeline = make_pipeline(calls)
-    pipeline.load("htdemucs")
+    pipeline.load("htdemucs", demucs_model_path="/models/demucs")
     waveform = torch.ones(1, 100)
 
     result = pipeline.process(
@@ -168,14 +168,117 @@ def test_user_stem_percentages_are_applied_to_the_mix():
     torch.testing.assert_close(result, waveform * 0.5)
     assert "stem.load" in calls
     assert "stem" in calls
-    assert "spectral:0.9" in calls
+    assert "spectral:0.0" in calls
+
+
+def test_speech_only_stem_controls_never_restore_muted_accompaniment():
+    calls: list[str] = []
+    pipeline = make_pipeline(calls)
+    pipeline.load("htdemucs", demucs_model_path="/models/demucs")
+    waveform = torch.ones(1, 101)
+    pipeline._stem.separate = lambda _waveform, _sr: {
+        "vocals": torch.zeros_like(waveform),
+        "other": waveform,
+    }
+
+    result = pipeline.process(
+        waveform,
+        1_000,
+        ContentMode.SPEECH,
+        StemLevels(speech=100, music=0, background=0),
+    )
+
+    torch.testing.assert_close(result, torch.zeros_like(waveform))
+
+
+def test_catastrophic_speech_enhancer_collapse_restores_source_without_attenuation():
+    calls: list[str] = []
+    pipeline = make_pipeline(calls)
+    pipeline._mossformer.enhance = lambda waveform, _sr: torch.zeros_like(waveform)
+    waveform = torch.linspace(-0.2, 0.2, 1_001).unsqueeze(0)
+
+    result = pipeline.process(waveform, 1_000, ContentMode.SPEECH)
+
+    torch.testing.assert_close(result, waveform)
+
+
+def test_speech_protection_restores_only_the_collapsed_stereo_channel():
+    calls: list[str] = []
+    pipeline = make_pipeline(calls)
+
+    def collapse_right_channel(waveform: torch.Tensor, _sr: int) -> torch.Tensor:
+        enhanced = waveform.clone()
+        enhanced[0] *= 0.5
+        enhanced[1].zero_()
+        return enhanced
+
+    pipeline._mossformer.enhance = collapse_right_channel
+    waveform = torch.full((2, 1_000), 0.1)
+
+    result = pipeline.process(waveform, 1_000, ContentMode.SPEECH)
+
+    torch.testing.assert_close(result[0], waveform[0] * 0.5)
+    torch.testing.assert_close(result[1], waveform[1])
+
+
+def test_speech_protection_restores_fragmented_within_frame_erasure():
+    calls: list[str] = []
+    pipeline = make_pipeline(calls)
+
+    def erase_ninety_percent(waveform: torch.Tensor, _sr: int) -> torch.Tensor:
+        enhanced = waveform.clone().reshape(1, -1, 20)
+        enhanced[:, :, :18] = 0.0
+        return enhanced.reshape_as(waveform)
+
+    pipeline._mossformer.enhance = erase_ninety_percent
+    waveform = torch.full((1, 1_000), 0.1)
+
+    result = pipeline.process(waveform, 1_000, ContentMode.SPEECH)
+
+    torch.testing.assert_close(result, waveform)
+
+
+def test_speech_protection_restores_fragmented_near_zero_residual():
+    calls: list[str] = []
+    pipeline = make_pipeline(calls)
+
+    def attenuate_ninety_percent(waveform: torch.Tensor, _sr: int) -> torch.Tensor:
+        enhanced = waveform.clone().reshape(1, -1, 20)
+        enhanced[:, :, :18] = 1.1e-7
+        return enhanced.reshape_as(waveform)
+
+    pipeline._mossformer.enhance = attenuate_ninety_percent
+    waveform = torch.full((1, 1_000), 0.1)
+
+    result = pipeline.process(waveform, 1_000, ContentMode.SPEECH)
+
+    torch.testing.assert_close(result, waveform)
+
+
+def test_speech_protection_uses_the_delivery_activity_floor_for_quiet_audio():
+    calls: list[str] = []
+    pipeline = make_pipeline(calls)
+    pipeline._mossformer.enhance = lambda waveform, _sr: torch.zeros_like(waveform)
+    waveform = torch.full((1, 1_000), 5e-7)
+
+    result = pipeline.process(waveform, 1_000, ContentMode.SPEECH)
+
+    torch.testing.assert_close(result, waveform)
 
 
 def test_background_percentage_inversely_controls_bounded_noise_suppression():
-    assert MagicCleanPipeline._suppression_strength_for_background(100) == 0.0
-    assert MagicCleanPipeline._suppression_strength_for_background(50) == 0.5
-    assert MagicCleanPipeline._suppression_strength_for_background(10) == 0.9
-    assert MagicCleanPipeline._suppression_strength_for_background(0) == 0.9
+    calls: list[str] = []
+    safe_pipeline = make_pipeline(calls)
+    enabled_pipeline = make_pipeline(
+        calls,
+        MagicCleanProfile(enable_spectral_suppression=True),
+    )
+
+    assert safe_pipeline._suppression_strength_for_background(0) == 0.0
+    assert enabled_pipeline._suppression_strength_for_background(100) == 0.0
+    assert enabled_pipeline._suppression_strength_for_background(50) == 0.5
+    assert enabled_pipeline._suppression_strength_for_background(10) == 0.9
+    assert enabled_pipeline._suppression_strength_for_background(0) == 0.9
 
 
 def _reference_lookahead_limit(
@@ -193,7 +296,11 @@ def _reference_lookahead_limit(
     previous = 1.0
     for index, peak in enumerate(peaks):
         required = min(ceiling / (peak + 1e-10), 1.0)
-        previous = required if required < previous else release * previous + (1 - release) * required
+        previous = (
+            required
+            if required < previous
+            else release * previous + (1 - release) * required
+        )
         gain[index] = previous
     delayed = np.ones(len(signal), dtype=np.float64)
     delayed[lookahead:] = gain[: len(signal) - lookahead]
@@ -206,7 +313,10 @@ def test_rolling_limiter_matches_previous_algorithm():
     waveform = torch.randn(1, 8_000, generator=generator) * 0.8
     processor = DynamicsProcessor(torch.device("cpu"))
 
-    expected = _reference_lookahead_limit(processor, waveform, 8_000)
+    expected = processor.true_peak_limit(
+        _reference_lookahead_limit(processor, waveform, 8_000),
+        8_000,
+    )
     actual = processor.lookahead_limit(waveform, 8_000)
 
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
@@ -238,7 +348,7 @@ def test_chunked_pipeline_bounds_each_processing_window_and_preserves_length():
 
     assert result.shape == waveform.shape
     torch.testing.assert_close(result, waveform)
-    assert calls.count("mossformer") == 4
+    assert calls.count("mossformer") == 5
 
 
 def test_chunked_pipeline_rejects_overlap_as_large_as_chunk():
@@ -257,4 +367,3 @@ def test_chunked_pipeline_rejects_overlap_as_large_as_chunk():
         assert "overlap" in str(error)
     else:
         raise AssertionError("expected invalid overlap to be rejected")
-

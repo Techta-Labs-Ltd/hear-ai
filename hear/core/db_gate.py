@@ -2,6 +2,8 @@ import asyncio
 
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
+from hear.core.blocking import run_blocking_to_completion
+
 db_write_lock = asyncio.Lock()
 
 TRANSIENT_PGCODES = {"40001", "40P01"}
@@ -24,8 +26,15 @@ def is_transient_db_error(exc: BaseException) -> bool:
 
 
 async def commit_with_retry(db, retries: int = 12) -> None:
-    loop = asyncio.get_running_loop()
+    """Commit the staged transaction once, rolling it back on any failure.
 
+    ``retries`` remains accepted for compatibility with existing callers, but
+    commit failures are deliberately not retried here. A rollback discards the
+    session's staged mutations, so retrying only ``commit()`` can falsely report
+    success after committing an empty transaction. Retrying safely requires the
+    caller to replay the complete unit of work in a fresh transaction.
+    """
+    del retries
     def _commit() -> None:
         db.commit()
 
@@ -35,14 +44,13 @@ async def commit_with_retry(db, retries: int = 12) -> None:
         except Exception:
             pass
 
-    for attempt in range(retries):
-        try:
-            async with db_write_lock:
-                await loop.run_in_executor(None, _commit)
-            return
-        except Exception as exc:
-            await loop.run_in_executor(None, _rollback)
-            if is_transient_db_error(exc) and attempt < retries - 1:
-                await asyncio.sleep(0.04 * (2 ** min(attempt, 10)))
-                continue
-            raise
+    try:
+        async with db_write_lock:
+            # A DBAPI call already running in a worker thread cannot be
+            # abandoned safely: closing or rolling back the session while it
+            # is still committing creates a second race on the same
+            # connection. Defer caller cancellation until COMMIT is terminal.
+            await run_blocking_to_completion(_commit)
+    except BaseException:
+        await run_blocking_to_completion(_rollback)
+        raise

@@ -7,6 +7,7 @@ import boto3
 import httpx
 
 from hear.config import settings
+from hear.core.hear_temp import hear_temp_directory
 
 FISH_SPEECH_URL = settings.FISH_SPEECH_TTS_SERVER_URL.rstrip("/")
 ALEXA_B2_ENDPOINT_URL = os.environ["ALEXA_B2_ENDPOINT_URL"].rstrip("/")
@@ -32,7 +33,9 @@ def generate_speech(text: str) -> bytes:
 
 
 def wav_to_mp3(wav_path: str, title: str) -> str:
-    mp3_fd, mp3_path = tempfile.mkstemp(suffix=".mp3")
+    mp3_fd, mp3_path = tempfile.mkstemp(
+        suffix=".mp3", dir=hear_temp_directory()
+    )
     os.close(mp3_fd)
     subprocess.run(
         [
@@ -84,7 +87,9 @@ PREFIX = "alexa-playback"
 
 print("Generating Feedback Wrapper...")
 fb_wav = generate_speech(feedback_text)
-with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+with tempfile.NamedTemporaryFile(
+    suffix=".wav", delete=False, dir=hear_temp_directory()
+) as f:
     f.write(fb_wav)
     fb_wav_path = f.name
 fb_mp3 = wav_to_mp3(fb_wav_path, "Feedback Wrapper")
@@ -96,7 +101,9 @@ print(f"  -> {fb_url}")
 
 print("Generating Playback Outro...")
 ot_wav = generate_speech(outro_text)
-with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+with tempfile.NamedTemporaryFile(
+    suffix=".wav", delete=False, dir=hear_temp_directory()
+) as f:
     f.write(ot_wav)
     ot_wav_path = f.name
 ot_mp3 = wav_to_mp3(ot_wav_path, "Playback Outro")

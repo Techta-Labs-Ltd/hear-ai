@@ -7,12 +7,12 @@ import time
 import numpy as np
 import soundfile as sf
 import torch
+from fish_speech.inference_engine import TTSInferenceEngine
+from fish_speech.models.dac.inference import load_model as load_decoder_model
+from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
+from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
 from ray import serve
 
-from fish_speech.inference_engine import TTSInferenceEngine
-from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
-from fish_speech.models.dac.inference import load_model as load_decoder_model
-from fish_speech.utils.schema import ServeTTSRequest, ServeReferenceAudio
 from hear.config import settings
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,7 @@ class FishSpeechDeployment:
         references: list[dict] | None = None,
         reference_id: str | None = None,
         language: str = "en",
+        seed: int | None = None,
     ) -> bytes:
         refs = []
         if references:
@@ -89,6 +90,7 @@ class FishSpeechDeployment:
             max_new_tokens=max_new_tokens,
             references=refs,
             reference_id=reference_id or None,
+            seed=seed,
             top_p=0.7,
             temperature=0.7,
             format="wav",

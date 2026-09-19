@@ -60,6 +60,7 @@ class ModerationService:
 
         text_lower = text.lower()
         all_keywords = harm_keyword_loader.all_keywords
+        built_in_keywords = harm_keyword_loader.harm_keywords
         loop = asyncio.get_event_loop()
 
         harm_score = await loop.run_in_executor(None, predict_harm, text)
@@ -74,7 +75,10 @@ class ModerationService:
                 "blocked_words_found": [],
             }
 
-        built_in_hits = [kw for kw in all_keywords if self._contains_keyword(text_lower, kw)]
+        built_in_hits = [
+            kw for kw in built_in_keywords
+            if self._contains_keyword(text_lower, kw)
+        ]
         if built_in_hits:
             return {
                 "flagged": True,

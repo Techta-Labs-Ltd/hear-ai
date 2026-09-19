@@ -1,10 +1,9 @@
-import asyncio
 import os
 import subprocess
-from typing import Optional
 
 import httpx
 
+from hear.core.blocking import run_blocking_to_completion
 from hear.core.hear_temp import hear_temp_job_dir, hear_temp_standalone_dir
 
 
@@ -13,9 +12,9 @@ async def download_audio(
     suffix: str = ".wav",
     *,
     db=None,
-    job_id: Optional[str] = None,
-    run_id: Optional[str] = None,
-    track_id: Optional[str] = None,
+    job_id: str | None = None,
+    run_id: str | None = None,
+    track_id: str | None = None,
     purpose: str = "audio",
     convert_to_wav: bool = False,
 ) -> str:
@@ -37,7 +36,9 @@ async def download_audio(
                 response.raise_for_status()
                 headers = getattr(response, "headers", None)
                 expected_length = headers.get("content-length") if headers else None
-                with open(partial_path, "wb") as output:
+                # Synchronous writes keep ordering with the streamed chunks;
+                # each bounded write targets a local temporary file.
+                with open(partial_path, "wb") as output:  # noqa: ASYNC230
                     async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                         if not chunk:
                             continue
@@ -52,10 +53,12 @@ async def download_audio(
             )
         os.replace(partial_path, download_path)
         if convert_to_wav:
-            await asyncio.to_thread(_convert_to_wav, download_path, path)
+            await run_blocking_to_completion(
+                lambda: _convert_to_wav(download_path, path)
+            )
             os.unlink(download_path)
         return path
-    except Exception:
+    except BaseException:
         for candidate in (partial_path, download_path, path):
             try:
                 os.unlink(candidate)

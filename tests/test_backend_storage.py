@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -106,6 +107,13 @@ def test_expired_encrypted_context_has_stable_error(configured):
     assert str(error.value) == "storage_credentials_expired"
 
 
+def test_expired_context_can_be_authenticated_for_credential_refresh(configured):
+    expired = context(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+    encrypted = encrypt_storage_context(expired)
+
+    assert decrypt_storage_context(encrypted, require_active=False) == expired
+
+
 def test_object_keys_and_public_urls_stay_under_authorized_prefix(configured):
     storage = object.__new__(B2Storage)
     storage.context = context()
@@ -114,6 +122,126 @@ def test_object_keys_and_public_urls_stay_under_authorized_prefix(configured):
     assert storage._public_url(key).startswith("https://cdn.backend-a.test/media/")
     with pytest.raises(ValueError, match="unsafe"):
         object_key(storage.context, "../other-backend", "file.mp3")
+
+
+def test_upload_verifies_sha256_metadata_and_size(configured, tmp_path):
+    payload = b"verified Magic Clean artifact"
+    local_path = tmp_path / "artifact.mp3"
+    local_path.write_bytes(payload)
+    checksum = hashlib.sha256(payload).hexdigest()
+
+    class FakeClient:
+        def __init__(self):
+            self.extra_args = None
+            self.deleted = False
+
+        def upload_file(self, _path, _bucket, _key, *, ExtraArgs):
+            self.extra_args = ExtraArgs
+
+        def head_object(self, **_kwargs):
+            return {
+                "ContentLength": len(payload),
+                "Metadata": {"sha256": checksum},
+            }
+
+        def get_object(self, **_kwargs):
+            return {"Body": io.BytesIO(payload)}
+
+        def delete_object(self, **_kwargs):
+            self.deleted = True
+
+    storage = object.__new__(B2Storage)
+    storage.context = context()
+    storage._client = FakeClient()
+    key = storage.key("enhanced", "job-1.mp3")
+
+    url = storage.upload_file(
+        str(local_path),
+        key,
+        "audio/mpeg",
+        checksum_sha256=checksum,
+    )
+
+    assert storage._client.extra_args["Metadata"] == {"sha256": checksum}
+    assert storage._client.deleted is False
+    assert url.endswith("/users/user-1/jobs/job-1/enhanced/job-1.mp3")
+
+
+def test_upload_removes_object_when_checksum_metadata_is_not_verified(
+    configured, tmp_path
+):
+    local_path = tmp_path / "artifact.mp3"
+    local_path.write_bytes(b"payload")
+    checksum = hashlib.sha256(b"payload").hexdigest()
+
+    class FakeClient:
+        deleted = False
+
+        def upload_file(self, *_args, **_kwargs):
+            return None
+
+        def head_object(self, **_kwargs):
+            return {"ContentLength": 7, "Metadata": {}}
+
+        def get_object(self, **_kwargs):
+            return {"Body": io.BytesIO(b"payload")}
+
+        def delete_object(self, **_kwargs):
+            self.deleted = True
+
+    storage = object.__new__(B2Storage)
+    storage.context = context()
+    storage._client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="checksum metadata"):
+        storage.upload_file(
+            str(local_path),
+            storage.key("enhanced", "job-1.mp3"),
+            checksum_sha256=checksum,
+        )
+
+    assert storage._client.deleted is True
+
+
+def test_upload_removes_object_when_remote_content_checksum_differs(
+    configured,
+    tmp_path,
+):
+    payload = b"verified payload"
+    local_path = tmp_path / "artifact.mp3"
+    local_path.write_bytes(payload)
+    checksum = hashlib.sha256(payload).hexdigest()
+
+    class FakeClient:
+        deleted = False
+
+        def upload_file(self, *_args, **_kwargs):
+            return None
+
+        def head_object(self, **_kwargs):
+            return {
+                "ContentLength": len(payload),
+                "Metadata": {"sha256": checksum},
+            }
+
+        def get_object(self, **_kwargs):
+            return {"Body": io.BytesIO(b"corrupted payload")}
+
+        def delete_object(self, **_kwargs):
+            self.deleted = True
+
+    storage = object.__new__(B2Storage)
+    storage.context = context()
+    storage._client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="content checksum"):
+        storage.upload_file(
+            str(local_path),
+            storage.key("enhanced", "job-1.mp3"),
+            checksum_sha256=checksum,
+        )
+
+    assert storage._client.deleted is True
 
 
 def test_fingerprint_excludes_credentials_but_includes_destination():

@@ -1,15 +1,15 @@
-from collections import deque
 import warnings
+from collections import deque
+
 import numpy as np
 import pyloudnorm as pyln
 import torch
-from .audio_io import AudioIO
-from .helpers import iir_envelope_simple, iir_coefs
-from ..models import ContentMode
-
-
 from scipy.ndimage import uniform_filter1d
-from scipy.signal import lfilter
+
+from ..models import ContentMode
+from .audio_io import AudioIO
+
+
 class DynamicsProcessor:
     TARGET_LUFS    = -16.0
     TRUE_PEAK_DBTP = -1.0
@@ -43,34 +43,65 @@ class DynamicsProcessor:
         threshold_db: float, ratio: float, makeup_db: float,
         attack_ms: float, release_ms: float,
     ) -> torch.Tensor:
-        try:
-            threshold_lin = 10 ** (threshold_db / 20)
-            attack_coef   = np.exp(-1.0 / (sr * attack_ms / 1000))
-            release_coef  = np.exp(-1.0 / (sr * release_ms / 1000))
-            makeup_lin    = 10 ** (makeup_db / 20)
+        if sr <= 0 or ratio < 1.0 or attack_ms <= 0 or release_ms <= 0:
+            raise ValueError("invalid compressor configuration")
 
-            sig_np = w.squeeze(0).cpu().numpy().astype(np.float64)
-            env_np = iir_envelope_simple(np.abs(sig_np), attack_coef, release_coef)
+        was_mono_vector = w.ndim == 1
+        working = w.unsqueeze(0) if was_mono_vector else w
+        if working.ndim != 2:
+            raise ValueError("compressor expects [channels, samples] audio")
+        if working.shape[-1] == 0:
+            return w
+        if not torch.isfinite(working).all():
+            raise ValueError("compressor input contains non-finite samples")
 
-            gain_np = np.ones_like(env_np)
-            over = env_np > threshold_lin
-            gain_np[over] = (
-                (threshold_lin + (env_np[over] - threshold_lin) / ratio)
-                / (env_np[over] + 1e-12)
+        attack_coef = np.exp(-1.0 / (sr * attack_ms / 1000))
+        release_coef = np.exp(-1.0 / (sr * release_ms / 1000))
+        makeup_lin = 10 ** (makeup_db / 20)
+
+        signal = working.detach().cpu().numpy().astype(np.float64)
+        # One peak detector and one gain curve link every channel. This avoids
+        # stereo-image movement when a transient occurs on only one channel.
+        detector = np.max(np.abs(signal), axis=0)
+        envelope = np.empty_like(detector)
+        envelope[0] = detector[0]
+        for index in range(1, detector.size):
+            coefficient = (
+                attack_coef if detector[index] > envelope[index - 1] else release_coef
+            )
+            envelope[index] = (
+                coefficient * envelope[index - 1]
+                + (1.0 - coefficient) * detector[index]
             )
 
-            b_r, a_r = iir_coefs(release_ms, sr)
-            gain_np = lfilter(b_r, a_r, gain_np)
-            gain_np = np.clip(gain_np, 0.0, 1.0)
+        level_db = 20.0 * np.log10(np.maximum(envelope, 1e-12))
+        target_gain_db = np.zeros_like(level_db)
+        over = level_db > threshold_db
+        target_gain_db[over] = (
+            threshold_db + (level_db[over] - threshold_db) / ratio - level_db[over]
+        )
 
-            gain = torch.from_numpy(gain_np.astype(np.float32)).unsqueeze(0).to(w.device)
-            out  = w * gain * makeup_lin
-            peak = out.abs().max().item()
-            if peak > 0.99:
-                out = out * (0.99 / peak)
-            return out
-        except Exception:
-            return w
+        # Initialize from the first requested gain. An implicit zero-state IIR
+        # starts gain near zero and creates a destructive fade at every window.
+        smoothed_gain_db = np.empty_like(target_gain_db)
+        smoothed_gain_db[0] = target_gain_db[0]
+        for index in range(1, target_gain_db.size):
+            previous = smoothed_gain_db[index - 1]
+            coefficient = attack_coef if target_gain_db[index] < previous else release_coef
+            smoothed_gain_db[index] = (
+                coefficient * previous + (1.0 - coefficient) * target_gain_db[index]
+            )
+
+        gain = torch.from_numpy(
+            np.power(10.0, smoothed_gain_db / 20.0).astype(np.float32)
+        ).to(device=working.device, dtype=working.dtype)
+        out = working * gain.unsqueeze(0) * makeup_lin
+        peak = out.abs().max().item()
+        if peak > 0.99:
+            out = out * (0.99 / peak)
+        if not torch.isfinite(out).all():
+            raise RuntimeError("compressor produced non-finite samples")
+        return out.squeeze(0) if was_mono_vector else out
 
     def level_loudness(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         """Short-term loudness leveling for consistent volume.
@@ -79,8 +110,12 @@ class DynamicsProcessor:
         corrections so every section hits the target LUFS.
         """
         try:
-            sig = w.squeeze(0).cpu().numpy().astype(np.float64)
-            n = len(sig)
+            was_mono_vector = w.ndim == 1
+            working = w.unsqueeze(0) if was_mono_vector else w
+            if working.ndim != 2:
+                raise ValueError("loudness leveling expects [channels, samples] audio")
+            sig = working.detach().cpu().numpy().astype(np.float64)
+            n = sig.shape[-1]
             meter = pyln.Meter(sr)
 
             block_size = int(sr * self.LEVEL_BLOCK_MS / 1000)
@@ -97,13 +132,14 @@ class DynamicsProcessor:
             for i in range(n_blocks):
                 start = i * block_size
                 end = start + block_size
-                block = sig[start:end]
+                block = sig[:, start:end]
                 block_rms = np.sqrt(np.mean(block ** 2))
                 if block_rms < 1e-6:
                     gains[i] = 1.0
                     continue
                 try:
-                    loudness = meter.integrated_loudness(block)
+                    meter_input = block[0] if block.shape[0] == 1 else block.T
+                    loudness = meter.integrated_loudness(meter_input)
                 except Exception:
                     loudness = -70.0
                 if not np.isfinite(loudness) or loudness < -70.0:
@@ -121,16 +157,21 @@ class DynamicsProcessor:
                 gains = uniform_filter1d(gains, size=smooth_kernel)
 
 
-            block_centers = np.array([i * block_size + block_size // 2 for i in range(n_blocks + 1)])
+            block_centers = np.array(
+                [i * block_size + block_size // 2 for i in range(n_blocks + 1)]
+            )
             block_centers[-1] = n - 1
             sample_indices = np.arange(n)
             gain_curve = np.interp(sample_indices, block_centers, gains)
             gain_curve = np.clip(gain_curve, 1.0 / max_gain_lin, max_gain_lin)
 
 
-            output = sig * gain_curve
-            output = torch.from_numpy(output.astype(np.float32)).unsqueeze(0).to(w.device)
-            return output
+            output = sig * gain_curve[np.newaxis, :]
+            result = torch.from_numpy(output.astype(np.float32)).to(
+                device=working.device,
+                dtype=working.dtype,
+            )
+            return result.squeeze(0) if was_mono_vector else result
         except Exception:
             return w
 
@@ -159,25 +200,41 @@ class DynamicsProcessor:
 
     def normalise_lufs(self, w: torch.Tensor) -> torch.Tensor:
         try:
-            if w.shape[1] < int(AudioIO.TARGET_SR * 0.5):
+            was_mono_vector = w.ndim == 1
+            working = w.unsqueeze(0) if was_mono_vector else w
+            if working.ndim != 2:
+                raise ValueError("loudness normalization expects [channels, samples] audio")
+            if working.shape[-1] < int(AudioIO.TARGET_SR * 0.5):
                 return self.peak_normalise(w)
-            meter    = pyln.Meter(AudioIO.TARGET_SR)
-            audio_np = w.cpu().squeeze(0).numpy().astype(np.float64)
-            loudness = meter.integrated_loudness(audio_np)
+            meter = pyln.Meter(AudioIO.TARGET_SR)
+            audio_np = working.detach().cpu().numpy().astype(np.float64)
+            meter_input = audio_np[0] if audio_np.shape[0] == 1 else audio_np.T
+            loudness = meter.integrated_loudness(meter_input)
             if not np.isfinite(loudness) or loudness < -70.0 or loudness > 0.0:
                 return self.peak_normalise(w)
             if abs(loudness - self.TARGET_LUFS) <= 0.5:
                 return w
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                normalised = pyln.normalize.loudness(audio_np, loudness, self.TARGET_LUFS)
+                normalised = pyln.normalize.loudness(
+                    meter_input,
+                    loudness,
+                    self.TARGET_LUFS,
+                )
             if not np.isfinite(normalised).all():
                 return self.peak_normalise(w)
-            result = torch.from_numpy(normalised.astype(np.float32)).unsqueeze(0).to(self._device)
-            peak   = result.abs().max().item()
+            if working.shape[0] > 1:
+                normalised = normalised.T
+            else:
+                normalised = normalised[np.newaxis, :]
+            result = torch.from_numpy(normalised.astype(np.float32)).to(
+                device=working.device,
+                dtype=working.dtype,
+            )
+            peak = result.abs().max().item()
             if peak > 0.99:
                 result = result * (0.99 / peak)
-            return result
+            return result.squeeze(0) if was_mono_vector else result
         except Exception:
             return self.peak_normalise(w)
 
@@ -202,10 +259,17 @@ class DynamicsProcessor:
             lookahead_samples = int(sr * self.LIMITER_LOOKAHEAD_MS / 1000)
             release_coef = np.exp(-1.0 / (sr * self.LIMITER_RELEASE_MS / 1000))
 
-            sig_np = w.squeeze(0).cpu().numpy().astype(np.float64)
-            n = len(sig_np)
+            was_mono_vector = w.ndim == 1
+            working = w.unsqueeze(0) if was_mono_vector else w
+            if working.ndim != 2:
+                raise ValueError("limiter expects [channels, samples] audio")
+            if working.shape[-1] == 0:
+                return w
+            sig_np = working.detach().cpu().numpy().astype(np.float64)
+            n = sig_np.shape[-1]
 
-            abs_sig = np.abs(sig_np)
+            # The loudest channel drives one shared gain curve.
+            abs_sig = np.max(np.abs(sig_np), axis=0)
 
             # Exact forward-looking rolling maximum in O(n). The previous
             # implementation scanned the complete window for every sample.
@@ -241,8 +305,10 @@ class DynamicsProcessor:
 
             gain_tensor = torch.from_numpy(
                 delayed_gain.astype(np.float32)
-            ).unsqueeze(0).to(w.device)
+            ).to(device=working.device, dtype=working.dtype)
 
-            return w * gain_tensor
+            result = working * gain_tensor.unsqueeze(0)
+            result = self.true_peak_limit(result, sr)
+            return result.squeeze(0) if was_mono_vector else result
         except Exception:
             return self.true_peak_limit(w, sr)

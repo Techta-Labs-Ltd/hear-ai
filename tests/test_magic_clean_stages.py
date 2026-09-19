@@ -13,7 +13,7 @@ def test_magic_clean_stream_stages_are_ordered_and_cover_full_progress():
     assert MAGIC_CLEAN[-1].progress_end == 100
     assert all(
         current.progress_end == following.progress_start
-        for current, following in zip(MAGIC_CLEAN, MAGIC_CLEAN[1:])
+        for current, following in zip(MAGIC_CLEAN, MAGIC_CLEAN[1:], strict=False)
     )
 
 

@@ -1,7 +1,9 @@
 import os
+
 import torch
 import torchaudio
 import torchaudio.functional as F
+
 
 class AudioIO:
     TARGET_SR = 44100

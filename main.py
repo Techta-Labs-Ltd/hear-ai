@@ -3,11 +3,15 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import logging
+import math
 import os
+import shutil
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
 import ray
+import yaml  # type: ignore[import-untyped]
 from pydantic import ValidationError
 from ray import serve
 
@@ -55,6 +59,66 @@ def validate_runtime(settings: Settings) -> None:
     if not settings.DATABASE_URL:
         errors.append("DATABASE_URL must be configured")
 
+    ffmpeg_path = shutil.which("ffmpeg")
+    ffprobe_path = shutil.which("ffprobe")
+    if ffmpeg_path is None:
+        errors.append("ffmpeg executable is unavailable")
+    if ffprobe_path is None:
+        errors.append("ffprobe executable is unavailable")
+    if ffmpeg_path is not None:
+        try:
+            encoders = subprocess.run(
+                [ffmpeg_path, "-hide_banner", "-encoders"],
+                capture_output=True,
+                check=True,
+                text=True,
+                timeout=30,
+            ).stdout
+            filters = subprocess.run(
+                [ffmpeg_path, "-hide_banner", "-filters"],
+                capture_output=True,
+                check=True,
+                text=True,
+                timeout=30,
+            ).stdout
+            if "libmp3lame" not in encoders:
+                errors.append("ffmpeg is missing the libmp3lame encoder")
+            for required_filter in ("loudnorm", "alimiter"):
+                if required_filter not in filters:
+                    errors.append(f"ffmpeg is missing the {required_filter} filter")
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append(f"could not inspect ffmpeg capabilities: {type(exc).__name__}")
+
+    if not settings.MAGIC_CLEAN_ENGINE_REVISION.strip():
+        errors.append("MAGIC_CLEAN_ENGINE_REVISION must be configured")
+    if not 8 <= settings.MAGIC_CLEAN_MP3_BITRATE_KBPS <= 320:
+        errors.append("MAGIC_CLEAN_MP3_BITRATE_KBPS must be between 8 and 320")
+    if (
+        not math.isfinite(settings.MAGIC_CLEAN_CLEANUP_GRACE_SECONDS)
+        or settings.MAGIC_CLEAN_CLEANUP_GRACE_SECONDS <= 0
+    ):
+        errors.append("MAGIC_CLEAN_CLEANUP_GRACE_SECONDS must be positive")
+    if (
+        not math.isfinite(
+            settings.MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS
+        )
+        or settings.MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS
+        <= settings.MAGIC_CLEAN_CLEANUP_GRACE_SECONDS
+    ):
+        errors.append(
+            "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed "
+            "MAGIC_CLEAN_CLEANUP_GRACE_SECONDS"
+        )
+    if settings.MAGIC_CLEAN_CHUNK_SECONDS <= 0:
+        errors.append("MAGIC_CLEAN_CHUNK_SECONDS must be positive")
+    if settings.MAGIC_CLEAN_CHUNK_OVERLAP_SECONDS < 0:
+        errors.append("MAGIC_CLEAN_CHUNK_OVERLAP_SECONDS cannot be negative")
+    if (
+        settings.MAGIC_CLEAN_CHUNK_OVERLAP_SECONDS * 2
+        >= settings.MAGIC_CLEAN_CHUNK_SECONDS
+    ):
+        errors.append("Magic Clean overlap margins must be shorter than the chunk")
+
     configured_directories = {
         "QWEN_ASR_MODEL_PATH": settings.QWEN_ASR_MODEL_PATH,
         "ALIGNER_MODEL_PATH": settings.ALIGNER_MODEL_PATH,
@@ -65,6 +129,7 @@ def validate_runtime(settings: Settings) -> None:
         "FISH_SPEECH_HOME": settings.FISH_SPEECH_HOME,
         "FISH_SPEECH_CHECKPOINT_PATH": settings.FISH_SPEECH_CHECKPOINT_PATH,
         "MOSSFORMER_MODEL_PATH": settings.MOSSFORMER_MODEL_PATH,
+        "DEMUCS_MODEL_PATH": settings.DEMUCS_MODEL_PATH,
         "MODEL_CACHE_DIR": settings.MODEL_CACHE_DIR,
     }
     for variable, raw_path in configured_directories.items():
@@ -74,6 +139,46 @@ def validate_runtime(settings: Settings) -> None:
         path = Path(raw_path)
         if not path.is_dir():
             errors.append(f"{variable} is not a directory: {path}")
+
+    mossformer_checkpoint = Path(settings.MOSSFORMER_MODEL_PATH) / "last_best_checkpoint"
+    if not mossformer_checkpoint.is_file():
+        errors.append(f"missing MossFormer2 checkpoint: {mossformer_checkpoint}")
+
+    demucs_root = Path(settings.DEMUCS_MODEL_PATH)
+    demucs_candidates = (
+        demucs_root / f"{settings.DEMUCS_MODEL}.yaml",
+        demucs_root / f"{settings.DEMUCS_MODEL}.th",
+    )
+    demucs_manifest = next(
+        (candidate for candidate in demucs_candidates if candidate.is_file()),
+        None,
+    )
+    if demucs_manifest is None:
+        errors.append(
+            "missing local Demucs model manifest: expected "
+            + " or ".join(str(candidate) for candidate in demucs_candidates)
+        )
+    elif demucs_manifest.suffix == ".yaml":
+        try:
+            payload = yaml.safe_load(demucs_manifest.read_text())
+            signatures = payload["models"]
+            if not isinstance(signatures, list) or not signatures:
+                raise ValueError("models must be a non-empty list")
+            missing_signatures = [
+                str(signature)
+                for signature in signatures
+                if not any(demucs_root.glob(f"{signature}*.th"))
+            ]
+            if missing_signatures:
+                errors.append(
+                    "Demucs manifest references missing local models: "
+                    + ", ".join(missing_signatures)
+                )
+        except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+            errors.append(
+                "invalid local Demucs model manifest: "
+                f"{demucs_manifest} ({type(exc).__name__})"
+            )
 
     fish_checkpoint = Path(settings.FISH_SPEECH_CHECKPOINT_PATH)
     codec = fish_checkpoint / "codec.pth"

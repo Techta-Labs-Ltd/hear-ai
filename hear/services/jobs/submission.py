@@ -4,20 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from ray.serve.handle import DeploymentHandle
 from sqlalchemy.dialects.postgresql import insert
 
-from hear.models.database import AiJob, SessionLocal
+from hear.config import settings
 from hear.core.backend_registry import validate_storage_for_backend
-from hear.core.storage import encrypt_storage_context
-from hear.models.schemas import PipelineRequest
+from hear.core.storage import (
+    StorageContextError,
+    StorageCredentialsExpiringError,
+    decrypt_storage_context,
+    encrypt_storage_context,
+)
+from hear.models.database import AiJob, SessionLocal
+from hear.models.schemas import PipelineRequest, StorageContext
 from hear.services.magic_clean.models import DEFAULT_STEM_LEVELS
-
 
 ALLOWED_JOB_TYPES = {
     "pipeline",
@@ -41,6 +47,8 @@ AUDIO_REQUIRED_JOB_TYPES = {
     "discovery",
 }
 
+MAGIC_CLEAN_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+
 
 class SubmissionConflictError(Exception):
     """The idempotency key was already used with a different request."""
@@ -61,7 +69,89 @@ class SubmissionResult:
     replayed: bool
 
 
-def normalize_request(request: PipelineRequest) -> dict[str, Any]:
+def _magic_clean_storage_ttl_is_safe(storage: StorageContext) -> bool:
+    required_storage_ttl = settings.MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS
+    if not math.isfinite(required_storage_ttl) or required_storage_ttl <= 0:
+        raise RuntimeError(
+            "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS is invalid"
+        )
+    remaining_storage_ttl = (
+        storage.expires_at - datetime.now(UTC)
+    ).total_seconds()
+    return remaining_storage_ttl >= required_storage_ttl
+
+
+def _validate_magic_clean_storage_ttl(storage: StorageContext) -> None:
+    if not _magic_clean_storage_ttl_is_safe(storage):
+        required_storage_ttl = (
+            settings.MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS
+        )
+        raise ValueError(
+            "magic_clean storage credentials must remain valid for at least "
+            f"{required_storage_ttl:g} seconds"
+        )
+
+
+def _credential_material_matches(
+    stored: StorageContext,
+    submitted: StorageContext,
+) -> bool:
+    return (
+        stored.key_id == submitted.key_id
+        and stored.application_key == submitted.application_key
+    )
+
+
+def _storage_destination_matches(
+    stored: StorageContext,
+    submitted: StorageContext,
+) -> bool:
+    return all(
+        getattr(stored, field) == getattr(submitted, field)
+        for field in (
+            "endpoint_url",
+            "bucket_name",
+            "folder_prefix",
+            "public_base_url",
+        )
+    )
+
+
+def _has_valid_magic_clean_cleanup_tombstone(
+    job: AiJob,
+    storage: StorageContext,
+) -> bool:
+    raw_options = job.job_options
+    options: dict[str, Any] = raw_options if isinstance(raw_options, dict) else {}
+    tombstone = options.get("magic_clean_cleanup_tombstone")
+    if not isinstance(tombstone, dict):
+        return False
+
+    key = str(tombstone.get("b2_key") or "").strip()
+    bucket_name = str(tombstone.get("bucket_name") or "").strip()
+    tombstone_run_id = str(tombstone.get("run_id") or "").strip()
+    job_run_id = str(job.run_id or "").strip()
+    if (
+        not key
+        or not job_run_id
+        or tombstone_run_id != job_run_id
+        or bucket_name != storage.bucket_name
+        or not key.startswith(storage.folder_prefix)
+        or "\\" in key
+        or "\x00" in key
+    ):
+        return False
+    relative_key = key.removeprefix(storage.folder_prefix)
+    return bool(relative_key) and all(
+        part not in {"", ".", ".."} for part in relative_key.split("/")
+    )
+
+
+def normalize_request(
+    request: PipelineRequest,
+    *,
+    enforce_magic_clean_storage_ttl: bool = True,
+) -> dict[str, Any]:
     job_id = request.job_id.strip()
     track_id = request.track_id.strip()
     job_type = (request.job_type or "pipeline").strip().replace("-", "_")
@@ -76,6 +166,8 @@ def normalize_request(request: PipelineRequest) -> dict[str, Any]:
     validate_storage_for_backend(backend_id, request.storage)
     if job_type not in ALLOWED_JOB_TYPES:
         raise ValueError(f"unsupported job_type: {request.job_type}")
+    if job_type == "magic_clean" and enforce_magic_clean_storage_ttl:
+        _validate_magic_clean_storage_ttl(request.storage)
     if job_type in {"rebuild", "edit_transcript"} and not (
         request.edited_transcript or ""
     ).strip():
@@ -105,7 +197,14 @@ def normalize_request(request: PipelineRequest) -> dict[str, Any]:
             }
         )
 
-    if job_type == "magic_clean" and request.speech is None:
+    magic_clean_controls_omitted = job_type == "magic_clean" and all(
+        value is None
+        for value in (request.speech, request.music, request.background)
+    )
+    speech: int | None
+    music: int | None
+    background: int | None
+    if magic_clean_controls_omitted:
         speech = DEFAULT_STEM_LEVELS.speech
         music = DEFAULT_STEM_LEVELS.music
         background = DEFAULT_STEM_LEVELS.background
@@ -139,19 +238,36 @@ def normalize_request(request: PipelineRequest) -> dict[str, Any]:
         "music": music,
         "background": background,
         "cut_silence": request.cut_silence,
+        "magic_clean_controls_omitted": magic_clean_controls_omitted,
     }
 
 
 def request_fingerprint(payload: dict[str, Any]) -> str:
+    return _request_fingerprint(payload, ignore_storage_expiration=False)
+
+
+def _semantic_request_fingerprint(payload: dict[str, Any]) -> str:
+    """Ignore rotatable credentials while retaining the storage destination."""
+    return _request_fingerprint(payload, ignore_storage_expiration=True)
+
+
+def _request_fingerprint(
+    payload: dict[str, Any],
+    *,
+    ignore_storage_expiration: bool,
+) -> str:
     canonical = {
         key: value
         for key, value in payload.items()
-        if key not in {"job_id", "storage"}
+        if key not in {"job_id", "storage", "magic_clean_controls_omitted"}
     }
+    ignored_storage_fields = {"key_id", "application_key"}
+    if ignore_storage_expiration:
+        ignored_storage_fields.add("expires_at")
     canonical["storage"] = {
         key: value
         for key, value in payload["storage"].items()
-        if key not in {"key_id", "application_key"}
+        if key not in ignored_storage_fields
     }
     encoded = json.dumps(
         canonical,
@@ -185,6 +301,7 @@ def _job_options(payload: dict[str, Any]) -> dict[str, Any]:
         "music": payload["music"],
         "background": payload["background"],
         "cut_silence": payload["cut_silence"],
+        "magic_clean_controls_omitted": payload["magic_clean_controls_omitted"],
     }
 
 
@@ -198,8 +315,12 @@ def _reconstruct_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _legacy_payload(job: AiJob) -> dict[str, Any]:
-    options = job.job_options or {}
-    reconstruct = job.custom_tags or {}
+    raw_options = job.job_options
+    options: dict[str, Any] = raw_options if isinstance(raw_options, dict) else {}
+    raw_reconstruct = job.custom_tags
+    reconstruct: dict[str, Any] = (
+        raw_reconstruct if isinstance(raw_reconstruct, dict) else {}
+    )
     return {
         "backend_id": job.backend_id or "",
         "storage": options.get("storage_destination") or {},
@@ -227,6 +348,9 @@ def _legacy_payload(job: AiJob) -> dict[str, Any]:
         "music": options.get("music"),
         "background": options.get("background"),
         "cut_silence": bool(options.get("cut_silence", False)),
+        "magic_clean_controls_omitted": bool(
+            options.get("magic_clean_controls_omitted", False)
+        ),
     }
 
 
@@ -235,10 +359,16 @@ class JobSubmissionService:
         self._orchestrator = orchestrator
 
     async def submit(self, request: PipelineRequest) -> SubmissionResult:
-        payload = normalize_request(request)
+        # Defer the minimum-lifetime rule until after the idempotency lookup so
+        # an exact replay can recover status with still-active credentials.
+        # New jobs and accepted cleanup-credential renewals validate it below.
+        payload = normalize_request(
+            request,
+            enforce_magic_clean_storage_ttl=False,
+        )
         fingerprint = request_fingerprint(payload)
         run_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(UTC).replace(tzinfo=None)
         values = {
             "id": payload["job_id"],
             "backend_id": payload["backend_id"],
@@ -267,25 +397,177 @@ class JobSubmissionService:
                 .returning(AiJob.id)
             )
             inserted = db.execute(statement).scalar_one_or_none() is not None
+            if inserted and payload["job_type"] == "magic_clean":
+                # The insert remains transactional until the new-job lifetime
+                # rule succeeds. Conflicting idempotent replays never reach
+                # this branch, even when their previously accepted TTL eroded.
+                _validate_magic_clean_storage_ttl(request.storage)
             db.commit()
 
-            job = db.query(AiJob).filter(AiJob.id == payload["job_id"]).first()
+            job = (
+                db.query(AiJob)
+                .filter(AiJob.id == payload["job_id"])
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
             if job is None:
                 raise RuntimeError("job disappeared after submission")
 
+            parked_for_storage_refresh = False
             if not inserted:
                 stored_fingerprint = job.request_hash
                 if not stored_fingerprint:
                     stored_fingerprint = request_fingerprint(_legacy_payload(job))
                     if stored_fingerprint == fingerprint:
                         job.request_hash = fingerprint
-                        db.commit()
-                if stored_fingerprint != fingerprint:
-                    raise SubmissionConflictError(
-                        "job_id has already been used with a different payload"
+                exact_payload_fingerprint = stored_fingerprint == fingerprint
+                if not exact_payload_fingerprint:
+                    stored_semantic_fingerprint = _semantic_request_fingerprint(
+                        _legacy_payload(job)
                     )
+                    if (
+                        payload["job_type"] != "magic_clean"
+                        or stored_semantic_fingerprint
+                        != _semantic_request_fingerprint(payload)
+                    ):
+                        raise SubmissionConflictError(
+                            "job_id has already been used with a different payload"
+                        )
 
-            if inserted or job.status == "queued":
+                # Credentials and their expiration are operational, not audio
+                # semantics. A queued job may accept a refresh; a terminal job
+                # may do so only while it owns an unresolved cleanup tombstone.
+                # A running actor has already captured its context. The encrypted
+                # context is authoritative because job_options is concurrently
+                # enriched with lineage metadata. A strictly later expiration
+                # prevents delayed retries from resurrecting older credentials.
+                if (
+                    payload["job_type"] == "magic_clean"
+                    and (
+                        job.status in {"queued", "running"}
+                        or job.status in MAGIC_CLEAN_TERMINAL_STATUSES
+                    )
+                ):
+                    try:
+                        stored_storage = decrypt_storage_context(
+                            getattr(job, "storage_context_encrypted", None),
+                            require_active=False,
+                        )
+                    except StorageContextError:
+                        stored_storage = None
+                    credential_material_changed = (
+                        stored_storage is None
+                        or not _credential_material_matches(
+                            stored_storage,
+                            request.storage,
+                        )
+                    )
+                    expiration_advances = (
+                        stored_storage is None
+                        or request.storage.expires_at > stored_storage.expires_at
+                    )
+                    expiration_matches = (
+                        stored_storage is not None
+                        and request.storage.expires_at == stored_storage.expires_at
+                    )
+                    exact_credential_replay = (
+                        exact_payload_fingerprint
+                        and stored_storage is not None
+                        and not credential_material_changed
+                        and expiration_matches
+                    )
+                    refresh_storage = False
+
+                    if job.status in MAGIC_CLEAN_TERMINAL_STATUSES:
+                        if stored_storage is None:
+                            if not exact_payload_fingerprint:
+                                raise ValueError(
+                                    "terminal magic_clean storage credentials "
+                                    "cannot be renewed without a valid stored context"
+                                )
+                        elif not exact_credential_replay:
+                            if not _storage_destination_matches(
+                                stored_storage,
+                                request.storage,
+                            ):
+                                raise SubmissionConflictError(
+                                    "magic_clean storage destination cannot be changed"
+                                )
+                            if not _has_valid_magic_clean_cleanup_tombstone(
+                                job,
+                                stored_storage,
+                            ):
+                                raise ValueError(
+                                    "terminal magic_clean credential renewal requires "
+                                    "a valid cleanup tombstone"
+                                )
+                            if not expiration_advances:
+                                raise ValueError(
+                                    "terminal magic_clean credential renewal must use "
+                                    "a later expiration"
+                                )
+                            _validate_magic_clean_storage_ttl(request.storage)
+                            refresh_storage = True
+                    elif job.status == "running":
+                        if (
+                            stored_storage is None
+                            or credential_material_changed
+                            or expiration_advances
+                        ):
+                            raise ValueError(
+                                "magic_clean storage credentials cannot be refreshed "
+                                "after the job has started"
+                            )
+                    elif credential_material_changed and not expiration_advances:
+                        raise ValueError(
+                            "magic_clean credential rotation must use a later "
+                            "expiration"
+                        )
+                    elif expiration_advances:
+                        _validate_magic_clean_storage_ttl(request.storage)
+                        refresh_storage = True
+
+                    if refresh_storage:
+                        job.storage_context_encrypted = values[
+                            "storage_context_encrypted"
+                        ]
+                        refreshed_options = dict(job.job_options or {})
+                        refreshed_options["storage_destination"] = {
+                            key: value
+                            for key, value in payload["storage"].items()
+                            if key not in {"key_id", "application_key"}
+                        }
+                        job.job_options = refreshed_options
+                        job.request_hash = fingerprint
+                        stored_storage = request.storage
+
+                    if (
+                        job.status == "queued"
+                        and (
+                            stored_storage is None
+                            or not _magic_clean_storage_ttl_is_safe(stored_storage)
+                        )
+                    ):
+                        if exact_credential_replay:
+                            job.error = StorageCredentialsExpiringError.code
+                            parked_for_storage_refresh = True
+                        else:
+                            _validate_magic_clean_storage_ttl(request.storage)
+                            raise RuntimeError(
+                                "queued magic_clean job has no cleanup-safe "
+                                "storage context"
+                            )
+                    elif (
+                        job.status == "queued"
+                        and job.error == StorageCredentialsExpiringError.code
+                    ):
+                        job.error = None
+
+            should_enqueue = job.status == "queued" and not parked_for_storage_refresh
+            db.commit()
+
+            if should_enqueue:
                 try:
                     await self._orchestrator.enqueue.remote(job.id, job.run_id)
                 except Exception as exc:

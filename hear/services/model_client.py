@@ -32,7 +32,7 @@ class RayModelClient:
 
     def _resolve_sync(self, ref):
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             fut = concurrent.futures.Future()
             def _resolve():
                 try:
@@ -75,6 +75,7 @@ class RayModelClient:
         references: list[dict] | None = None,
         reference_id: str | None = None,
         language: str = "en",
+        seed: int | None = None,
     ) -> bytes:
         return await self._get_handle("fish_speech").generate_speech.remote(
             text,
@@ -82,6 +83,7 @@ class RayModelClient:
             references,
             reference_id,
             language,
+            seed,
         )
 
     def transcribe_sync(self, audio_bytes: bytes, batch_size: int = 36) -> dict:

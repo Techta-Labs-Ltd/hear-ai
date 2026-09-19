@@ -9,10 +9,23 @@ def test_no_content_report_is_structured_and_includes_transcription():
     report = Orchestrator.func_or_class._no_content_report(transcript)
 
     assert report == {
-        "flagged": True,
+        "flagged": False,
         "code": "content_not_detected",
         "reason": "No usable spoken content was detected in the transcription",
         "transcription": transcript,
+    }
+
+
+def test_no_content_moderation_does_not_flag_non_speech_audio():
+    moderation = Orchestrator.func_or_class._no_content_moderation()
+
+    assert moderation == {
+        "flagged": False,
+        "severity": "none",
+        "intent": "no_content",
+        "reason": "No credible speech content was transcribed",
+        "flagged_categories": [],
+        "blocked_words_found": [],
     }
 
 

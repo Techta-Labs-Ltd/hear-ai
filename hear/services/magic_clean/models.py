@@ -1,7 +1,8 @@
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import StrEnum
 
-class ContentMode(str, Enum):
+
+class ContentMode(StrEnum):
     SPEECH = "speech"
     MUSIC  = "music"
     AUTO   = "auto"
@@ -40,3 +41,9 @@ class EnhancementResult:
     clipping_detected: bool
     mode_used:         str
     bucket_name:       str
+    stage_times: dict[str, float] = field(default_factory=dict)
+    source_file_sha256: str = ""
+    source_pcm_sha256: str = ""
+    delivered_file_sha256: str = ""
+    delivered_pcm_sha256: str = ""
+    engine_revision: str = ""

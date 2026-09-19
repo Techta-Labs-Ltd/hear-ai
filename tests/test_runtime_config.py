@@ -30,6 +30,7 @@ def configured_settings(model_dir: Path, **overrides) -> Settings:
         "SENTIMENT_MODEL_PATH": str(model_dir),
         "NLI_MODEL_PATH": str(model_dir),
         "MOSSFORMER_MODEL_PATH": str(model_dir),
+        "DEMUCS_MODEL_PATH": str(model_dir),
         "FISH_SPEECH_HOME": str(model_dir),
         "FISH_SPEECH_CHECKPOINT_PATH": str(model_dir),
         "RESOLVER_SEMANTIC_MODEL": str(model_dir),
@@ -41,6 +42,9 @@ def configured_settings(model_dir: Path, **overrides) -> Settings:
 def test_runtime_validation_accepts_preprovisioned_artifacts(tmp_path):
     (tmp_path / "model.safetensors").touch()
     (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
 
     validate_runtime(configured_settings(tmp_path))
 
@@ -48,6 +52,9 @@ def test_runtime_validation_accepts_preprovisioned_artifacts(tmp_path):
 def test_runtime_validation_rejects_missing_model_path(tmp_path):
     (tmp_path / "model.safetensors").touch()
     (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
     settings = configured_settings(tmp_path, QWEN_ASR_MODEL_PATH="")
 
     with pytest.raises(RuntimeError, match="QWEN_ASR_MODEL_PATH must be configured"):
@@ -57,6 +64,9 @@ def test_runtime_validation_rejects_missing_model_path(tmp_path):
 def test_runtime_validation_rejects_missing_backend_registry(tmp_path):
     (tmp_path / "model.safetensors").touch()
     (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
     settings = configured_settings(tmp_path, BACKEND_REGISTRY_JSON="")
 
     with pytest.raises(RuntimeError, match="BACKEND_REGISTRY_JSON"):
@@ -66,10 +76,23 @@ def test_runtime_validation_rejects_missing_backend_registry(tmp_path):
 def test_runtime_validation_rejects_invalid_storage_encryption_key(tmp_path):
     (tmp_path / "model.safetensors").touch()
     (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
     settings = configured_settings(tmp_path, STORAGE_CONTEXT_ENCRYPTION_KEY="invalid")
 
     with pytest.raises(RuntimeError, match="STORAGE_CONTEXT_ENCRYPTION_KEY"):
         validate_runtime(settings)
+
+
+def test_runtime_validation_rejects_incomplete_mossformer_checkpoint(tmp_path):
+    (tmp_path / "model.safetensors").touch()
+    (tmp_path / "codec.pth").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
+
+    with pytest.raises(RuntimeError, match="missing MossFormer2 checkpoint"):
+        validate_runtime(configured_settings(tmp_path))
 
 
 def test_durable_defaults_use_workspace():
@@ -101,6 +124,58 @@ def test_durable_paths_allow_environment_overrides(monkeypatch, tmp_path):
 
 def test_magic_clean_has_a_demucs_model_default(tmp_path):
     assert configured_settings(tmp_path).DEMUCS_MODEL == "htdemucs"
+
+
+def test_runtime_validation_rejects_unsafe_cleanup_grace(tmp_path):
+    (tmp_path / "model.safetensors").touch()
+    (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
+
+    with pytest.raises(RuntimeError, match="CLEANUP_GRACE_SECONDS must be positive"):
+        validate_runtime(
+            configured_settings(tmp_path, MAGIC_CLEAN_CLEANUP_GRACE_SECONDS=0)
+        )
+
+
+def test_runtime_validation_requires_cleanup_safe_storage_credential_ttl(tmp_path):
+    (tmp_path / "model.safetensors").touch()
+    (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+    (tmp_path / "demucs-signature.th").touch()
+    (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
+
+    with pytest.raises(
+        RuntimeError,
+        match="STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed",
+    ):
+        validate_runtime(
+            configured_settings(
+                tmp_path,
+                MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS=1800,
+            )
+        )
+
+    with pytest.raises(
+        RuntimeError,
+        match="STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed",
+    ):
+        validate_runtime(
+            configured_settings(
+                tmp_path,
+                MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS=float("nan"),
+            )
+        )
+
+
+def test_runtime_validation_rejects_missing_local_demucs_model(tmp_path):
+    (tmp_path / "model.safetensors").touch()
+    (tmp_path / "codec.pth").touch()
+    (tmp_path / "last_best_checkpoint").touch()
+
+    with pytest.raises(RuntimeError, match="missing local Demucs model manifest"):
+        validate_runtime(configured_settings(tmp_path))
 
 
 def test_default_single_gpu_deployment_budget_allows_one_heavy_actor(tmp_path):

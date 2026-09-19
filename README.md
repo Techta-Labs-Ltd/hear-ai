@@ -131,9 +131,11 @@ Ray Serve hosts these system endpoints on `HTTP_PORT` (default `8000`):
 Every request must include that registered backend identity and a job-scoped
 `storage` object containing an allowed B2 endpoint/bucket, temporary credentials,
 a user/job folder prefix, public base URL, and expiry. Missing or mismatched
-backend/storage context is rejected. The request `job_id` is its idempotency key: an identical resend returns the original
-`run_id` and current status, while a different payload for the same key returns
-HTTP `409`. Deliberate reruns must use a new `job_id`.
+backend/storage context is rejected. The request `job_id` is its idempotency key:
+an identical resend returns the original `run_id` and current status, while a
+different semantic payload for the same key returns HTTP `409`. A queued Magic
+Clean job may accept an authenticated credential-only refresh with a later
+expiry; deliberate reruns must still use a new `job_id`.
 
 OpenAPI documentation is exposed at `/docs` and `/openapi.json` only when
 `ENABLE_DOCS=true`. Typed application operations remain on gRPC.
@@ -155,8 +157,27 @@ from `x-api-key`; one backend cannot read or cancel another backend's jobs.
 Artifact results contain `backend_id`, `bucket_name`, `b2_key`, and a URL joined
 from the submitted public base URL, but never storage credentials.
 
+For reconstruction requests sent through `SubmitJob` or `CreatePreview`, an
+omitted `same_speaker` field defaults to `true`. Send the optional field
+explicitly as `false` to opt out of matching the source speaker.
+Reconstruction measures the first-to-last aligned source speech span and applies
+a bounded, pitch-preserving tempo correction to match the generated delivery rate
+while retaining natural internal pauses. A longer or shorter replacement can
+therefore change the segment and rebuilt-track duration; clients must use the
+returned duration instead of assuming the old interval length.
+
 Ray Serve provides the gRPC proxy. Do not start `grpc.aio.server`, install
 packages, generate stubs, or download models in `main.py`.
+
+For asynchronous `SubmitJob` same-interval retries, submitting the exact
+rebuilt URL from an earlier completed job with the same `backend_id`,
+`track_id`, and change intervals keeps that current audio for splicing but
+resolves the original source for voice, pitch, and pace reference. Isolated
+segment URLs and changed intervals fail closed because their timestamps cannot
+be mapped safely to the original speaker. URL aliases, re-uploads, and changed
+track IDs are deliberately not guessed across security boundaries; those clients
+should retain the immutable original and submit the cumulative change set in
+original-track coordinates.
 
 To regenerate stubs during a controlled build/development step:
 

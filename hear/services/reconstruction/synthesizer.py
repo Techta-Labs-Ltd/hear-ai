@@ -1,9 +1,11 @@
 import asyncio
+import hashlib
 import io
 import logging
 import os
 import re
 import tempfile
+import warnings
 import wave
 from dataclasses import dataclass, field
 
@@ -19,9 +21,9 @@ from hear.core.hear_temp import (
     hear_temp_directory,
 )
 from hear.core.storage import B2Storage
-from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
 from hear.services.magic_clean.processing.noise import NoiseReducer
 from hear.services.model_client import get_model_client
+from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
 from hear.services.transcription.service import TranscriptionService
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,16 @@ class SynthesisResult:
 
 class SpeechSynthesizer:
     TARGET_SR = 44100
+    VOICE_REFERENCE_SECONDS = 10.0
+    VOICE_REFERENCE_GUARD_SECONDS = 0.25
+    MIN_VOICE_REFERENCE_SECONDS = 1.0
+    MIN_PACING_TARGET_SECONDS = 0.15
+    MAX_PACING_REFERENCE_SECONDS = 30.0
+    PACING_ACTIVITY_FRAME_MS = 20
+    MIN_PLAUSIBLE_SPEAKING_RATE = 0.5
+    MAX_PLAUSIBLE_SPEAKING_RATE = 8.0
+    MIN_SAFE_TEMPO_FACTOR = 0.75
+    MAX_SAFE_TEMPO_FACTOR = 1.35
 
     TTS_SYSTEM_PROMPT = """You are a text preprocessor for the fish-speech TTS engine. The engine under-weights punctuation, but it DOES respect inline control tokens in square brackets. Rewrite the input text so pauses, emotion, and delivery are expressed through these tokens. The input can be any kind of text: news, stories, dialogue, letters, lists, transcripts.
 
@@ -117,8 +129,12 @@ RULES:
     def fishspeech_available(self) -> bool:
         return self._fishspeech_available
 
-    def _compute_seed(self, job_id: str, track_id: str) -> int:
-        return abs(hash(f"{job_id}:{track_id}")) % (2**31)
+    def _compute_seed(self, _job_id: str, track_id: str) -> int:
+        """Keep Fish sampling stable when the same track is regenerated again."""
+        digest = hashlib.sha256(
+            f"reconstruction:{track_id}".encode()
+        ).digest()
+        return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
 
     @staticmethod
     def _analyze_prosody(
@@ -228,14 +244,24 @@ RULES:
         seed = self._compute_seed(job_id or track_id, track_id) if job_id else None
 
         reference_path = None
-        if same_speaker:
-            reference_path = self._export_reference_clip(
-                original_waveform, start_sample, end_sample, track_id=track_id
-            )
+        reference_text = None
+        reference_speaking_rate = None
         try:
+            if same_speaker:
+                (
+                    reference_path,
+                    reference_text,
+                    reference_speaking_rate,
+                ) = await self._prepare_voice_reference(
+                    original_waveform,
+                    start_sample,
+                    end_sample,
+                    track_id=track_id,
+                    original_text=original_text,
+                )
             tts_bytes = await self._generate_segment_groups(
                 new_text, reference_audio_path=reference_path,
-                original_text=original_text, track_id=track_id, seed=seed,
+                original_text=reference_text, track_id=track_id, seed=seed,
             )
         finally:
             if reference_path:
@@ -250,15 +276,35 @@ RULES:
         if tts_sr != self.TARGET_SR:
             tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
 
-        ref_segment = original_waveform[:, start_sample:end_sample]
+        duration_reference = original_waveform[:, start_sample:end_sample]
+        ref_segment = duration_reference
         ref_radius = int(2.0 * self.TARGET_SR)
         if ref_segment.shape[1] < int(self.TARGET_SR * 1.0):
             ref_start = max(0, start_sample - ref_radius)
             ref_end = min(original_waveform.shape[1], end_sample + ref_radius)
             ref_segment = original_waveform[:, ref_start:ref_end]
 
-        tts_waveform = self._time_stretch_to_match(tts_waveform, ref_segment)
-        tts_waveform = TTSPostProcessor.process(tts_waveform, ref_segment, self.TARGET_SR)
+        tts_waveform = await asyncio.to_thread(
+            TTSPostProcessor.process,
+            tts_waveform,
+            ref_segment,
+            self.TARGET_SR,
+            match_reference_pitch=same_speaker,
+        )
+        pacing_reference, pacing_text = self._pacing_reference(
+            original_waveform,
+            start_sample,
+            end_sample,
+            original_text=original_text,
+            reference_text=reference_text,
+        )
+        tts_waveform = self._time_stretch_to_match(
+            tts_waveform,
+            pacing_reference,
+            new_text=new_text,
+            original_text=pacing_text,
+            source_speaking_rate=reference_speaking_rate,
+        )
 
         reconstructed = self._splice_segment(original_waveform, tts_waveform, start_sample, end_sample)
 
@@ -282,14 +328,29 @@ RULES:
         changes: list,
         storage: B2Storage,
         same_speaker: bool = True,
+        voice_reference_audio_path: str | None = None,
         job_id: str | None = None,
         run_id: str | None = None,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
         if orig_sr != self.TARGET_SR:
             original_waveform = F_audio.resample(original_waveform, orig_sr, self.TARGET_SR)
+        reference_waveform = original_waveform
+        if (
+            voice_reference_audio_path
+            and voice_reference_audio_path != original_audio_path
+        ):
+            reference_waveform, reference_sr = torchaudio.load(
+                voice_reference_audio_path
+            )
+            if reference_sr != self.TARGET_SR:
+                reference_waveform = F_audio.resample(
+                    reference_waveform,
+                    reference_sr,
+                    self.TARGET_SR,
+                )
 
-        merged = original_waveform
+        merged = original_waveform.clone()
         normalized = self._normalize_changes(changes)
         if not normalized:
             raise ValueError("reconstruct requires non-empty segment changes")
@@ -299,10 +360,31 @@ RULES:
 
         normalized = sorted(normalized, key=lambda c: float(c["segment_start"]), reverse=True)
         for change in normalized:
-            start_sample = int(float(change["segment_start"]) * self.TARGET_SR)
-            end_sample = int(float(change["segment_end"]) * self.TARGET_SR)
-            start_sample = max(0, min(start_sample, merged.shape[1] - 1 if merged.shape[1] else 0))
-            end_sample = max(start_sample + 1, min(end_sample, merged.shape[1]))
+            timeline_start = int(
+                float(change["segment_start"]) * self.TARGET_SR
+            )
+            timeline_end = int(
+                float(change["segment_end"]) * self.TARGET_SR
+            )
+            start_sample = max(
+                0,
+                min(
+                    timeline_start,
+                    merged.shape[1] - 1 if merged.shape[1] else 0,
+                ),
+            )
+            end_sample = max(
+                start_sample + 1,
+                min(timeline_end, merged.shape[1]),
+            )
+            reference_start = max(
+                0,
+                min(timeline_start, reference_waveform.shape[1]),
+            )
+            reference_end = max(
+                reference_start,
+                min(timeline_end, reference_waveform.shape[1]),
+            )
 
             if change.get("is_deletion"):
                 _recon_payload_logger.info(
@@ -321,37 +403,35 @@ RULES:
                 ))
                 continue
 
-            clip_samples = end_sample - start_sample
-            min_samples = int(3.0 * self.TARGET_SR)
-            if clip_samples < min_samples:
-                radius = min_samples // 2
-                ref_start = max(0, start_sample - radius)
-                ref_end = min(merged.shape[1], end_sample + radius)
-                if ref_end - ref_start < min_samples:
-                    ref_start = max(0, ref_end - min_samples)
-                    ref_end = min(merged.shape[1], ref_start + min_samples)
-            else:
-                ref_start = start_sample
-                ref_end = end_sample
-
-            ref_text_for_clone = change.get("original_text") or None
+            original_text = str(change.get("original_text") or "").strip()
+            ref_text_for_clone = original_text or None
             reference_path = None
-            if same_speaker:
-                reference_path = self._export_reference_clip(
-                    merged, start_sample, end_sample, track_id=track_id
+            reference_speaking_rate = None
+            try:
+                if same_speaker:
+                    (
+                        reference_path,
+                        ref_text_for_clone,
+                        reference_speaking_rate,
+                    ) = await self._prepare_voice_reference(
+                        reference_waveform,
+                        reference_start,
+                        reference_end,
+                        track_id=track_id,
+                        original_text=original_text,
+                    )
+
+                _recon_payload_logger.info(
+                    "CHANGE | seg=%.1fs-%.1fs | original_text='%s' | new_text='%s' "
+                    "| ref_text_for_clone='%s' | ref_path=%s | track=%s",
+                    change["segment_start"], change["segment_end"],
+                    change.get("original_text", "")[:80],
+                    change["new_text"][:120],
+                    (ref_text_for_clone or "<AUTO>")[:80],
+                    reference_path or "<NONE>",
+                    track_id,
                 )
 
-            _recon_payload_logger.info(
-                "CHANGE | seg=%.1fs-%.1fs | original_text='%s' | new_text='%s' | ref_text_for_clone='%s' | ref_path=%s | track=%s",
-                change["segment_start"], change["segment_end"],
-                change.get("original_text", "")[:80],
-                change["new_text"][:120],
-                (ref_text_for_clone or "<AUTO>")[:80],
-                reference_path or "<NONE>",
-                track_id,
-            )
-
-            try:
                 tts_bytes = await self._generate_segment_groups(
                     change["new_text"],
                     reference_audio_path=reference_path,
@@ -371,15 +451,39 @@ RULES:
             if tts_sr != self.TARGET_SR:
                 tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
 
-            ref_segment = merged[:, start_sample:end_sample]
+            ref_segment = reference_waveform[
+                :, reference_start:reference_end
+            ]
             ref_radius = int(2.0 * self.TARGET_SR)
             if ref_segment.shape[1] < int(self.TARGET_SR * 1.0):
-                ref_start = max(0, start_sample - ref_radius)
-                ref_end = min(merged.shape[1], end_sample + ref_radius)
-                ref_segment = merged[:, ref_start:ref_end]
+                ref_start = max(0, reference_start - ref_radius)
+                ref_end = min(
+                    reference_waveform.shape[1],
+                    reference_end + ref_radius,
+                )
+                ref_segment = reference_waveform[:, ref_start:ref_end]
 
-            tts_waveform = self._time_stretch_to_match(tts_waveform, ref_segment)
-            tts_waveform = TTSPostProcessor.process(tts_waveform, ref_segment, self.TARGET_SR)
+            tts_waveform = await asyncio.to_thread(
+                TTSPostProcessor.process,
+                tts_waveform,
+                ref_segment,
+                self.TARGET_SR,
+                match_reference_pitch=same_speaker,
+            )
+            pacing_reference, pacing_text = self._pacing_reference(
+                reference_waveform,
+                reference_start,
+                reference_end,
+                original_text=original_text,
+                reference_text=ref_text_for_clone,
+            )
+            tts_waveform = self._time_stretch_to_match(
+                tts_waveform,
+                pacing_reference,
+                new_text=change["new_text"],
+                original_text=pacing_text,
+                source_speaking_rate=reference_speaking_rate,
+            )
 
             orig_seg_dur = (end_sample - start_sample) / self.TARGET_SR
             tts_seg_dur = tts_waveform.shape[1] / self.TARGET_SR
@@ -469,12 +573,24 @@ RULES:
                     )
                     continue
 
-                ref_path = voice_reference_path
-                ref_text = change.get("original_text") or None
+                original_text = str(change.get("original_text") or "").strip()
+                ref_path = voice_reference_path if same_speaker else None
+                ref_text = original_text or None
+                reference_speaking_rate = None
+                owns_reference = False
                 if same_speaker and not ref_path:
-                    ref_path = self._export_reference_clip(
-                        merged, start_sample, end_sample, track_id=track_id
+                    (
+                        ref_path,
+                        ref_text,
+                        reference_speaking_rate,
+                    ) = await self._prepare_voice_reference(
+                        original_waveform,
+                        start_sample,
+                        end_sample,
+                        track_id=track_id,
+                        original_text=original_text,
                     )
+                    owns_reference = True
                 try:
                     tts_bytes = await self._generate_segment_groups(
                         change["new_text"],
@@ -484,7 +600,7 @@ RULES:
                         seed=seed,
                     )
                 finally:
-                    if ref_path and ref_path != voice_reference_path:
+                    if ref_path and owns_reference:
                         drop_temp_standalone(ref_path)
 
                 with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
@@ -495,15 +611,35 @@ RULES:
                 if tts_sr != self.TARGET_SR:
                     tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
 
-                ref_segment = merged[:, start_sample:end_sample]
+                duration_reference = merged[:, start_sample:end_sample]
+                ref_segment = duration_reference
                 ref_radius = int(2.0 * self.TARGET_SR)
                 if ref_segment.shape[1] < int(self.TARGET_SR * 1.0):
                     ref_start = max(0, start_sample - ref_radius)
                     ref_end = min(merged.shape[1], end_sample + ref_radius)
                     ref_segment = merged[:, ref_start:ref_end]
 
-                tts_waveform = self._time_stretch_to_match(tts_waveform, ref_segment)
-                tts_waveform = TTSPostProcessor.process(tts_waveform, ref_segment, self.TARGET_SR)
+                tts_waveform = await asyncio.to_thread(
+                    TTSPostProcessor.process,
+                    tts_waveform,
+                    ref_segment,
+                    self.TARGET_SR,
+                    match_reference_pitch=same_speaker,
+                )
+                pacing_reference, pacing_text = self._pacing_reference(
+                    original_waveform,
+                    start_sample,
+                    end_sample,
+                    original_text=original_text,
+                    reference_text=ref_text,
+                )
+                tts_waveform = self._time_stretch_to_match(
+                    tts_waveform,
+                    pacing_reference,
+                    new_text=change["new_text"],
+                    original_text=pacing_text,
+                    source_speaking_rate=reference_speaking_rate,
+                )
                 merged = self._splice_segment(merged, tts_waveform, start_sample, end_sample)
 
             if batch_idx < len(batches) - 1:
@@ -562,12 +698,23 @@ RULES:
                 ))
                 continue
 
-            ref_text = change.get("original_text") or None
-            reference_path = self._export_reference_clip(
-                original_waveform, start_sample, end_sample, track_id=track_id,
-            )
-
+            original_text = str(change.get("original_text") or "").strip()
+            ref_text = original_text or None
+            reference_path = None
+            reference_speaking_rate = None
             try:
+                if same_speaker:
+                    (
+                        reference_path,
+                        ref_text,
+                        reference_speaking_rate,
+                    ) = await self._prepare_voice_reference(
+                        original_waveform,
+                        start_sample,
+                        end_sample,
+                        track_id=track_id,
+                        original_text=original_text,
+                    )
                 tts_bytes = await self._generate_segment_groups(
                     text, reference_audio_path=reference_path,
                     original_text=ref_text,
@@ -585,10 +732,30 @@ RULES:
             if sr != self.TARGET_SR:
                 wf = F_audio.resample(wf, sr, self.TARGET_SR)
 
-            ref_segment = original_waveform[:, start_sample:end_sample]
+            duration_reference = original_waveform[:, start_sample:end_sample]
+            ref_segment = duration_reference
             if ref_segment.shape[1] > 0:
-                wf = self._time_stretch_to_match(wf, ref_segment)
-                wf = TTSPostProcessor.process(wf, ref_segment, self.TARGET_SR)
+                wf = await asyncio.to_thread(
+                    TTSPostProcessor.process,
+                    wf,
+                    ref_segment,
+                    self.TARGET_SR,
+                    match_reference_pitch=same_speaker,
+                )
+                pacing_reference, pacing_text = self._pacing_reference(
+                    original_waveform,
+                    start_sample,
+                    end_sample,
+                    original_text=original_text,
+                    reference_text=ref_text,
+                )
+                wf = self._time_stretch_to_match(
+                    wf,
+                    pacing_reference,
+                    new_text=text,
+                    original_text=pacing_text,
+                    source_speaking_rate=reference_speaking_rate,
+                )
 
             segment_results.append(await self._upload_segment_audio(
                 wf,
@@ -737,13 +904,35 @@ RULES:
         if orig_sr != self.TARGET_SR:
             original_waveform = F_audio.resample(original_waveform, orig_sr, self.TARGET_SR)
 
-        seed = self._compute_seed(job_id, track_id)
-        rebuilt_bytes = await self._generate_segment_groups(
-            edited_transcript,
-            reference_audio_path=original_audio_path,
-            track_id=track_id,
-            seed=seed,
+        start_sample, end_sample = self._detect_speech_bounds(
+            original_waveform, self.TARGET_SR, original_transcript
         )
+        seed = self._compute_seed(job_id, track_id)
+        reference_path = None
+        reference_text = None
+        reference_speaking_rate = None
+        try:
+            (
+                reference_path,
+                reference_text,
+                reference_speaking_rate,
+            ) = await self._prepare_voice_reference(
+                original_waveform,
+                start_sample,
+                end_sample,
+                track_id=track_id,
+                original_text=original_transcript,
+            )
+            rebuilt_bytes = await self._generate_segment_groups(
+                edited_transcript,
+                reference_audio_path=reference_path,
+                original_text=reference_text,
+                track_id=track_id,
+                seed=seed,
+            )
+        finally:
+            if reference_path:
+                drop_temp_standalone(reference_path)
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=hear_temp_directory()) as tmp:
             tmp.write(rebuilt_bytes)
             rebuilt_path = tmp.name
@@ -753,7 +942,6 @@ RULES:
         if rebuilt_sr != self.TARGET_SR:
             rebuilt_waveform = F_audio.resample(rebuilt_waveform, rebuilt_sr, self.TARGET_SR)
 
-        start_sample, end_sample = self._detect_speech_bounds(original_waveform, self.TARGET_SR, original_transcript)
         ref_segment = original_waveform[:, start_sample:end_sample]
         if ref_segment.shape[1] < int(self.TARGET_SR * 0.05):
             ref_radius = int(2.0 * self.TARGET_SR)
@@ -761,8 +949,19 @@ RULES:
             ref_end = min(original_waveform.shape[1], end_sample + ref_radius)
             ref_segment = original_waveform[:, ref_start:ref_end]
 
-        rebuilt_waveform = self._time_stretch_to_match(rebuilt_waveform, ref_segment)
-        rebuilt_waveform = TTSPostProcessor.process(rebuilt_waveform, ref_segment, self.TARGET_SR)
+        rebuilt_waveform = await asyncio.to_thread(
+            TTSPostProcessor.process,
+            rebuilt_waveform,
+            ref_segment,
+            self.TARGET_SR,
+        )
+        rebuilt_waveform = self._time_stretch_to_match(
+            rebuilt_waveform,
+            ref_segment,
+            new_text=edited_transcript,
+            original_text=original_transcript,
+            source_speaking_rate=reference_speaking_rate,
+        )
 
         merged = self._splice_segment(original_waveform, rebuilt_waveform, start_sample, end_sample)
         peak = merged.abs().max().item()
@@ -878,64 +1077,32 @@ RULES:
         )
 
         refs = None
-        if reference_audio_path and os.path.isfile(reference_audio_path):
-            with open(reference_audio_path, "rb") as _rf:
-                refs = [{"audio": _rf.read(), "text": original_text or ""}]
-            _recon_payload_logger.info(
-                "FISHSPEECH_REF | path='%s' size=%d text='%s'",
-                reference_audio_path, len(refs[0]["audio"]) if refs else 0,
-                (original_text or "")[:80],
-            )
+        if reference_audio_path:
+            try:
+                reference_bytes = await asyncio.to_thread(
+                    self._read_file_bytes, reference_audio_path
+                )
+                refs = [{"audio": reference_bytes, "text": original_text or ""}]
+                _recon_payload_logger.info(
+                    "FISHSPEECH_REF | path='%s' size=%d text='%s'",
+                    reference_audio_path,
+                    len(reference_bytes),
+                    (original_text or "")[:80],
+                )
+            except OSError as exc:
+                logger.warning("Unable to read voice reference %s: %s", reference_audio_path, exc)
         return await get_model_client().generate_speech(
             text=processed_text,
             max_new_tokens=1024,
             references=refs,
+            seed=seed,
         )
 
     async def _preprocess_for_s2(self, text: str) -> str:
-        """Add Fish Speech control tokens at punctuation and paragraph breaks.
-        
-        Token placement rules:
-          [pause]        — after . ! ? and at paragraph breaks
-          [short pause]  — after , ; : —
-        """
-        # Split into paragraphs
+        """Preserve the requested delivery and mark only explicit paragraph breaks."""
         paragraphs = re.split(r"\n\s*\n", text.strip())
-        result_parts = []
-
-        for pi, para in enumerate(paragraphs):
-            if not para.strip():
-                continue
-            # Add [pause] at paragraph breaks
-            if pi > 0:
-                result_parts.append("[pause]")
-
-            # Process sentence by sentence within paragraph
-            lines = para.split("\n")
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-
-                # Add [short pause] after commas, semicolons, colons, em-dashes
-                line = re.sub(r",\s*", ", [short pause] ", line)
-                line = re.sub(r";\s*", "; [short pause] ", line)
-                line = re.sub(r":\s*", ": [short pause] ", line)
-                line = re.sub(r"\u2014\s*", "\u2014 [short pause] ", line)
-
-                # Add [pause] after periods, exclamation marks, question marks
-                line = re.sub(r"\.\s+", ". [pause] ", line)
-                line = re.sub(r"!\s+", "! [pause] ", line)
-                line = re.sub(r"\?\s+", "? [pause] ", line)
-
-                # Clean up: no double tags
-                line = re.sub(r"\[pause\]\s*\[pause\]", "[pause]", line)
-                line = re.sub(r"\[short pause\]\s*\[short pause\]", "[short pause]", line)
-
-                result_parts.append(line)
-
-        processed = " ".join(result_parts)
-        return processed
+        normalized = [re.sub(r"\s+", " ", paragraph).strip() for paragraph in paragraphs]
+        return " [pause] ".join(paragraph for paragraph in normalized if paragraph)
 
     async def _generate_segment_groups(
         self,
@@ -986,6 +1153,358 @@ RULES:
         torchaudio.save(ref_path, clip, self.TARGET_SR)
         return ref_path
 
+    def _reference_clip_bounds(
+        self,
+        waveform: torch.Tensor,
+        start_sample: int,
+        end_sample: int,
+    ) -> tuple[int, int]:
+        """Return a clean reference window that never contains the edited audio."""
+        total_samples = waveform.shape[1]
+        if total_samples <= 0:
+            return 0, 0
+
+        start_sample = max(0, min(start_sample, total_samples))
+        end_sample = max(start_sample, min(end_sample, total_samples))
+        target_samples = int(self.VOICE_REFERENCE_SECONDS * self.TARGET_SR)
+        minimum_samples = int(self.MIN_VOICE_REFERENCE_SECONDS * self.TARGET_SR)
+        guard_samples = int(self.VOICE_REFERENCE_GUARD_SECONDS * self.TARGET_SR)
+
+        excluded_start = max(0, start_sample - guard_samples)
+        excluded_end = min(total_samples, end_sample + guard_samples)
+        left_samples = min(target_samples, excluded_start)
+        right_samples = min(target_samples, total_samples - excluded_end)
+
+        if max(left_samples, right_samples) < minimum_samples:
+            return 0, 0
+
+        # Prefer preceding speech when both sides offer the same amount. It is
+        # normally the closest causal context and avoids crossing a speaker
+        # change immediately after the edited interval.
+        if left_samples >= right_samples:
+            return excluded_start - left_samples, excluded_start
+        return excluded_end, excluded_end + right_samples
+
+    @classmethod
+    def _speaking_rate_from_transcription(
+        cls,
+        transcription: dict,
+    ) -> float | None:
+        """Measure delivery rate across the complete aligned ASR speech span."""
+        intervals: list[tuple[float, float]] = []
+        units = 0
+
+        for segment in transcription.get("segments") or []:
+            segment_has_aligned_words = False
+            for word in segment.get("words") or []:
+                word_units = cls._speech_units(word.get("word"))
+                try:
+                    word_start = float(word.get("start"))
+                    word_end = float(word.get("end"))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    word_units <= 0
+                    or not np.isfinite(word_start)
+                    or not np.isfinite(word_end)
+                    or word_end <= word_start
+                ):
+                    continue
+                intervals.append((word_start, word_end))
+                units += word_units
+                segment_has_aligned_words = True
+
+            if segment_has_aligned_words:
+                continue
+
+            segment_units = cls._speech_units(segment.get("text"))
+            try:
+                segment_start = float(segment.get("start"))
+                segment_end = float(segment.get("end"))
+            except (TypeError, ValueError):
+                continue
+            if (
+                segment_units > 0
+                and np.isfinite(segment_start)
+                and np.isfinite(segment_end)
+                and segment_end > segment_start
+            ):
+                intervals.append((segment_start, segment_end))
+                units += segment_units
+
+        if units <= 0 or not intervals:
+            return None
+
+        # Source and generated audio must use the same clock. The full aligned
+        # span includes natural internal pauses while excluding leading and
+        # trailing audio outside the first and last recognized words.
+        speech_start = min(start for start, _end in intervals)
+        speech_end = max(end for _start, end in intervals)
+        span_seconds = speech_end - speech_start
+        if span_seconds <= 0.0:
+            return None
+        speaking_rate = units / span_seconds
+        if not (
+            np.isfinite(speaking_rate)
+            and cls.MIN_PLAUSIBLE_SPEAKING_RATE
+            <= speaking_rate
+            <= cls.MAX_PLAUSIBLE_SPEAKING_RATE
+        ):
+            return None
+        return float(speaking_rate)
+
+    @classmethod
+    def _transcription_text_for_window(
+        cls,
+        transcription: dict,
+        window_start: float,
+        window_end: float,
+    ) -> str:
+        """Return ASR text aligned to a clipped reference-audio window."""
+        if window_end <= window_start:
+            return ""
+
+        timed_words: list[tuple[float, float, str, int]] = []
+        segment_bounds: list[tuple[float, float, str]] = []
+        for segment in transcription.get("segments") or []:
+            try:
+                segment_start = float(segment.get("start"))
+                segment_end = float(segment.get("end"))
+            except (TypeError, ValueError):
+                segment_start = segment_end = 0.0
+            segment_text = str(segment.get("text") or "").strip()
+            if segment_text and segment_end > segment_start:
+                segment_bounds.append((segment_start, segment_end, segment_text))
+
+            for word in segment.get("words") or []:
+                word_text = str(word.get("word") or "").strip()
+                word_units = cls._speech_units(word_text)
+                try:
+                    word_start = float(word.get("start"))
+                    word_end = float(word.get("end"))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    word_units <= 0
+                    or not np.isfinite(word_start)
+                    or not np.isfinite(word_end)
+                    or word_end <= word_start
+                ):
+                    continue
+                timed_words.append((word_start, word_end, word_text, word_units))
+
+        all_bounds = [(start, end) for start, end, *_rest in timed_words]
+        all_bounds.extend((start, end) for start, end, _text in segment_bounds)
+        if all_bounds:
+            speech_start = min(start for start, _end in all_bounds)
+            speech_end = max(end for _start, end in all_bounds)
+            if window_start <= speech_start and window_end >= speech_end:
+                return str(transcription.get("transcript") or "").strip()
+
+        selected_words = [
+            word_text
+            for word_start, word_end, word_text, word_units in timed_words
+            if word_units <= 2
+            and window_start <= (word_start + word_end) / 2 < window_end
+        ]
+        if selected_words:
+            return " ".join(selected_words)
+
+        # A provider may omit word timestamps. Only use whole segments that
+        # fit inside the clip; partial segment text would mislabel Fish's
+        # reference audio and can leak source words into the output.
+        selected_segments = [
+            segment_text
+            for segment_start, segment_end, segment_text in segment_bounds
+            if segment_start >= window_start and segment_end <= window_end
+        ]
+        return " ".join(selected_segments)
+
+    @classmethod
+    def _complete_word_reference_window(
+        cls,
+        transcription: dict,
+        window_start: float,
+        window_end: float,
+    ) -> tuple[float, float, str] | None:
+        """Align reference audio and text to the same complete ASR words."""
+        if window_end <= window_start:
+            return None
+
+        selected: list[tuple[float, float, str]] = []
+        for segment in transcription.get("segments") or []:
+            for word in segment.get("words") or []:
+                word_text = str(word.get("word") or "").strip()
+                word_units = cls._speech_units(word_text)
+                try:
+                    word_start = float(word.get("start"))
+                    word_end = float(word.get("end"))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    0 < word_units <= 2
+                    and np.isfinite(word_start)
+                    and np.isfinite(word_end)
+                    and word_end > word_start
+                    and word_start >= window_start
+                    and word_end <= window_end
+                ):
+                    selected.append((word_start, word_end, word_text))
+
+        if not selected:
+            return None
+        selected.sort(key=lambda item: (item[0], item[1]))
+        return selected[0][0], selected[-1][1], " ".join(
+            word_text for _start, _end, word_text in selected
+        )
+
+    async def _prepare_voice_reference(
+        self,
+        waveform: torch.Tensor,
+        start_sample: int,
+        end_sample: int,
+        *,
+        track_id: str | None,
+        original_text: str | None = None,
+    ) -> tuple[str | None, str, float | None]:
+        """Export word-aligned speaker audio, transcript, and delivery rate."""
+        total_samples = waveform.shape[1]
+        edit_start = max(0, min(start_sample, total_samples))
+        edit_end = max(edit_start, min(end_sample, total_samples))
+        target_samples = int(self.VOICE_REFERENCE_SECONDS * self.TARGET_SR)
+        minimum_samples = int(self.MIN_VOICE_REFERENCE_SECONDS * self.TARGET_SR)
+
+        # A supplied source transcript makes the edited interval a trusted
+        # speaker and pacing reference. Prefer it over adjacent audio, which
+        # can cross a speaker change.
+        use_edited_interval = (
+            self._speech_units(original_text) > 0
+            and edit_end - edit_start >= minimum_samples
+        )
+        if use_edited_interval:
+            clip_samples = min(target_samples, edit_end - edit_start)
+            ref_start = edit_start + (edit_end - edit_start - clip_samples) // 2
+            ref_end = ref_start + clip_samples
+
+            max_pacing_samples = int(
+                self.MAX_PACING_REFERENCE_SECONDS * self.TARGET_SR
+            )
+            pacing_samples = min(max_pacing_samples, edit_end - edit_start)
+            pacing_start = edit_start + (
+                edit_end - edit_start - pacing_samples
+            ) // 2
+            pacing_end = pacing_start + pacing_samples
+        else:
+            ref_start, ref_end = self._reference_clip_bounds(
+                waveform, edit_start, edit_end
+            )
+            pacing_start, pacing_end = ref_start, ref_end
+
+        if ref_end <= ref_start:
+            logger.warning(
+                "No usable voice reference for track=%s",
+                track_id,
+            )
+            return None, "", None
+
+        reference_path = None
+        try:
+            if use_edited_interval:
+                pacing_audio = (
+                    waveform[:, pacing_start:pacing_end]
+                    .detach()
+                    .float()
+                    .mean(dim=0)
+                    .cpu()
+                    .numpy()
+                )
+                audio_bytes = await asyncio.to_thread(
+                    self._wav_bytes_from_audio,
+                    pacing_audio,
+                    self.TARGET_SR,
+                )
+            else:
+                reference_path = self._export_reference_clip(
+                    waveform,
+                    ref_start,
+                    ref_end,
+                    track_id=track_id,
+                )
+                audio_bytes = await asyncio.to_thread(
+                    self._read_file_bytes,
+                    reference_path,
+                )
+
+            pacing_duration = (pacing_end - pacing_start) / self.TARGET_SR
+            transcript = await _get_transcriber().transcribe(
+                audio_bytes,
+                track_id=track_id,
+                short_utterance=pacing_duration <= self.VOICE_REFERENCE_SECONDS,
+            )
+            speaking_rate = self._speaking_rate_from_transcription(transcript)
+            if use_edited_interval:
+                window_start = (ref_start - pacing_start) / self.TARGET_SR
+                window_end = (ref_end - pacing_start) / self.TARGET_SR
+                aligned_window = self._complete_word_reference_window(
+                    transcript,
+                    window_start,
+                    window_end,
+                )
+                if aligned_window is not None:
+                    aligned_start, aligned_end, reference_text = aligned_window
+                    aligned_samples = round(
+                        (aligned_end - aligned_start) * self.TARGET_SR
+                    )
+                    if aligned_samples >= minimum_samples:
+                        ref_start = pacing_start + round(
+                            aligned_start * self.TARGET_SR
+                        )
+                        ref_end = pacing_start + round(aligned_end * self.TARGET_SR)
+                    else:
+                        reference_text = ""
+                else:
+                    reference_text = self._transcription_text_for_window(
+                        transcript,
+                        window_start,
+                        window_end,
+                    )
+            else:
+                reference_text = str(transcript.get("transcript") or "").strip()
+
+            if reference_text:
+                if reference_path is None:
+                    reference_path = self._export_reference_clip(
+                        waveform,
+                        ref_start,
+                        ref_end,
+                        track_id=track_id,
+                    )
+                return reference_path, reference_text, speaking_rate
+
+            if speaking_rate is not None:
+                logger.warning(
+                    "Voice clone reference text was not aligned for track=%s; "
+                    "using measured speaking rate without voice reference",
+                    track_id,
+                )
+                if reference_path:
+                    drop_temp_standalone(reference_path)
+                return None, "", speaking_rate
+            logger.warning("Voice reference transcription was empty for track=%s", track_id)
+        except Exception as exc:
+            logger.warning("Voice reference transcription failed for track=%s: %s", track_id, exc)
+
+        # Never pair reference audio with missing or mismatched text. Fish can
+        # otherwise treat unlabelled reference words as target content.
+        if reference_path:
+            drop_temp_standalone(reference_path)
+        return None, "", None
+
+    @staticmethod
+    def _read_file_bytes(path: str) -> bytes:
+        with open(path, "rb") as file_obj:
+            return file_obj.read()
+
     def _wav_bytes_from_audio(self, audio: np.ndarray, sampling_rate: int) -> bytes:
         pcm = np.clip(audio.astype(np.float32), -1.0, 1.0)
         pcm_i16 = (pcm * 32767.0).astype(np.int16)
@@ -1017,48 +1536,240 @@ RULES:
             return 0, waveform.shape[1]
         return start, end
 
+    def _pacing_reference(
+        self,
+        waveform: torch.Tensor,
+        start_sample: int,
+        end_sample: int,
+        *,
+        original_text: str | None,
+        reference_text: str | None,
+    ) -> tuple[torch.Tensor, str]:
+        """Choose audio and aligned text from which to learn speaking rate."""
+        total_samples = waveform.shape[1]
+        start_sample = max(0, min(start_sample, total_samples))
+        end_sample = max(start_sample, min(end_sample, total_samples))
+        edited_segment = waveform[:, start_sample:end_sample]
+
+        aligned_original = str(original_text or "").strip()
+        if self._speech_units(aligned_original) > 0:
+            return edited_segment, aligned_original
+
+        clean_reference_text = str(reference_text or "").strip()
+        if self._speech_units(clean_reference_text) > 0:
+            ref_start, ref_end = self._reference_clip_bounds(
+                waveform,
+                start_sample,
+                end_sample,
+            )
+            if ref_end > ref_start:
+                return waveform[:, ref_start:ref_end], clean_reference_text
+
+        return edited_segment, ""
+
+    @staticmethod
+    def _speech_units(text: str | None) -> int:
+        """Count spoken word units while ignoring Fish Speech control tokens."""
+        without_controls = re.sub(r"\[[^\]]+\]", " ", str(text or ""))
+        return len(re.findall(r"[^\W_]+(?:['’][^\W_]+)?", without_controls, re.UNICODE))
+
+    @classmethod
+    def _active_speech_duration(
+        cls,
+        waveform: torch.Tensor,
+        sr: int,
+        *,
+        allow_uniform_activity: bool = True,
+    ) -> float:
+        """Estimate voiced/activity time without counting long silent gaps.
+
+        Uniform energy is accepted for clean generated speech, but callers can
+        reject it for source recordings where stationary music/noise otherwise
+        looks like speech across the entire clip.
+        """
+        if waveform.numel() == 0 or sr <= 0:
+            return 0.0
+
+        mono = waveform.detach().float().mean(dim=0).cpu().numpy()
+        frame_samples = max(1, int(sr * cls.PACING_ACTIVITY_FRAME_MS / 1000))
+        frame_count = len(mono) // frame_samples
+        if frame_count < 2:
+            peak = float(np.max(np.abs(mono))) if mono.size else 0.0
+            return len(mono) / sr if peak >= 1e-5 else 0.0
+
+        framed = mono[: frame_count * frame_samples].reshape(frame_count, frame_samples)
+        rms = np.sqrt(np.mean(framed * framed, axis=1))
+        low_energy = float(np.percentile(rms, 20))
+        high_energy = float(np.percentile(rms, 95))
+        if high_energy < 1e-5:
+            return 0.0
+
+        if low_energy / high_energy >= 0.65:
+            if not allow_uniform_activity:
+                return 0.0
+            active = np.ones(frame_count, dtype=bool)
+        else:
+            threshold = max(
+                1e-5,
+                high_energy * 0.08,
+                float(np.sqrt(max(low_energy, 0.0) * high_energy)),
+            )
+            active = rms > threshold
+            # Bridge isolated 20 ms detector gaps inside otherwise continuous speech.
+            active = np.convolve(active.astype(np.int8), np.ones(3, dtype=np.int8), mode="same") > 0
+
+        return float(np.count_nonzero(active) * frame_samples / sr)
+
     def _time_stretch_to_match(
         self,
         tts_waveform: torch.Tensor,
         ref_waveform: torch.Tensor,
+        *,
+        new_text: str | None = None,
+        original_text: str | None = None,
+        source_speaking_rate: float | None = None,
     ) -> torch.Tensor:
-        target_dur = ref_waveform.shape[1] / self.TARGET_SR
-        current_dur = tts_waveform.shape[1] / self.TARGET_SR
-        if current_dur < 0.01:
+        current_samples = tts_waveform.shape[1]
+        current_dur = current_samples / self.TARGET_SR
+        if current_samples <= 0:
             return tts_waveform
-        ratio = target_dur / current_dur
-        ratio = max(0.9, min(1.1, ratio))
-        if abs(ratio - 1.0) < 0.05:
+        source_units = self._speech_units(original_text)
+        replacement_units = self._speech_units(new_text)
+        if replacement_units <= 0:
+            logger.info("Speech-rate match skipped because replacement text is unavailable")
             return tts_waveform
-        logger.info("Time-stretching TTS: %.2fs -> %.2fs (ratio=%.3f)", current_dur, target_dur, ratio)
+
+        source_rate = None
+        source_measurement = "aligned-asr-span"
         try:
-            n_fft = 2048
-            hop = n_fft // 4
-            spec = torch.stft(
-                tts_waveform.squeeze(0),
-                n_fft=n_fft,
-                hop_length=hop,
-                win_length=n_fft,
-                window=torch.hann_window(n_fft, device=tts_waveform.device),
-                return_complex=True,
-            )
-            phase_advance = torch.linspace(
-                0, torch.pi * hop, spec.size(0), device=spec.device
-            ).unsqueeze(1)
-            stretched_spec = torchaudio.functional.phase_vocoder(
-                spec.unsqueeze(0), ratio, phase_advance
-            ).squeeze(0)
-            stretched = torch.istft(
-                stretched_spec,
-                n_fft=n_fft,
-                hop_length=hop,
-                win_length=n_fft,
-                window=torch.hann_window(n_fft, device=tts_waveform.device),
-            )
-            return stretched.unsqueeze(0)
-        except Exception as e:
-            logger.warning("Time-stretch failed: %s, using original", e)
+            candidate_rate = float(source_speaking_rate)
+        except (TypeError, ValueError):
+            candidate_rate = 0.0
+        if (
+            np.isfinite(candidate_rate)
+            and self.MIN_PLAUSIBLE_SPEAKING_RATE
+            <= candidate_rate
+            <= self.MAX_PLAUSIBLE_SPEAKING_RATE
+        ):
+            source_rate = candidate_rate
+
+        if source_rate is None:
+            source_measurement = "aligned-source-span"
+            if source_units <= 0:
+                logger.info(
+                    "Speech-rate match skipped because aligned source timing is unavailable"
+                )
+                return tts_waveform
+            source_span_dur = ref_waveform.shape[1] / self.TARGET_SR
+            if source_span_dur < 0.05:
+                logger.warning(
+                    "Speech-rate match skipped because source span is too short"
+                )
+                return tts_waveform
+            source_rate = source_units / source_span_dur
+
+        if current_dur < 0.05:
+            logger.warning("Speech-rate match skipped because generated span is too short")
             return tts_waveform
+
+        raw_tts_rate = replacement_units / current_dur
+        if not (
+            np.isfinite(source_rate)
+            and np.isfinite(raw_tts_rate)
+            and self.MIN_PLAUSIBLE_SPEAKING_RATE
+            <= source_rate
+            <= self.MAX_PLAUSIBLE_SPEAKING_RATE
+            and self.MIN_PLAUSIBLE_SPEAKING_RATE
+            <= raw_tts_rate
+            <= self.MAX_PLAUSIBLE_SPEAKING_RATE
+        ):
+            logger.warning(
+                "Speech-rate match skipped because source/raw rates are unreliable "
+                "(source=%.3f raw_tts=%.3f)",
+                source_rate,
+                raw_tts_rate,
+            )
+            return tts_waveform
+
+        requested_rate = source_rate / raw_tts_rate
+        applied_rate = float(np.clip(
+            requested_rate,
+            self.MIN_SAFE_TEMPO_FACTOR,
+            self.MAX_SAFE_TEMPO_FACTOR,
+        ))
+        target_samples = max(1, round(current_samples / applied_rate))
+        target_dur = target_samples / self.TARGET_SR
+        logger.info(
+            "Speech-rate profile: source=%.2f words/s raw_tts=%.2f words/s "
+            "requested=%.3f applied=%.3f measurement=%s duration=%.2fs->%.2fs",
+            source_rate,
+            raw_tts_rate,
+            requested_rate,
+            applied_rate,
+            source_measurement,
+            current_dur,
+            target_dur,
+        )
+        _recon_payload_logger.info(
+            "PACING_PROFILE | source=%.3f words/s | raw_tts=%.3f words/s "
+            "| requested=%.4f | applied=%.4f | measurement=%s "
+            "| duration=%.3fs->%.3fs",
+            source_rate,
+            raw_tts_rate,
+            requested_rate,
+            applied_rate,
+            source_measurement,
+            current_dur,
+            target_dur,
+        )
+        if not np.isclose(requested_rate, applied_rate):
+            residual_percent = (applied_rate / requested_rate - 1.0) * 100.0
+            logger.warning(
+                "Speech-rate correction clamped: requested=%.3f applied=%.3f "
+                "residual=%+.1f%%",
+                requested_rate,
+                applied_rate,
+                residual_percent,
+            )
+        if target_dur < self.MIN_PACING_TARGET_SECONDS:
+            return tts_waveform
+        if abs(applied_rate - 1.0) < 0.01:
+            return tts_waveform
+        try:
+            sox_input = tts_waveform.detach().to(device="cpu", dtype=torch.float32)
+            effects = [["tempo", "-s", f"{applied_rate:.8f}"]]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                stretched, stretched_sr = torchaudio.sox_effects.apply_effects_tensor(
+                    sox_input,
+                    self.TARGET_SR,
+                    effects,
+                )
+            if stretched_sr != self.TARGET_SR:
+                stretched = F_audio.resample(
+                    stretched,
+                    stretched_sr,
+                    self.TARGET_SR,
+                )
+            stretched = stretched.to(
+                device=tts_waveform.device,
+                dtype=tts_waveform.dtype,
+            )
+            return self._fit_waveform_length(stretched, target_samples)
+        except Exception as e:
+            logger.warning(
+                "Speech tempo matching failed: %s, preserving natural TTS speed",
+                e,
+            )
+            return tts_waveform
+
+    @staticmethod
+    def _fit_waveform_length(waveform: torch.Tensor, target_samples: int) -> torch.Tensor:
+        """Keep reconstruction timestamps stable even when time-stretching fails."""
+        current_samples = waveform.shape[1]
+        if current_samples >= target_samples:
+            return waveform[:, :target_samples]
+        return torch.nn.functional.pad(waveform, (0, target_samples - current_samples))
 
     def _splice_segment(
         self,
@@ -1074,36 +1785,6 @@ RULES:
 
         before = original_waveform[:, :start_sample]
         after = original_waveform[:, end_sample:]
-
-        is_removal = replacement_waveform.shape[1] == 0
-
-        if is_removal:
-            cross_len = min(int(0.03 * self.TARGET_SR), before.shape[1], after.shape[1])
-            if cross_len > 0 and before.shape[1] > 0 and after.shape[1] > 0:
-                fade_out = torch.linspace(1.0, 0.0, cross_len).unsqueeze(0)
-                fade_in = torch.linspace(0.0, 1.0, cross_len).unsqueeze(0)
-                before[:, -cross_len:] = before[:, -cross_len:] * fade_out + after[:, :cross_len] * fade_in
-                after = after[:, cross_len:]
-            return torch.cat([before, after], dim=1) if after.shape[1] > 0 else before
-
-        if replacement_waveform.shape[1] > int(0.3 * self.TARGET_SR) and after.shape[1] > int(0.3 * self.TARGET_SR):
-            tail_len = min(int(0.2 * self.TARGET_SR), replacement_waveform.shape[1])
-            head_len = min(int(0.2 * self.TARGET_SR), after.shape[1])
-            if tail_len > 0 and head_len > 0:
-                tail = replacement_waveform[0, -tail_len:].float()
-                head = after[0, :head_len].float()
-                tail_norm = tail / (tail.norm() + 1e-10)
-                head_norm = head / (head.norm() + 1e-10)
-                correlation = torch.nn.functional.conv1d(
-                    head_norm.view(1, 1, -1),
-                    tail_norm.flip(0).view(1, 1, -1),
-                    padding=tail_len - 1,
-                ).squeeze()
-                max_corr = correlation.max().item()
-                if max_corr > 0.35:
-                    best_offset = correlation.argmax().item() - tail_len + 1
-                    if best_offset > 0:
-                        after = after[:, best_offset:]
 
         is_removal = replacement_waveform.shape[1] == 0
 

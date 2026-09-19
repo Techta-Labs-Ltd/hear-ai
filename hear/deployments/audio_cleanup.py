@@ -5,6 +5,9 @@ from ray import serve
 
 from hear.config import settings
 from hear.core.hear_temp import sweep_tracked_temp_files
+from hear.services.magic_clean.cleanup import (
+    reconcile_magic_clean_cleanup_tombstones,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +27,19 @@ class AudioCleanupDeployment:
         while True:
             try:
                 result = await asyncio.to_thread(sweep_tracked_temp_files)
+                reconciliation = await asyncio.to_thread(
+                    reconcile_magic_clean_cleanup_tombstones
+                )
                 if result["by_age"]:
                     logger.info(
                         "Removed %s stale audio entries (%s bytes)",
                         result["by_age"],
                         result["bytes_freed"],
+                    )
+                if reconciliation["failed"]:
+                    logger.error(
+                        "%s Magic Clean artifact cleanup tombstones remain",
+                        reconciliation["failed"],
                     )
             except asyncio.CancelledError:
                 raise
@@ -37,7 +48,13 @@ class AudioCleanupDeployment:
             await asyncio.sleep(settings.AUDIO_CLEANUP_INTERVAL_SECONDS)
 
     async def run_now(self) -> dict:
-        return await asyncio.to_thread(sweep_tracked_temp_files)
+        temp = await asyncio.to_thread(sweep_tracked_temp_files)
+        artifacts = await asyncio.to_thread(
+            reconcile_magic_clean_cleanup_tombstones
+        )
+        # Preserve the existing manual-cleanup response keys for callers while
+        # exposing reconciliation diagnostics as an additive field.
+        return {**temp, "magic_clean_artifacts": artifacts}
 
     def __del__(self) -> None:
         task = getattr(self, "_task", None)

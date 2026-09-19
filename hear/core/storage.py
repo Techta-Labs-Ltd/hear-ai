@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -11,6 +12,7 @@ from pathlib import PurePosixPath
 from urllib.parse import quote
 
 import boto3
+from botocore.exceptions import ClientError
 from cryptography.fernet import Fernet, InvalidToken
 
 from hear.config import settings
@@ -27,6 +29,10 @@ class MissingStorageContextError(StorageContextError):
 
 class StorageCredentialsExpiredError(StorageContextError):
     code = "storage_credentials_expired"
+
+
+class StorageCredentialsExpiringError(StorageContextError):
+    code = "storage_credentials_expiring"
 
 
 @lru_cache(maxsize=1)
@@ -53,7 +59,11 @@ def encrypt_storage_context(storage: StorageContext) -> str:
     return _fernet().encrypt(payload).decode("ascii")
 
 
-def decrypt_storage_context(token: str | None) -> StorageContext:
+def decrypt_storage_context(
+    token: str | None,
+    *,
+    require_active: bool = True,
+) -> StorageContext:
     if not token:
         raise MissingStorageContextError("missing_storage_context")
     try:
@@ -66,7 +76,7 @@ def decrypt_storage_context(token: str | None) -> StorageContext:
     expires = storage.expires_at
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=UTC)
-    if expires <= datetime.now(UTC):
+    if require_active and expires <= datetime.now(UTC):
         raise StorageCredentialsExpiredError("storage_credentials_expired")
     return storage
 
@@ -124,7 +134,14 @@ class B2Storage:
             "audio_url": audio_url,
         }
 
-    def upload_file(self, local_path: str, remote_key: str, content_type: str | None = None) -> str:
+    def upload_file(
+        self,
+        local_path: str,
+        remote_key: str,
+        content_type: str | None = None,
+        *,
+        checksum_sha256: str | None = None,
+    ) -> str:
         self._ensure_active()
         if not remote_key.startswith(self.context.folder_prefix):
             raise ValueError("object key escapes authorized folder prefix")
@@ -134,19 +151,57 @@ class B2Storage:
             or mimetypes.guess_type(local_path)[0]
             or "application/octet-stream"
         )
-        self._client.upload_file(
-            local_path,
-            self.bucket_name,
-            remote_key,
-            ExtraArgs={"ContentType": resolved_type},
-        )
-        uploaded = self._client.head_object(Bucket=self.bucket_name, Key=remote_key)
-        local_size = os.path.getsize(local_path)
-        remote_size = int(uploaded.get("ContentLength") or -1)
-        if remote_size != local_size:
-            raise RuntimeError(
-                f"uploaded object size mismatch: local={local_size}, remote={remote_size}"
+        extra_args: dict[str, object] = {"ContentType": resolved_type}
+        if checksum_sha256 is not None:
+            normalized_checksum = checksum_sha256.strip().lower()
+            if len(normalized_checksum) != 64 or any(
+                character not in "0123456789abcdef"
+                for character in normalized_checksum
+            ):
+                raise ValueError("checksum_sha256 must be a lowercase SHA-256 hex digest")
+            extra_args["Metadata"] = {"sha256": normalized_checksum}
+        try:
+            self._client.upload_file(
+                local_path,
+                self.bucket_name,
+                remote_key,
+                ExtraArgs=extra_args,
             )
+            uploaded = self._client.head_object(Bucket=self.bucket_name, Key=remote_key)
+            local_size = os.path.getsize(local_path)
+            remote_size = int(uploaded.get("ContentLength") or -1)
+            if remote_size != local_size:
+                raise RuntimeError(
+                    "uploaded object size mismatch: "
+                    f"local={local_size}, remote={remote_size}"
+                )
+            if checksum_sha256 is not None:
+                remote_checksum = str(
+                    (uploaded.get("Metadata") or {}).get("sha256") or ""
+                ).lower()
+                if remote_checksum != normalized_checksum:
+                    raise RuntimeError("uploaded object checksum metadata mismatch")
+                remote_object = self._client.get_object(
+                    Bucket=self.bucket_name,
+                    Key=remote_key,
+                )
+                body = remote_object["Body"]
+                digest = hashlib.sha256()
+                try:
+                    while chunk := body.read(1024 * 1024):
+                        digest.update(chunk)
+                finally:
+                    close = getattr(body, "close", None)
+                    if callable(close):
+                        close()
+                if digest.hexdigest() != normalized_checksum:
+                    raise RuntimeError("uploaded object content checksum mismatch")
+        except Exception:
+            try:
+                self._client.delete_object(Bucket=self.bucket_name, Key=remote_key)
+            except Exception:
+                pass
+            raise
         return self._public_url(remote_key)
 
     def delete_object(self, key: str | None) -> None:
@@ -157,3 +212,12 @@ class B2Storage:
         if not clean.startswith(self.context.folder_prefix):
             raise ValueError("object key escapes authorized folder prefix")
         self._client.delete_object(Bucket=self.bucket_name, Key=clean)
+        try:
+            self._client.head_object(Bucket=self.bucket_name, Key=clean)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code") or "")
+            status = int(exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0)
+            if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
+                return
+            raise
+        raise RuntimeError("storage object still exists after deletion")

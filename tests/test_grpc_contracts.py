@@ -89,7 +89,10 @@ def test_gateway_does_not_expose_resolver_rpcs():
 
 
 @pytest.mark.anyio
-async def test_submit_job_accepts_track_without_existence_gate(monkeypatch):
+@pytest.mark.parametrize(("explicit_value", "expected"), [(None, True), (False, False)])
+async def test_submit_job_accepts_track_without_existence_gate(
+    monkeypatch, explicit_value, expected
+):
     configure_backend_auth(monkeypatch, "secret")
     monkeypatch.setattr(
         OriginalGatewayClass,
@@ -122,6 +125,8 @@ async def test_submit_job_accepts_track_without_existence_gate(monkeypatch):
             expires_at="2099-01-01T00:00:00Z",
         ),
     )
+    if explicit_value is not None:
+        request.same_speaker = explicit_value
 
     response = await OriginalGatewayClass.SubmitJob(gateway, request, context)
 
@@ -133,6 +138,56 @@ async def test_submit_job_accepts_track_without_existence_gate(monkeypatch):
     submitted = gateway._submission.submit.await_args.args[0]
     assert submitted.track_id == "track-1"
     assert submitted.audio_url == "https://example.test/audio.mp3"
+    assert submitted.same_speaker is expected
+
+
+def test_same_speaker_grpc_fields_preserve_presence():
+    omitted_job = pipeline_pb2.SubmitJobRequest()
+    explicit_job = pipeline_pb2.SubmitJobRequest(same_speaker=False)
+    omitted_preview = pipeline_pb2.ReconstructRequest()
+    explicit_preview = pipeline_pb2.ReconstructRequest(same_speaker=False)
+
+    assert not omitted_job.HasField("same_speaker")
+    assert explicit_job.HasField("same_speaker")
+    assert explicit_job.same_speaker is False
+    assert not omitted_preview.HasField("same_speaker")
+    assert explicit_preview.HasField("same_speaker")
+    assert explicit_preview.same_speaker is False
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("explicit_value", "expected"), [(None, True), (False, False)])
+async def test_create_preview_defaults_same_speaker_only_when_omitted(
+    monkeypatch, explicit_value, expected
+):
+    configure_backend_auth(monkeypatch, "secret")
+    service = object.__new__(PipelineGrpcService)
+    service._operations = SimpleNamespace(
+        create_preview=AsyncMock(return_value={"preview_id": "preview-1"})
+    )
+    context = FakeContext((("x-api-key", "secret"), ("application", "hear")))
+    request = pipeline_pb2.ReconstructRequest(
+        audio_url="https://example.test/audio.mp3",
+        track_id="track-1",
+        backend_id="backend-a",
+        storage=pipeline_pb2.StorageContext(
+            endpoint_url="https://s3.example.test",
+            bucket_name="bucket-a",
+            key_id="key-id",
+            application_key="application-key",
+            folder_prefix="users/user/jobs/job",
+            public_base_url="https://cdn.example.test",
+            expires_at="2099-01-01T00:00:00Z",
+        ),
+    )
+    if explicit_value is not None:
+        request.same_speaker = explicit_value
+
+    response = await service.CreatePreview(request, context)
+
+    assert response.preview_id == "preview-1"
+    assert context.code is None
+    assert service._operations.create_preview.await_args.kwargs["same_speaker"] is expected
 
 
 def test_track_exists_is_not_part_of_submission_contract():

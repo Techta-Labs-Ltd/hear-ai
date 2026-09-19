@@ -1,5 +1,6 @@
 import logging
 
+import librosa
 import numpy as np
 import pyloudnorm as pyln
 import torch
@@ -15,9 +16,8 @@ logger = logging.getLogger(__name__)
 class TTSPostProcessor:
     """Post-processing pipeline for TTS output before splicing into the original audio.
 
-    Cleans up reconstructed segments by stripping silence, matching loudness,
-    and applying gentle spectral envelope matching so the TTS output blends
-    naturally with the surrounding original audio.
+    Cleans up reconstructed segments and matches speaker pitch and loudness so
+    the TTS output blends naturally with the surrounding original audio.
     """
 
 
@@ -33,6 +33,16 @@ class TTSPostProcessor:
 
     MAX_LOUDNESS_GAIN_DB = 18.0
     MAX_BAND_GAIN_DB = 3.0
+    MIN_PITCH_HZ = 65.0
+    MAX_PITCH_HZ = 500.0
+    MIN_PITCH_DURATION_SECONDS = 0.25
+    MIN_PITCH_SHIFT_SEMITONES = 0.35
+    MAX_PITCH_SHIFT_SEMITONES = 5.0
+    MIN_VOICED_PITCH_FRAMES = 5
+    PITCH_BOUNDARY_SECONDS = 1.5
+    PITCH_BOUNDARY_BLEND_SECONDS = 0.15
+    MIN_ACCEPTABLE_DNSMOS = 3.0
+    MAX_ACCEPTABLE_DNSMOS_DROP = 0.5
 
     @staticmethod
     def strip_tts_silence(waveform: torch.Tensor, sr: int) -> torch.Tensor:
@@ -166,6 +176,183 @@ class TTSPostProcessor:
             return result_tensor
         except Exception as e:
             logger.warning("Spectral envelope match failed: %s", e)
+            return tts_waveform
+
+    @staticmethod
+    def _estimate_median_pitch_hz(
+        waveform: torch.Tensor,
+        sr: int,
+    ) -> float | None:
+        """Estimate the median voiced fundamental frequency of a speech clip."""
+        try:
+            if waveform.shape[1] < int(sr * TTSPostProcessor.MIN_PITCH_DURATION_SECONDS):
+                return None
+
+            signal = waveform.detach().float().mean(dim=0).cpu().numpy()
+            if signal.size == 0 or float(np.max(np.abs(signal))) < 1e-4:
+                return None
+
+            frame_length = 2048
+            hop_length = 512
+            max_pitch_hz = min(TTSPostProcessor.MAX_PITCH_HZ, sr / 4)
+            pitches = librosa.yin(
+                signal,
+                fmin=TTSPostProcessor.MIN_PITCH_HZ,
+                fmax=max_pitch_hz,
+                sr=sr,
+                frame_length=frame_length,
+                hop_length=hop_length,
+            )
+            rms = librosa.feature.rms(
+                y=signal,
+                frame_length=frame_length,
+                hop_length=hop_length,
+            ).reshape(-1)
+
+            frame_count = min(len(pitches), len(rms))
+            pitches = pitches[:frame_count]
+            rms = rms[:frame_count]
+            energy_floor = max(1e-4, float(np.max(rms)) * 0.08)
+            voiced = (
+                np.isfinite(pitches)
+                & (pitches >= TTSPostProcessor.MIN_PITCH_HZ)
+                & (pitches <= max_pitch_hz)
+                & (rms >= energy_floor)
+            )
+            voiced_pitches = pitches[voiced]
+            if len(voiced_pitches) < TTSPostProcessor.MIN_VOICED_PITCH_FRAMES:
+                return None
+            return float(np.median(voiced_pitches))
+        except Exception as exc:
+            logger.warning("Pitch estimation failed: %s", exc)
+            return None
+
+    @staticmethod
+    def match_pitch(
+        tts_waveform: torch.Tensor,
+        ref_waveform: torch.Tensor,
+        sr: int,
+    ) -> torch.Tensor:
+        """Shift TTS fundamental pitch toward the replaced speaker without changing duration."""
+        try:
+            tts_pitch = TTSPostProcessor._estimate_median_pitch_hz(tts_waveform, sr)
+            ref_pitch = TTSPostProcessor._estimate_median_pitch_hz(ref_waveform, sr)
+            if tts_pitch is None or ref_pitch is None:
+                return tts_waveform
+
+            requested_steps = 12.0 * np.log2(ref_pitch / tts_pitch)
+            if abs(requested_steps) < TTSPostProcessor.MIN_PITCH_SHIFT_SEMITONES:
+                return tts_waveform
+            applied_steps = float(np.clip(
+                requested_steps,
+                -TTSPostProcessor.MAX_PITCH_SHIFT_SEMITONES,
+                TTSPostProcessor.MAX_PITCH_SHIFT_SEMITONES,
+            ))
+
+            source = tts_waveform.detach().float().cpu().numpy()
+            shifted = librosa.effects.pitch_shift(
+                source,
+                sr=sr,
+                n_steps=applied_steps,
+                bins_per_octave=12,
+                res_type="soxr_hq",
+            )
+            shifted_tensor = torch.from_numpy(
+                np.asarray(shifted, dtype=np.float32)
+            ).to(device=tts_waveform.device, dtype=tts_waveform.dtype)
+
+            target_samples = tts_waveform.shape[1]
+            if shifted_tensor.shape[1] > target_samples:
+                shifted_tensor = shifted_tensor[:, :target_samples]
+            elif shifted_tensor.shape[1] < target_samples:
+                shifted_tensor = torch.nn.functional.pad(
+                    shifted_tensor,
+                    (0, target_samples - shifted_tensor.shape[1]),
+                )
+
+            peak = shifted_tensor.abs().max().item()
+            if peak > 0.99:
+                shifted_tensor = shifted_tensor * (0.99 / peak)
+            logger.info(
+                "Pitch match: TTS %.1fHz -> ref %.1fHz (requested=%+.2f, applied=%+.2f semitones)",
+                tts_pitch,
+                ref_pitch,
+                requested_steps,
+                applied_steps,
+            )
+            return shifted_tensor
+        except Exception as exc:
+            logger.warning("Pitch match failed: %s", exc)
+            return tts_waveform
+
+    @staticmethod
+    def match_boundary_pitch(
+        tts_waveform: torch.Tensor,
+        ref_waveform: torch.Tensor,
+        sr: int,
+    ) -> torch.Tensor:
+        """Match pitch near both splice points while blending into the segment interior."""
+        try:
+            shortest_samples = min(tts_waveform.shape[1], ref_waveform.shape[1])
+            boundary_samples = min(
+                int(sr * TTSPostProcessor.PITCH_BOUNDARY_SECONDS),
+                shortest_samples // 3,
+            )
+            blend_samples = min(
+                int(sr * TTSPostProcessor.PITCH_BOUNDARY_BLEND_SECONDS),
+                boundary_samples // 3,
+            )
+            if boundary_samples < int(sr * TTSPostProcessor.MIN_PITCH_DURATION_SECONDS):
+                return tts_waveform
+
+            result = tts_waveform.clone()
+            start_extent = min(result.shape[1], boundary_samples + blend_samples)
+            shifted_start = TTSPostProcessor.match_pitch(
+                result[:, :start_extent],
+                ref_waveform[:, :start_extent],
+                sr,
+            )
+            result[:, :boundary_samples] = shifted_start[:, :boundary_samples]
+            if blend_samples > 0:
+                fade_out = torch.linspace(
+                    1.0,
+                    0.0,
+                    blend_samples,
+                    device=result.device,
+                    dtype=result.dtype,
+                ).unsqueeze(0)
+                fade_in = 1.0 - fade_out
+                blend_end = boundary_samples + blend_samples
+                result[:, boundary_samples:blend_end] = (
+                    shifted_start[:, boundary_samples:blend_end] * fade_out
+                    + tts_waveform[:, boundary_samples:blend_end] * fade_in
+                )
+
+            end_extent = min(result.shape[1], boundary_samples + blend_samples)
+            shifted_end = TTSPostProcessor.match_pitch(
+                result[:, -end_extent:],
+                ref_waveform[:, -end_extent:],
+                sr,
+            )
+            if blend_samples > 0:
+                fade_in = torch.linspace(
+                    0.0,
+                    1.0,
+                    blend_samples,
+                    device=result.device,
+                    dtype=result.dtype,
+                ).unsqueeze(0)
+                fade_out = 1.0 - fade_in
+                end_blend_start = result.shape[1] - boundary_samples - blend_samples
+                end_blend_end = result.shape[1] - boundary_samples
+                result[:, end_blend_start:end_blend_end] = (
+                    result[:, end_blend_start:end_blend_end] * fade_out
+                    + shifted_end[:, :blend_samples] * fade_in
+                )
+            result[:, -boundary_samples:] = shifted_end[:, -boundary_samples:]
+            return result
+        except Exception as exc:
+            logger.warning("Boundary pitch match failed: %s", exc)
             return tts_waveform
 
     @staticmethod
@@ -315,20 +502,25 @@ class TTSPostProcessor:
         tts_waveform: torch.Tensor,
         ref_waveform: torch.Tensor,
         sr: int,
+        *,
+        match_reference_pitch: bool = True,
     ) -> torch.Tensor:
         """Run the full TTS post-processing pipeline with quality gating.
 
-        Order: trim digital silence -> compress silence -> edge fades ->
-        loudness match -> spectral envelope match.
-
-        If DNSMOS drops more than 0.1 after processing, the raw TTS output
-        is used instead to prevent quality degradation from over-processing.
+        Order: trim exterior digital silence -> pitch match -> edge fades ->
+        loudness match. Internal pauses are preserved because they carry the
+        source sentence cadence. Reference-cloned speech is not spectrally
+        equalized because that can import room noise and color the cloned voice.
+        Pitch matching is kept while the candidate remains above the repository's
+        acceptable DNSMOS floor and within a bounded quality drop.
 
         Args:
             tts_waveform: The raw TTS output waveform (1, N).
             ref_waveform: The original segment being replaced (1, M) used as
-                reference for loudness and spectral matching.
+                reference for pitch and loudness matching.
             sr: Sample rate.
+            match_reference_pitch: Whether to match the replaced speaker's
+                median fundamental pitch.
 
         Returns:
             Cleaned and matched TTS waveform ready for splicing.
@@ -341,7 +533,8 @@ class TTSPostProcessor:
         raw_dnsmos = TTSPostProcessor._score_dnsmos(tts_waveform, sr)
 
         result = TTSPostProcessor._trim_digital_silence(tts_waveform, sr)
-        result = TTSPostProcessor._compress_internal_silence(result, sr)
+        if match_reference_pitch:
+            result = TTSPostProcessor.match_pitch(result, ref_waveform, sr)
         result = TTSPostProcessor._apply_edge_fades(result, sr)
 
         result = TTSPostProcessor.match_loudness(result, ref_waveform, sr)
@@ -354,8 +547,6 @@ class TTSPostProcessor:
             )
             result = tts_waveform
 
-        result = TTSPostProcessor.match_spectral_envelope(result, ref_waveform, sr)
-
         final_peak = result.abs().max().item()
         if final_peak < 0.01 and tts_peak > 0.01:
             logger.warning(
@@ -365,14 +556,22 @@ class TTSPostProcessor:
             result = tts_waveform
 
         final_dnsmos = TTSPostProcessor._score_dnsmos(result, sr)
-        if raw_dnsmos > 0.0 and final_dnsmos > 0.0 and raw_dnsmos - final_dnsmos > 0.1:
-            logger.warning(
-                "Post-processing degraded DNSMOS (%.2f -> %.2f, delta=%.2f), reverting to cleaned raw",
-                raw_dnsmos, final_dnsmos, raw_dnsmos - final_dnsmos,
+        if raw_dnsmos > 0.0 and final_dnsmos > 0.0:
+            quality_floor = max(
+                TTSPostProcessor.MIN_ACCEPTABLE_DNSMOS,
+                raw_dnsmos - TTSPostProcessor.MAX_ACCEPTABLE_DNSMOS_DROP,
             )
-            cleaned = TTSPostProcessor._trim_digital_silence(tts_waveform, sr)
-            cleaned = TTSPostProcessor._apply_edge_fades(cleaned, sr)
-            result = cleaned
+            if final_dnsmos < quality_floor:
+                logger.warning(
+                    "Pitch/loudness candidate rejected by DNSMOS "
+                    "(raw=%.2f candidate=%.2f floor=%.2f); using cleaned raw TTS",
+                    raw_dnsmos,
+                    final_dnsmos,
+                    quality_floor,
+                )
+                cleaned = TTSPostProcessor._trim_digital_silence(tts_waveform, sr)
+                cleaned = TTSPostProcessor._apply_edge_fades(cleaned, sr)
+                result = cleaned
 
         logger.info(
             "TTSPostProcessor: tts_dur=%.2fs ref_dur=%.2fs tts_peak=%.4f final_peak=%.4f final_dur=%.2fs dnsmos_raw=%.2f dnsmos_final=%.2f",

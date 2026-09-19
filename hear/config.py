@@ -39,24 +39,28 @@ class Settings(BaseSettings):
     QWEN_ASR_DEVICE_MAP: str = "cuda:0"
     QWEN_LLM_ENABLED: bool = False
     JOB_MAX_RETRIES: int = 3
-    ORCHESTRATOR_MAX_CONCURRENT_JOBS: int = 3
-    ORCHESTRATOR_MAX_CONCURRENT_JOBS_PER_USER: int = 1
+    ORCHESTRATOR_MAX_CONCURRENT_JOBS: int = 8
+    ORCHESTRATOR_MAX_CONCURRENT_JOBS_PER_USER: int = 3
     MAGIC_CLEAN_REPLICA_COUNT: int = 1
     MAGIC_CLEAN_CHUNK_SECONDS: int = 60
     MAGIC_CLEAN_CHUNK_OVERLAP_SECONDS: float = 2.0
     MAGIC_CLEAN_STREAMING_THRESHOLD_SECONDS: int = 300
+    MAGIC_CLEAN_ENGINE_REVISION: str = "safe-v1"
+    MAGIC_CLEAN_MP3_BITRATE_KBPS: int = 96
+    MAGIC_CLEAN_CLEANUP_GRACE_SECONDS: float = 30 * 60
+    MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS: float = 24 * 60 * 60
     FISH_SPEECH_REPLICA_COUNT: int = 1
     GPU_ON_DEMAND_IDLE_SECONDS: float = 15.0
     ORCHESTRATOR_JOB_TYPE_LIMITS: dict[str, int] = {
-        "pipeline": 2,
-        "transcription": 2,
-        "audio_tag": 3,
-        "categorization": 3,
-        "magic_clean": 2,
-        "rebuild": 1,
-        "reconstruct": 1,
-        "edit_transcript": 1,
-        "discovery": 2,
+        "pipeline": 4,
+        "transcription": 4,
+        "audio_tag": 6,
+        "categorization": 6,
+        "magic_clean": 1,
+        "rebuild": 2,
+        "reconstruct": 2,
+        "edit_transcript": 2,
+        "discovery": 4,
     }
     ORCHESTRATOR_RECOVERY_SECONDS: float = 15.0
     DATABASE_URL: str = ""
@@ -86,6 +90,7 @@ class Settings(BaseSettings):
     NLI_MODEL_PATH: str = "/workspace/models/nli-distilroberta"
     MOSSFORMER_MODEL_PATH: str = "/workspace/models/mossformer2-se-48k"
     DEMUCS_MODEL: str = "htdemucs"
+    DEMUCS_MODEL_PATH: str = "/workspace/models/demucs"
 
     MODERATION_AUTO_LEARN: bool = False
     FISH_SPEECH_TTS_ENABLED: bool = True
@@ -95,7 +100,7 @@ class Settings(BaseSettings):
     FISH_SPEECH_BNB_MODE: str = "nf4"
     REGENERATION_PREVIEW_TTL_SECONDS: int = 3600
 
-    MAX_CONCURRENT_EDIT_TRANSCRIPT_JOBS: int = 1
+    MAX_CONCURRENT_EDIT_TRANSCRIPT_JOBS: int = 2
     VOICE_PROFILES_DIR: str = ""
     VOICE_PROFILE_MAX_AGE_HOURS: int = 168
     EDIT_PHRASE_EXPANSION_WORDS: int = 1

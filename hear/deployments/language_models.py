@@ -3,7 +3,12 @@ import logging
 import httpx
 import torch
 from ray import serve
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    pipeline,
+)
 
 from hear.config import settings
 
@@ -86,15 +91,21 @@ class SmallModelsDeployment:
 )
 class LLMDeployment:
     def __init__(self) -> None:
-        logger.info("Loading Qwen2.5-7B-Instruct (bfloat16) ...")
+        logger.info("Loading Qwen2.5-7B-Instruct (4-bit quantized) ...")
         self._tokenizer = AutoTokenizer.from_pretrained(
             settings.LLM_MODEL_PATH,
             local_files_only=True,
         )
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
         self._model = AutoModelForCausalLM.from_pretrained(
             settings.LLM_MODEL_PATH,
             device_map="auto",
-            torch_dtype=torch.bfloat16,
+            quantization_config=quantization_config,
             local_files_only=True,
         )
         logger.info("LLM ready")

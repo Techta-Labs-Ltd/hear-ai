@@ -1,7 +1,9 @@
+import ast
 import asyncio
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from hear.core.downloader import download_audio
 from hear.core.hear_temp import (
@@ -58,6 +60,154 @@ def test_download_audio_streams_into_job_scope(monkeypatch, tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+async def _exercise_cancelled_download_removes_partial(monkeypatch, tmp_path):
+    started = asyncio.Event()
+
+    class Response:
+        headers = None
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        async def aiter_bytes(self, chunk_size):
+            del chunk_size
+            yield b"partial-audio"
+            started.set()
+            await asyncio.Event().wait()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        @staticmethod
+        def stream(*_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(
+        "hear.core.downloader.httpx.AsyncClient",
+        lambda **_kwargs: Client(),
+    )
+    monkeypatch.setattr(
+        "hear.core.downloader.hear_temp_job_dir",
+        lambda *_args: str(tmp_path),
+    )
+    task = asyncio.create_task(
+        download_audio(
+            "https://example.test/source.wav",
+            job_id="job",
+            run_id="run",
+            purpose="source",
+        )
+    )
+    await started.wait()
+
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("download cancellation must propagate")
+
+    assert not (tmp_path / "source.wav.part").exists()
+    assert not (tmp_path / "source.wav").exists()
+
+
+def test_cancelled_download_does_not_leave_partial_audio(monkeypatch, tmp_path):
+    asyncio.run(_exercise_cancelled_download_removes_partial(monkeypatch, tmp_path))
+
+
+async def _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_path):
+    payload = b"encoded source audio"
+    conversion_started = threading.Event()
+    release_conversion = threading.Event()
+
+    class Response:
+        headers = {"content-length": str(len(payload))}
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        async def aiter_bytes(self, chunk_size):
+            del chunk_size
+            yield payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        @staticmethod
+        def stream(*_args, **_kwargs):
+            return Response()
+
+    def delayed_convert(_source_path, wav_path):
+        conversion_started.set()
+        assert release_conversion.wait(timeout=5)
+        with open(wav_path, "wb") as output:
+            output.write(b"late decoded output")
+
+    monkeypatch.setattr(
+        "hear.core.downloader.httpx.AsyncClient",
+        lambda **_kwargs: Client(),
+    )
+    monkeypatch.setattr(
+        "hear.core.downloader.hear_temp_job_dir",
+        lambda *_args: str(tmp_path),
+    )
+    monkeypatch.setattr("hear.core.downloader._convert_to_wav", delayed_convert)
+    task = asyncio.create_task(
+        download_audio(
+            "https://example.test/source.mp3",
+            job_id="job",
+            run_id="run",
+            purpose="source",
+            convert_to_wav=True,
+        )
+    )
+    assert await asyncio.to_thread(conversion_started.wait, 5)
+
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release_conversion.set()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("conversion cancellation must propagate")
+
+    assert not (tmp_path / "source.wav").exists()
+    assert not (tmp_path / "source.wav.source").exists()
+    assert not (tmp_path / "source.wav.source.part").exists()
+
+
+def test_cancelled_conversion_cannot_recreate_cleaned_audio(monkeypatch, tmp_path):
+    asyncio.run(
+        _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_path)
+    )
 
 
 def test_download_audio_can_decode_source_to_wav(monkeypatch, tmp_path):
@@ -149,6 +299,51 @@ def test_default_audio_directory_is_inside_project_workspace():
 
     assert runtime.HEAR_TEMP_DIR == str(PROJECT_ROOT / "audio")
     assert not runtime.HEAR_TEMP_DIR.startswith("/tmp")
+
+
+def test_runtime_audio_tempfiles_always_set_workspace_directory():
+    project_root = Path(__file__).resolve().parents[1]
+    runtime_files = [
+        *project_root.joinpath("hear").rglob("*.py"),
+        *project_root.joinpath("scripts").glob("*.py"),
+    ]
+    audio_suffixes = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+
+    for source_path in runtime_files:
+        tree = ast.parse(source_path.read_text(), filename=str(source_path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            function_name = getattr(node.func, "attr", "")
+            if function_name not in {"mkstemp", "NamedTemporaryFile"}:
+                continue
+            suffix = next(
+                (
+                    keyword.value.value
+                    for keyword in node.keywords
+                    if keyword.arg == "suffix"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ),
+                "",
+            )
+            if suffix not in audio_suffixes:
+                continue
+            assert any(keyword.arg == "dir" for keyword in node.keywords), (
+                f"audio tempfile must set the workspace directory: {source_path}"
+            )
+
+
+def test_live_regeneration_harness_has_no_system_tmp_audio_paths():
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "live_regeneration_local_test.py"
+    )
+    source = script_path.read_text()
+
+    assert 'AUDIO_ROOT = Path(settings.HEAR_TEMP_DIR)' in source
+    assert 'Path("/tmp/' not in source
 
 
 def test_sweep_uses_configured_max_age(monkeypatch, tmp_path):

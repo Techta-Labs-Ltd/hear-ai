@@ -2,25 +2,25 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
-import torchaudio
 import httpx
+import torchaudio
 import torchaudio.functional as F_audio
 
 from hear.config import settings
+from hear.core.db_gate import commit_with_retry
 from hear.core.downloader import download_audio
 from hear.core.hear_temp import drop_temp_standalone, hear_temp_directory
 from hear.core.storage import B2Storage, decrypt_storage_context, encrypt_storage_context
-from hear.core.db_gate import commit_with_retry
-from hear.models.database import SessionLocal, RegenerationPreview
+from hear.models.database import RegenerationPreview, SessionLocal
+from hear.services.reconstruction.quality import RegenerationQualityAssessor
 from hear.services.reconstruction.synthesizer import (
     SegmentAudioResult,
     SpeechSynthesizer,
     SynthesisResult,
 )
-from hear.services.reconstruction.quality import RegenerationQualityAssessor
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,12 @@ class RegenerationService:
             await self._broadcast_event(track_id, "preview_quality_check", {"track_id": track_id})
 
             original_waveform, orig_sr = torchaudio.load(source_path)
+            if orig_sr != self._synthesizer.TARGET_SR:
+                original_waveform = F_audio.resample(
+                    original_waveform,
+                    orig_sr,
+                    self._synthesizer.TARGET_SR,
+                )
             quality_metrics = {}
             preview_dl_path = None
             try:
@@ -87,15 +93,30 @@ class RegenerationService:
                 )
                 preview_waveform, preview_sr = torchaudio.load(preview_dl_path)
                 if preview_sr != self._synthesizer.TARGET_SR:
-                    preview_waveform = F_audio.resample(preview_waveform, preview_sr, self._synthesizer.TARGET_SR)
+                    preview_waveform = F_audio.resample(
+                        preview_waveform,
+                        preview_sr,
+                        self._synthesizer.TARGET_SR,
+                    )
 
                 first_change = changes[0] if changes else {}
-                ref_start = int(float(first_change.get("segment_start", 0)) * self._synthesizer.TARGET_SR)
-                ref_end = int(float(first_change.get("segment_end", 0)) * self._synthesizer.TARGET_SR)
-                ref_segment = original_waveform[:, ref_start:ref_end] if ref_end > ref_start else original_waveform
-
+                ref_start = int(
+                    float(first_change.get("segment_start", 0))
+                    * self._synthesizer.TARGET_SR
+                )
+                ref_end = int(
+                    float(first_change.get("segment_end", 0))
+                    * self._synthesizer.TARGET_SR
+                )
+                ref_segment = (
+                    original_waveform[:, ref_start:ref_end]
+                    if ref_end > ref_start
+                    else original_waveform
+                )
                 quality_report = self._quality_assessor.assess(
-                    preview_waveform, ref_segment, self._synthesizer.TARGET_SR
+                    preview_waveform,
+                    ref_segment,
+                    self._synthesizer.TARGET_SR,
                 )
                 quality_metrics = {
                     "dnsmos_ovr": float(quality_report.dnsmos_ovr),
@@ -108,10 +129,12 @@ class RegenerationService:
                 logger.warning("Quality assessment failed for preview: %s", e)
                 quality_metrics = {"passed": True, "error": str(e)}
             finally:
-                if preview_dl_path and os.path.isfile(preview_dl_path):
+                if preview_dl_path:
                     drop_temp_standalone(preview_dl_path)
 
-            expires_at = datetime.utcnow() + timedelta(seconds=settings.REGENERATION_PREVIEW_TTL_SECONDS)
+            expires_at = datetime.utcnow() + timedelta(
+                seconds=settings.REGENERATION_PREVIEW_TTL_SECONDS
+            )
 
             db = SessionLocal()
             try:
@@ -128,7 +151,11 @@ class RegenerationService:
                     original_audio_url=audio_url,
                     quality_metrics=quality_metrics,
                     status="pending",
-                    seed=self._synthesizer._compute_seed(job_id or track_id, track_id) if job_id else None,
+                    seed=(
+                        self._synthesizer._compute_seed(job_id or track_id, track_id)
+                        if job_id
+                        else None
+                    ),
                     user_id=user_id,
                     created_at=datetime.utcnow(),
                     expires_at=expires_at,
@@ -177,13 +204,19 @@ class RegenerationService:
             await self._commit(db)
             track_id = preview.track_id
             original_audio_url = preview.original_audio_url
-            changes_data = (preview.changes_json or {}).get("changes", [])
+            preview_changes = preview.changes_json or {}
+            changes_data = preview_changes.get("changes", [])
+            same_speaker = bool(preview_changes.get("same_speaker", True))
             backend_id = preview.backend_id
             storage = B2Storage(decrypt_storage_context(preview.storage_context_encrypted))
         finally:
             db.close()
 
-        await self._broadcast_event(track_id, "confirm_splicing", {"track_id": track_id, "preview_id": preview_id})
+        await self._broadcast_event(
+            track_id,
+            "confirm_splicing",
+            {"track_id": track_id, "preview_id": preview_id},
+        )
 
         source_path = await download_audio(
             original_audio_url, suffix=".wav", convert_to_wav=True
@@ -194,7 +227,7 @@ class RegenerationService:
                 original_audio_path=source_path,
                 track_id=track_id,
                 changes=changes_data,
-                same_speaker=True,
+                same_speaker=same_speaker,
                 job_id=preview.job_id or preview_id,
                 storage=storage,
             )
@@ -213,7 +246,11 @@ class RegenerationService:
             try:
                 storage.delete_object(preview.preview_b2_key)
             except Exception as exc:
-                logger.warning("Failed to delete preview B2 object %s: %s", preview.preview_b2_key, exc)
+                logger.warning(
+                    "Failed to delete preview B2 object %s: %s",
+                    preview.preview_b2_key,
+                    exc,
+                )
 
             return result
         finally:
@@ -283,7 +320,11 @@ class RegenerationService:
                 storage = B2Storage(decrypt_storage_context(preview.storage_context_encrypted))
                 storage.delete_object(preview.preview_b2_key)
             except Exception as e:
-                logger.warning("Failed to delete preview B2 asset %s: %s", preview.preview_b2_key, e)
+                logger.warning(
+                    "Failed to delete preview B2 asset %s: %s",
+                    preview.preview_b2_key,
+                    e,
+                )
 
             await self._broadcast_event(preview.track_id, "preview_rolled_back", {
                 "preview_id": preview_id,

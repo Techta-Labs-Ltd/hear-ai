@@ -77,7 +77,7 @@ curl --fail-with-body \
       "application_key": "temporary-application-key",
       "folder_prefix": "users/user-456/jobs/01JBACKENDGENERATEDULID",
       "public_base_url": "https://media.example.com/backend-a-bucket",
-      "expires_at": "2026-07-27T12:00:00Z"
+      "expires_at": "2099-01-01T00:00:00Z"
     },
     "track_id": "track-123",
     "user_id": "user-456",
@@ -98,6 +98,17 @@ that backend, `expires_at` must cover the complete job lifecycle, and
 examples below omit the repeated storage block only for readability; callers
 must include it. Old requests without `backend_id` and `storage` fail validation.
 
+For `magic_clean`, credentials must have at least
+`MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS` remaining both when a new job is
+admitted and when an attempt starts (24 hours by default). This reserve protects
+processing, retries, and cleanup; issue a longer lifetime for the deployment's
+maximum supported recording and outage window. If queue time erodes the reserve,
+Hear keeps the job queued instead of consuming an attempt or failing it. Submit the
+same semantic request and `job_id` with refreshed credentials to resume dispatch.
+`Subscribe` exposes this park as `job_queued` with
+`error: storage_credentials_expiring`. An exact replay with the unchanged,
+still-active context returns the existing queued run but does not dispatch it.
+
 `audio_url` must return audio bytes directly, not HTML. Hear AI does not fetch
 recordings or transcriptions from another backend endpoint.
 
@@ -117,8 +128,17 @@ A new job returns `202`:
 
 `job_id` is the idempotency key:
 
-- Identical payload and ID: `200`, original `run_id`, `replayed: true`.
+- Identical payload and ID: `200`, original `run_id`, `replayed: true`. If a
+  queued Magic Clean job's credential reserve has eroded, this recovers status
+  but remains parked until a valid refresh arrives.
 - Different payload with an existing ID: `409`.
+- Magic Clean exception: while the existing job is queued, the same non-secret
+  request and storage destination may refresh credentials. A key rotation must
+  also advance `expires_at`; every accepted refresh must restore the full minimum
+  lifetime. Refresh after processing starts is rejected with `422` because the
+  running actor already captured its storage context.
+- A terminal Magic Clean replay still returns the original run and result; it
+  never creates a replacement run under the same `job_id`.
 - Timeout or `503`: retry the identical payload with the same ID.
 - `401`, `409`, or `422`: fix the request; do not blindly retry.
 
@@ -141,23 +161,23 @@ A new job returns `202`:
 For Magic Clean, `speech`, `music`, and `background` are integer percentages
 from `0` to `100`. Supply all three or omit all three. `speech` and `music`
 control how much of their separated stems is retained. `background` controls
-both the retained residual-background level and the cleaning strength: lower
-background means stronger noise suppression. The service derives suppression
-as `min(90%, 100% - background)`; the 90% ceiling protects speech from
-metallic, harmonic, and warbling artifacts.
+the retained residual-background level. The legacy spectral suppressor is
+currently disabled for speech safety, so lowering `background` does not apply
+an additional independent noise-suppression pass.
 
-| `background` | Residual retained | Noise suppression |
-| ---: | ---: | ---: |
-| `100` | 100% | 0% |
-| `50` | 50% | 50% |
-| `10` | 10% | 90% |
-| `0` | 0% | 90% (safe ceiling) |
+| `background` | Residual retained |
+| ---: | ---: |
+| `100` | 100% |
+| `50` | 50% |
+| `10` | 10% |
+| `0` | 0% |
 
 When all three values are omitted, the API applies the production default
 `speech: 100`, `music: 10`, and `background: 10`. The normalized job sent
 through the pipeline therefore always contains explicit Magic Clean levels.
-This keeps the complete separation and cleaning process active and applies 90%
-background-noise suppression while retaining the full separated speech stem.
+This keeps stem separation and neural speech enhancement active, retains the
+full separated speech stem, and mixes 10% of the separated music and residual
+background estimates.
 
 Set the optional boolean `cut_silence` to `true` to remove detected quiet gaps
 after enhancement and before final loudness normalization. It defaults to
@@ -223,8 +243,9 @@ Custom levels:
 Returns `JobResult.magic_clean` with enhanced audio URL/key, audio-quality
 measurements, stage timings, and any transcription/moderation performed by the
 cleaning flow. The three mix percentages must be supplied together. In this
-example, `background: 10` retains 10% of the residual background and applies
-the maximum safe 90% noise suppression to the separated speech stem.
+example, `background: 10` retains 10% of the residual background estimate. The
+current safe engine disables the legacy spectral suppressor, so this control
+does not independently increase speech denoising.
 
 ### `discovery`
 
@@ -365,7 +386,7 @@ Every streamed update uses this common `PipelineEvent` envelope:
 
 ```json
 {
-  "event":"stage_changed|stage_result|job_retrying|job_completed|job_failed|job_cancelled",
+  "event":"job_queued|stage_changed|stage_result|job_retrying|job_completed|job_failed|job_cancelled",
   "job_id":"job-1",
   "run_id":"run-1",
   "track_id":"track-1",
@@ -427,7 +448,12 @@ from `job_completed.result.enhanced_audio`. Both contain the exact Backblaze
 `audio_url` and `b2_key` that passed post-upload size verification. Do not
 reuse the submitted source URL as the completed audio URL.
 
-The pipeline `compressed_audio` object also reports the bitrate actually selected. Encoding is adaptive for Alexa delivery: lossless or high-bitrate sources are capped at `PIPELINE_MP3_BITRATE_KBPS` (96 kbps by default), while already-compressed sources use the next standard bitrate at or below 80% of their measured source bitrate. The same adaptive rule is applied when encoding the final Magic Clean enhanced MP3; enhancement processing is unchanged.
+The pipeline `compressed_audio` object also reports the bitrate actually
+selected. Pipeline encoding is adaptive for Alexa delivery: lossless or
+high-bitrate sources are capped at `PIPELINE_MP3_BITRATE_KBPS` (96 kbps by
+default), while already-compressed sources use the next standard bitrate at or
+below 80% of their measured source bitrate. Magic Clean instead uses its
+dedicated fixed `MAGIC_CLEAN_MP3_BITRATE_KBPS` setting (96 kbps by default).
 
 The pipeline `compressed_audio` object reports:
 
@@ -495,9 +521,9 @@ If no content is detected, `pipeline.report` contains
   "job_type":"magic_clean","status":"completed",
   "magic_clean":{
     "enhanced":true,
-    "enhanced_audio":{"audio_url":"https://storage.example/clean.mp3","b2_key":"audio/clean.mp3"},
+    "enhanced_audio":{"backend_id":"backend-a","bucket_name":"backend-a-bucket","audio_url":"https://storage.example/clean.mp3","b2_key":"audio/clean.mp3"},
     "quality":{"quality_score":0.92,"snr_db":24.5,"peak_db":-1.0,"lufs":-16.0,"clipping_detected":false},
-    "stage_times":{"downloading":0.7,"separating":8.2,"enhancing":3.4,"mixing":0.5,"finalizing":0.8}
+    "stage_times":{"downloading":0.7,"decode":0.2,"enhance_and_stitch":11.6,"measure":0.3,"master_and_encode":0.8,"hash_source":0.2,"validate_delivery":0.6,"hash_artifacts":0.2,"upload":0.5,"total":14.4}
   }
 }
 ```

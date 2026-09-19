@@ -216,7 +216,9 @@ class GrpcGateway:
                     }
                     for item in request.changes
                 ],
-                same_speaker=request.same_speaker,
+                same_speaker=(
+                    request.same_speaker if request.HasField("same_speaker") else True
+                ),
                 grouped=request.grouped,
                 group_id=request.group_id if request.HasField("group_id") else None,
                 kind=request.kind or "track",
@@ -314,4 +316,3 @@ class GrpcGateway:
 
     async def Health(self, request, grpc_context=None):
         return await self._pipeline.Health(request, grpc_context)
-

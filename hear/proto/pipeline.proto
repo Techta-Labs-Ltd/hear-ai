@@ -50,7 +50,7 @@ message SubmitJobRequest {
   optional string audio_url = 5;
   optional string edited_transcript = 6;
   repeated SegmentChange changes = 7;
-  bool same_speaker = 8;
+  optional bool same_speaker = 8;
   bool grouped = 9;
   optional string group_id = 10;
   string kind = 11;
@@ -248,7 +248,7 @@ message ReconstructRequest {
   optional double segment_start = 4;
   optional double segment_end = 5;
   optional string new_text = 6;
-  bool same_speaker = 7;
+  optional bool same_speaker = 7;
   string backend_id = 8;
   StorageContext storage = 9;
 }
