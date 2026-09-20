@@ -317,15 +317,6 @@ class PipelineGrpcService:
             pipeline_pb2.ListDiscoveryReply,
         )
 
-    async def UpdatePlatformSettings(self, request, context=None):
-        return await self._call(
-            context,
-            lambda: self._operations.update_platform_settings(
-                request.blocked_keywords, request.auto_tag_keywords
-            ),
-            pipeline_pb2.PlatformSettingsReply,
-        )
-
     async def health_data(self) -> dict:
         try:
             async with asyncio.timeout(2.0):

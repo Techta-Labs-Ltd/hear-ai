@@ -148,9 +148,6 @@ class CategorizeResponse(BaseModel):
     categories: list[str]
     confidence_scores: dict[str, float] = Field(default_factory=dict)
     sentiment: str = "neutral"
-    new_tags_added: list[str] = Field(default_factory=list)
-    new_categories_added: list[str] = Field(default_factory=list)
-    settings_applied: bool = False
     llm_used: bool = False
     categorizer_mode: str = "nli"
 
@@ -218,17 +215,6 @@ class DiscoveryCatalogResponse(BaseModel):
     offset: int
     total: int
     items: list[DiscoveryCatalogItem]
-
-
-class PlatformSettingsWebhookEvent(BaseModel):
-    blocked_keywords: str = ""  # comma-separated, e.g. "spam,scam,fraud"
-    auto_tag_keywords: str = ""  # comma-separated, e.g. "news,breaking,exclusive,interview,report"
-
-
-class PlatformSettingsWebhookResponse(BaseModel):
-    status: str = "accepted"
-    blocked_keywords_count: int = 0
-    auto_tag_keywords_count: int = 0
 
 
 class HealthResponse(BaseModel):

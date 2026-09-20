@@ -54,7 +54,6 @@ async def _assert_audio_tag_pipeline_stops_after_transcription(monkeypatch, tmp_
         job_options={},
         existing_transcript=None,
     )
-    track = SimpleNamespace(track_id="track-1", audio_url="https://audio.test/a.mp3")
     track_job = SimpleNamespace(updated_at=None)
     orchestrator_class = Orchestrator.func_or_class
     orchestrator = orchestrator_class.__new__(orchestrator_class)
@@ -67,17 +66,12 @@ async def _assert_audio_tag_pipeline_stops_after_transcription(monkeypatch, tmp_
         categorize=AsyncMock(return_value={"tags": ["#construction", "#news", "#ignored"]})
     )
     completed = []
-    orchestrator_platform = SimpleNamespace(auto_tag_keywords=[])
 
     async def complete(db, completed_job, completed_track_job, result):
         completed.append(result)
         return True
 
     orchestrator._complete = complete
-    monkeypatch.setattr(
-        "hear.orchestrator.PlatformSettingsProvider.fetch_platform_settings",
-        AsyncMock(return_value=orchestrator_platform),
-    )
     monkeypatch.setattr(
         "hear.orchestrator.AudioDownloader.download_audio", AsyncMock(return_value=str(audio_path))
     )
@@ -101,7 +95,6 @@ async def _assert_audio_tag_pipeline_stops_after_transcription(monkeypatch, tmp_
     orchestrator._categorizer.categorize.assert_awaited_once_with(
         transcript="A short audio clip.",
         segments=[],
-        custom_tags=orchestrator_platform.auto_tag_keywords,
         max_tags=2,
         per_track_transcripts={"track-1": "A short audio clip."},
     )

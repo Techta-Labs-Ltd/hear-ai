@@ -3,9 +3,7 @@ from __future__ import annotations
 import uuid
 
 from hear.core.backend_registry import BackendRegistry
-from hear.core.category_loader import category_loader
 from hear.core.health import ServiceHealth
-from hear.core.keyword_loader import auto_tag_keyword_loader, harm_keyword_loader
 from hear.core.storage import B2Storage
 from hear.models.database import AiTrackJob, DatabaseRuntime
 from hear.models.schemas import StorageContext
@@ -217,19 +215,6 @@ class Operations:
             }
         finally:
             db.close()
-
-    async def update_platform_settings(self, blocked_keywords: str, auto_tag_keywords: str) -> dict:
-        blocked = [item.strip().lower() for item in blocked_keywords.split(",") if item.strip()]
-        auto_tags = [item.strip().lower() for item in auto_tag_keywords.split(",") if item.strip()]
-        harm_keyword_loader.sync_platform_keywords(blocked)
-        auto_tag_keyword_loader.sync(auto_tags)
-        for keyword in auto_tags:
-            category_loader.add_tag(keyword)
-        return {
-            "status": "accepted",
-            "blocked_keywords_count": len(blocked),
-            "auto_tag_keywords_count": len(auto_tags),
-        }
 
     async def health(self, queue: dict) -> dict:
         return await self._health.read(queue)

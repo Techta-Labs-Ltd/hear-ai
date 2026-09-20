@@ -8,6 +8,8 @@ import torch
 import torchaudio
 from clearvoice import ClearVoice
 
+from hear.config import MODEL_ROOT
+
 logger = logging.getLogger(__name__)
 MAX_CHUNK_S = 4
 
@@ -30,7 +32,9 @@ class MossFormer2Enhancer:
         # hundreds of MB into the workspace on every cold start.
         model_root = Path(
             model_path
-            or os.environ.get("MOSSFORMER_MODEL_PATH", "/workspace/models/mossformer2-se-48k")
+            or os.environ.get(
+                "MOSSFORMER_MODEL_PATH", str(MODEL_ROOT / "mossformer2-se-48k")
+            )
         )
         if not (model_root / "last_best_checkpoint").is_file():
             raise FileNotFoundError(f"MossFormer2 checkpoint is incomplete: {model_root}")

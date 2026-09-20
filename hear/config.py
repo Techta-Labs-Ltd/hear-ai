@@ -4,12 +4,15 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+MODEL_ROOT = Path("/models")
+FISH_SPEECH_SOURCE_ROOT = Path("/fish-speech")
+TEMP_ROOT = Path("/audio")
 
 
 class Settings(BaseSettings):
     RAY_ADDRESS: str = "local"
     RAY_DASHBOARD_HOST: str = "127.0.0.1"
-    RAY_DASHBOARD_PORT: int = 8324
+    RAY_DASHBOARD_PORT: int = 8282
     HTTP_HOST: str = "0.0.0.0"
     HTTP_PORT: int = 8000
     GRPC_PORT: int = 50051
@@ -63,27 +66,30 @@ class Settings(BaseSettings):
     DISCOVERY_METADATA_ENABLED: bool = True
     DISCOVERY_MAX_SEARCH_PHRASES: int = 12
     DISCOVERY_MAX_NEW_TOKENS: int = 1100
-    HEAR_TEMP_DIR: str = str(PROJECT_ROOT / "audio")
+    HEAR_TEMP_DIR: str = str(TEMP_ROOT)
     AUDIO_CLEANUP_INTERVAL_SECONDS: float = 300.0
     AUDIO_MAX_AGE_SECONDS: float = 24 * 60 * 60
     AUDIO_DOWNLOAD_MAX_BYTES: int = Field(default=4 * 1024**3, gt=0)
     AUDIO_DOWNLOAD_READ_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0, allow_inf_nan=False)
     AUDIO_DECODE_TIMEOUT_SECONDS: float = Field(default=1200.0, gt=0, allow_inf_nan=False)
-    MODEL_CACHE_DIR: str = "/workspace/models"
-    QWEN_ASR_MODEL_PATH: str = "/workspace/models/qwen3-asr-1.7b"
-    ALIGNER_MODEL_PATH: str = "/workspace/models/qwen3-forced-aligner"
-    LLM_MODEL_PATH: str = "/workspace/models/qwen2.5-7b-instruct"
-    TOXIC_MODEL_PATH: str = "/workspace/models/toxic-bert"
-    SENTIMENT_MODEL_PATH: str = "/workspace/models/twitter-roberta-sentiment"
-    NLI_MODEL_PATH: str = "/workspace/models/nli-distilroberta"
-    MOSSFORMER_MODEL_PATH: str = "/workspace/models/mossformer2-se-48k"
+    MODEL_CACHE_DIR: str = str(MODEL_ROOT)
+    QWEN_ASR_MODEL_PATH: str = str(MODEL_ROOT / "qwen3-asr-1.7b")
+    ALIGNER_MODEL_PATH: str = str(MODEL_ROOT / "qwen3-forced-aligner")
+    LLM_MODEL_PATH: str = str(MODEL_ROOT / "qwen2.5-7b-instruct")
+    TOXIC_MODEL_PATH: str = str(MODEL_ROOT / "toxic-bert")
+    SENTIMENT_MODEL_PATH: str = str(MODEL_ROOT / "twitter-roberta-sentiment")
+    NLI_MODEL_PATH: str = str(MODEL_ROOT / "nli-distilroberta")
+    MOSSFORMER_MODEL_PATH: str = str(MODEL_ROOT / "mossformer2-se-48k")
     DEMUCS_MODEL: str = "htdemucs"
-    DEMUCS_MODEL_PATH: str = "/workspace/models/demucs"
+    DEMUCS_MODEL_PATH: str = str(MODEL_ROOT / "demucs")
 
     FISH_SPEECH_TTS_ENABLED: bool = True
-    FISH_SPEECH_HOME: str = "/workspace/fish-speech"
-    FISH_SPEECH_CHECKPOINT_PATH: str = "/workspace/models/fish-speech/s2-pro"
-    FISH_SPEECH_CODEC_PATH: str = "/workspace/models/fish-speech/s2-pro/codec.pth"
+    # Fish Speech source is a code dependency; its weights remain under MODEL_CACHE_DIR.
+    FISH_SPEECH_HOME: str = str(FISH_SPEECH_SOURCE_ROOT)
+    FISH_SPEECH_CHECKPOINT_PATH: str = str(MODEL_ROOT / "fish-speech" / "s2-pro")
+    FISH_SPEECH_CODEC_PATH: str = str(
+        MODEL_ROOT / "fish-speech" / "s2-pro" / "codec.pth"
+    )
     FISH_SPEECH_BNB_MODE: str = "nf4"
     REGENERATION_PREVIEW_TTL_SECONDS: int = 3600
 

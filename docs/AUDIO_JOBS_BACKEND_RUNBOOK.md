@@ -9,11 +9,11 @@ unhealthy. The constructor error was:
 
 ```text
 FileNotFoundError: MossFormer2 checkpoint is incomplete:
-/workspace/models/mossformer2-se-48k
+/models/mossformer2-se-48k
 ```
 
 The required file is
-`/workspace/models/mossformer2-se-48k/last_best_checkpoint`. The orchestrator
+`/models/mossformer2-se-48k/last_best_checkpoint`. The orchestrator
 then received `DeploymentUnavailableError` at the `enhancing` stage. The prior
 runtime check accepted an empty model directory, so startup appeared valid.
 
@@ -23,10 +23,11 @@ Before starting or deploying Hear AI, run:
 uv run --no-project python main.py --validate-only
 ```
 
-Provisioning model files is an operator/build action. Do not download them at
-application startup. In a controlled provisioning environment, the repository
-script's `mossformer2-se-48k` manifest entry installs the expected Hugging Face
-snapshot. Validate the image/workspace again after provisioning.
+The Supervisor-managed Ray server provisions missing model files automatically
+before it starts Serve. Artifacts are stored only under the repository-root
+`/models` directory. The manual script can prewarm that same cache, but does
+not use a second model location. Validate the workspace again after a manual
+prewarm.
 
 ## Backend interaction contract
 

@@ -442,14 +442,6 @@ class DiscoveryRequest(_message.Message):
     offset: int
     def __init__(self, sort: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
 
-class PlatformSettingsRequest(_message.Message):
-    __slots__ = ("blocked_keywords", "auto_tag_keywords")
-    BLOCKED_KEYWORDS_FIELD_NUMBER: _ClassVar[int]
-    AUTO_TAG_KEYWORDS_FIELD_NUMBER: _ClassVar[int]
-    blocked_keywords: str
-    auto_tag_keywords: str
-    def __init__(self, blocked_keywords: _Optional[str] = ..., auto_tag_keywords: _Optional[str] = ...) -> None: ...
-
 class QueueStatsReply(_message.Message):
     __slots__ = ("active", "queued", "total", "estimated_wait_s", "avg_job_duration_s")
     ACTIVE_FIELD_NUMBER: _ClassVar[int]
@@ -481,26 +473,20 @@ class ModerationReply(_message.Message):
     def __init__(self, flagged: bool = ..., severity: _Optional[str] = ..., intent: _Optional[str] = ..., reason: _Optional[str] = ..., flagged_categories: _Optional[_Iterable[str]] = ..., blocked_words_found: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class CategorizationReply(_message.Message):
-    __slots__ = ("categories", "tags", "confidence_scores", "sentiment", "new_tags_added", "new_categories_added", "settings_applied", "llm_used", "categorizer_mode")
+    __slots__ = ("categories", "tags", "confidence_scores", "sentiment", "llm_used", "categorizer_mode")
     CATEGORIES_FIELD_NUMBER: _ClassVar[int]
     TAGS_FIELD_NUMBER: _ClassVar[int]
     CONFIDENCE_SCORES_FIELD_NUMBER: _ClassVar[int]
     SENTIMENT_FIELD_NUMBER: _ClassVar[int]
-    NEW_TAGS_ADDED_FIELD_NUMBER: _ClassVar[int]
-    NEW_CATEGORIES_ADDED_FIELD_NUMBER: _ClassVar[int]
-    SETTINGS_APPLIED_FIELD_NUMBER: _ClassVar[int]
     LLM_USED_FIELD_NUMBER: _ClassVar[int]
     CATEGORIZER_MODE_FIELD_NUMBER: _ClassVar[int]
     categories: _containers.RepeatedScalarFieldContainer[str]
     tags: _containers.RepeatedScalarFieldContainer[str]
     confidence_scores: _struct_pb2.Struct
     sentiment: str
-    new_tags_added: _containers.RepeatedScalarFieldContainer[str]
-    new_categories_added: _containers.RepeatedScalarFieldContainer[str]
-    settings_applied: bool
     llm_used: bool
     categorizer_mode: str
-    def __init__(self, categories: _Optional[_Iterable[str]] = ..., tags: _Optional[_Iterable[str]] = ..., confidence_scores: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., sentiment: _Optional[str] = ..., new_tags_added: _Optional[_Iterable[str]] = ..., new_categories_added: _Optional[_Iterable[str]] = ..., settings_applied: bool = ..., llm_used: bool = ..., categorizer_mode: _Optional[str] = ...) -> None: ...
+    def __init__(self, categories: _Optional[_Iterable[str]] = ..., tags: _Optional[_Iterable[str]] = ..., confidence_scores: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., sentiment: _Optional[str] = ..., llm_used: bool = ..., categorizer_mode: _Optional[str] = ...) -> None: ...
 
 class CreatePreviewReply(_message.Message):
     __slots__ = ("preview_id", "preview_audio_url", "preview_duration", "quality_metrics", "expires_at", "segments_applied", "track_id", "segments", "b2_key", "bucket_name", "backend_id")
@@ -649,16 +635,6 @@ class ListDiscoveryReply(_message.Message):
     total: int
     items: _containers.RepeatedCompositeFieldContainer[DiscoveryItem]
     def __init__(self, sort: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., total: _Optional[int] = ..., items: _Optional[_Iterable[_Union[DiscoveryItem, _Mapping]]] = ...) -> None: ...
-
-class PlatformSettingsReply(_message.Message):
-    __slots__ = ("status", "blocked_keywords_count", "auto_tag_keywords_count")
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    BLOCKED_KEYWORDS_COUNT_FIELD_NUMBER: _ClassVar[int]
-    AUTO_TAG_KEYWORDS_COUNT_FIELD_NUMBER: _ClassVar[int]
-    status: str
-    blocked_keywords_count: int
-    auto_tag_keywords_count: int
-    def __init__(self, status: _Optional[str] = ..., blocked_keywords_count: _Optional[int] = ..., auto_tag_keywords_count: _Optional[int] = ...) -> None: ...
 
 class GpuMemory(_message.Message):
     __slots__ = ("free_mb", "used_mb", "total_mb")

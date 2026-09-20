@@ -1,7 +1,4 @@
-"""Cancellation-safe bridges for blocking and externally managed work."""
-
 from __future__ import annotations
-
 import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -16,12 +13,6 @@ class AsyncCompletion:
         on_cancel: Callable[[], object] | None = None,
         executor: Executor | None = None,
     ) -> T:
-        """Wait for a blocking worker to stop before propagating cancellation.
-
-        Python cannot cancel a thread that is already writing a local or remote
-        artifact. Returning control while that writer is still active lets cleanup
-        race the write, so cancellation is deferred until the worker has stopped.
-        """
         future = asyncio.get_running_loop().run_in_executor(executor, function)
         cancellation: asyncio.CancelledError | None = None
         while True:
@@ -55,7 +46,6 @@ class AsyncCompletion:
     async def run_awaitable_to_completion[T](
         awaitable: Awaitable[T], *, on_cancel: Callable[[], object] | None = None
     ) -> T:
-        """Cancel an in-flight remote worker and await its terminal state safely."""
         future = asyncio.ensure_future(awaitable)
         cancellation: asyncio.CancelledError | None = None
         while True:

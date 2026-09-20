@@ -18,7 +18,6 @@ is intentionally empty so multi-hour results remain compact.
 - `Moderate`, `Categorize`, `ListDiscovery`
 - `CreatePreview`, `ConfirmPreview`, `RemoveSegment`,
   `RollbackPreview`, `GetPreview`
-- `UpdatePlatformSettings`
 - `Health`
 
 `Subscribe` is a server stream and emits stage, heartbeat, completion, failure,

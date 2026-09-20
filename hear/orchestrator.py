@@ -17,7 +17,6 @@ from hear.core.blocking import AsyncCompletion
 from hear.core.db_gate import DatabaseCommitter
 from hear.core.downloader import AudioDownloader
 from hear.core.hear_temp import TempWorkspace
-from hear.core.platform_settings import PlatformSettingsProvider
 from hear.core.storage import (
     StorageContextError,
     StorageContexts,
@@ -1564,7 +1563,6 @@ class Orchestrator:
 
     async def _process_pipeline(self, job: AiJob, track_job: AiTrackJob, db):
         track = self._track_from_job(job)
-        platform = await PlatformSettingsProvider.fetch_platform_settings()
         transcript_text = ""
         segments: list[dict] = []
         tmp_path = None
@@ -1676,7 +1674,6 @@ class Orchestrator:
                 tag_data = await self._categorizer.categorize(
                     transcript=transcript_text,
                     segments=segments,
-                    custom_tags=platform.auto_tag_keywords,
                     max_tags=2,
                     per_track_transcripts={track.track_id: transcript_text},
                 )
@@ -1723,7 +1720,7 @@ class Orchestrator:
         if not await self._set_stage(db, job, track_job, "moderating"):
             return
         stage_start = time.time()
-        moderation = await self._moderator.moderate(transcript_text, platform.blocked_keywords)
+        moderation = await self._moderator.moderate(transcript_text)
         track_job.moderation_json = moderation
         track_job.updated_at = datetime.utcnow()
         await DatabaseCommitter.commit_with_retry(db)
@@ -1738,7 +1735,6 @@ class Orchestrator:
             categorization = await self._categorizer.categorize(
                 transcript=transcript_text,
                 segments=segments,
-                custom_tags=platform.auto_tag_keywords,
                 max_tags=job.max_tags or 8,
                 per_track_transcripts={track.track_id: transcript_text},
             )

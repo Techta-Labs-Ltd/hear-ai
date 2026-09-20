@@ -27,8 +27,9 @@ gRPC client -> Ray Serve gRPC proxy :50051 --------------------+
 FastAPI runs inside the Ray Serve ingress; there is no separate Uvicorn
 process, gRPC server, model sidecar, or runtime installer. Internal calls use
 injected Ray Serve deployment handles.
-Required Python packages, native libraries, PostgreSQL, and model artifacts
-must be provisioned before the process starts.
+Required Python packages, native libraries, and PostgreSQL must be available
+before the process starts. The server applies its verified dependency patch and
+uses Ray to provision missing model artifacts before it creates Serve deployments.
 
 ## Package management
 
@@ -54,24 +55,24 @@ uv run --no-project python main.py
 For KubeRay, use a Ray image that already contains `uv` and set
 `RAY_RUNTIME_ENV_HOOK=ray._private.runtime_env.uv_runtime_env_hook.hook` on
 every Ray pod. Keep the project directory as the working directory so Ray and
-`uv` discover the same lockfile. The dependency environment and local model
-artifacts must be present before the Serve application starts.
+`uv` discover the same lockfile. The dependency environment must be present
+before the Serve application starts.
 
 ## RunPod persistent workspace
 
-RunPod treats `/root` as ephemeral. Before installing dependencies or downloading
-model artifacts, source the workspace environment helper:
+RunPod treats `/root` as ephemeral. Before installing dependencies or starting
+the server, source the workspace environment helper:
 
 ```bash
 cd /workspace/hear-ai
 source scripts/runpod-workspace-env.sh
 ```
 
-The helper only creates persistent directories and exports cache paths. It does
-not install packages, copy existing assets, or contact Hugging Face. Model
-downloads remain an explicit operator action; when later authorized,
-`scripts/download_models_ray.py` stores them under `/workspace/models` by
-default. Keep `.env` model paths aligned with `.env.example`.
+The helper only creates repository-local directories and exports cache paths.
+When the server starts, Ray downloads missing model artifacts into `/models`
+and startup applies the verified dependency patch.
+`scripts/download_models_ray.py` remains available for manual pre-warming.
+Keep `.env` model paths aligned with `.env.example`.
 
 After a CUDA or base-image maintenance event, rebuild the project environment
 from the committed lockfile instead of reusing a virtual environment created
@@ -107,7 +108,33 @@ uv run --no-project python main.py
 
 `main.py` connects to `RAY_ADDRESS` or creates a local Ray runtime, starts the
 Ray Serve HTTP and gRPC proxies, registers the generated protobuf servicers,
-and deploys the single `hear` application.
+and deploys the single `hear` application. Before Serve starts, a Ray task
+downloads any missing artifacts into the filesystem-root `/models` directory
+and applies required dependency patches. Model paths must stay under that one
+directory; do not use a separate workspace model cache.
+
+### Supervisor deployment
+
+Use [deploy/supervisord.conf](deploy/supervisord.conf) as the process-manager
+configuration. It starts a Ray head first, waits for it in
+`scripts/start-hear-ray-server.sh`, then starts `main.py` with
+`RAY_ADDRESS=auto`. Supervisor restarts either process if it exits; first
+startup provisions the `/models` cache from the Ray cluster before Serve
+accepts traffic.
+
+On a new root-capable pod, one command installs the OS/Python/Fish Speech
+dependencies, creates local PostgreSQL credentials, and prepares the root-level
+runtime directories:
+
+```bash
+cd /workspace/hear-ai
+sudo scripts/bootstrap-pod.sh
+supervisord -c deploy/supervisord.conf
+```
+
+Use `scripts/bootstrap-pod.sh --start` to start Supervisor immediately after
+setup. The first server start downloads models into `/models`; it does not
+store weights under `/workspace`.
 
 ## Availability and concurrency
 

@@ -99,14 +99,14 @@ def test_runtime_validation_rejects_incomplete_mossformer_checkpoint(tmp_path):
         RuntimeApplication.validate_runtime(configured_settings(tmp_path))
 
 
-def test_durable_defaults_use_workspace():
+def test_durable_defaults_keep_models_at_the_filesystem_root():
     defaults = Settings(_env_file=None)
-    assert defaults.MODEL_CACHE_DIR == "/workspace/models"
-    assert defaults.QWEN_ASR_MODEL_PATH == "/workspace/models/qwen3-asr-1.7b"
-    assert defaults.MOSSFORMER_MODEL_PATH == "/workspace/models/mossformer2-se-48k"
-    assert defaults.FISH_SPEECH_HOME == "/workspace/fish-speech"
-    assert defaults.FISH_SPEECH_CHECKPOINT_PATH.startswith("/workspace/models/")
-    assert defaults.FISH_SPEECH_CODEC_PATH.startswith("/workspace/models/")
+    assert defaults.MODEL_CACHE_DIR == "/models"
+    assert defaults.QWEN_ASR_MODEL_PATH == "/models/qwen3-asr-1.7b"
+    assert defaults.MOSSFORMER_MODEL_PATH == "/models/mossformer2-se-48k"
+    assert defaults.FISH_SPEECH_HOME == "/fish-speech"
+    assert defaults.FISH_SPEECH_CHECKPOINT_PATH.startswith("/models/")
+    assert defaults.FISH_SPEECH_CODEC_PATH.startswith("/models/")
 
 
 def test_durable_paths_allow_environment_overrides(monkeypatch, tmp_path):
@@ -169,6 +169,46 @@ def test_default_single_gpu_deployment_budget_allows_one_heavy_actor(tmp_path):
     assert runtime.FISH_SPEECH_REPLICA_COUNT == 1
     assert resident + on_demand <= 1.0
     assert resident + 2 * on_demand > 1.0
+
+
+def test_server_applies_patches_and_provisions_models_before_serve(monkeypatch, tmp_path):
+    runtime = configured_settings(tmp_path)
+    order = []
+    provision = object()
+
+    monkeypatch.setattr("main.ray.is_initialized", lambda: True)
+    monkeypatch.setattr("main.DependencyPatchManager.run", lambda _self: order.append("patch"))
+    monkeypatch.setattr(
+        "main.provision_models_on_ray",
+        type("Provisioner", (), {"remote": staticmethod(lambda *_args: provision)}),
+    )
+    monkeypatch.setattr(
+        "main.ray.get", lambda value: order.append("models") if value is provision else None
+    )
+    monkeypatch.setattr(
+        "main.RuntimeApplication.configure_process", lambda _settings: order.append("configure")
+    )
+    monkeypatch.setattr(
+        "main.RuntimeApplication.validate_runtime", lambda _settings: order.append("validate")
+    )
+    monkeypatch.setattr("main.DatabaseRuntime.init_db", lambda: order.append("database"))
+    monkeypatch.setattr("main.serve.start", lambda **_kwargs: order.append("serve_start"))
+    monkeypatch.setattr("main.serve.run", lambda *_args, **_kwargs: order.append("serve_run"))
+    monkeypatch.setattr(
+        "main.ApplicationBuilder.build_application", lambda _settings: object()
+    )
+
+    RuntimeApplication.run(runtime)
+
+    assert order == [
+        "patch",
+        "models",
+        "configure",
+        "validate",
+        "database",
+        "serve_start",
+        "serve_run",
+    ]
 
 
 def test_on_demand_gpu_models_have_a_short_idle_timeout(tmp_path):

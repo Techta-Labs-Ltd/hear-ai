@@ -140,20 +140,6 @@ guarantee documented for gRPC traffic.
 - Missing backend ownership never falls back to global visibility.
 - Unit and PostgreSQL integration tests cover two backends and pagination.
 
-### SYS-002: privileged RPCs have authentication but no authorization
-
-**Evidence**
-
-`UpdatePlatformSettings` uses the
-same service-key authentication as ordinary job consumers. The registry stores
-identity and storage allow-lists but no roles or capabilities.
-
-**Impact**
-
-Any backend credential can mutate global moderation keywords, global auto-tag
-behavior. A compromised ordinary
-backend key becomes a control-plane credential.
-
 **Required change**
 
 - Add explicit backend capabilities, for example:

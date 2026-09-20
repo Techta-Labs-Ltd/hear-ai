@@ -101,13 +101,6 @@ class HarmKeyword(Base):
     __table_args__ = (Index("ix_harm_keywords_keyword_kind", "keyword", "kind", unique=True),)
 
 
-class AutoTagKeyword(Base):
-    __tablename__ = "auto_tag_keywords"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    keyword = Column(String, nullable=False, unique=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
 class RegenerationPreview(Base):
     __tablename__ = "regeneration_previews"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))

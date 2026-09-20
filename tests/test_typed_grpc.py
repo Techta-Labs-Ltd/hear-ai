@@ -63,7 +63,6 @@ EVERY_RPC = {
     "RollbackPreview": ("PreviewRequest", "RollbackPreviewReply"),
     "GetPreview": ("PreviewRequest", "Preview"),
     "ListDiscovery": ("DiscoveryRequest", "ListDiscoveryReply"),
-    "UpdatePlatformSettings": ("PlatformSettingsRequest", "PlatformSettingsReply"),
     "Health": ("Empty", "HealthReply"),
 }
 
@@ -120,16 +119,12 @@ class TestParseDictMessageConstruction:
             tags=["#weather", "#nature"],
             confidence_scores={"#weather": 0.95},
             sentiment="neutral",
-            new_tags_added=["#weather"],
-            new_categories_added=["Nature"],
-            settings_applied=False,
             llm_used=True,
             categorizer_mode="qwen_primary",
         )
         msg = ParseDict(d, pipeline_pb2.CategorizationReply(), ignore_unknown_fields=True)
         assert list(msg.categories) == ["Nature"]
         assert list(msg.tags) == ["#weather", "#nature"]
-        assert list(msg.new_tags_added) == ["#weather"]
         assert msg.sentiment == "neutral"
         assert msg.llm_used is True
         assert msg.categorizer_mode == "qwen_primary"
@@ -248,13 +243,6 @@ class TestParseDictMessageConstruction:
         assert len(msg.changes) == 1
         assert msg.changes[0].segment_start == 1.0
         assert msg.quality_metrics.passed is True
-
-    def test_platform_settings_reply(self):
-        d = dict(status="accepted", blocked_keywords_count=3, auto_tag_keywords_count=5)
-        msg = ParseDict(d, pipeline_pb2.PlatformSettingsReply(), ignore_unknown_fields=True)
-        assert msg.status == "accepted"
-        assert msg.blocked_keywords_count == 3
-        assert msg.auto_tag_keywords_count == 5
 
     def test_health_reply(self):
         d = dict(

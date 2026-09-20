@@ -19,7 +19,9 @@ from hear.config import Settings
 from hear.core.backend_registry import BackendRegistry
 from hear.core.storage import StorageContexts
 from hear.deployments.app import ApplicationBuilder
+from hear.models.database import DatabaseRuntime
 from hear.tools.dependency_patches import DependencyPatchManager
+from hear.tools.model_provisioning import provision_models_on_ray
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 REQUIRED_MODULES = (
@@ -213,8 +215,7 @@ class RuntimeApplication:
 
     @staticmethod
     def run(settings: Settings) -> None:
-        RuntimeApplication.configure_process(settings)
-        RuntimeApplication.validate_runtime(settings)
+        DependencyPatchManager().run()
         owns_ray = not ray.is_initialized()
         if owns_ray:
             ray.init(
@@ -224,6 +225,10 @@ class RuntimeApplication:
                 ignore_reinit_error=False,
             )
         try:
+            ray.get(provision_models_on_ray.remote(settings.MODEL_CACHE_DIR))
+            RuntimeApplication.configure_process(settings)
+            RuntimeApplication.validate_runtime(settings)
+            DatabaseRuntime.init_db()
             serve.start(
                 proxy_location="EveryNode",
                 http_options={"host": settings.HTTP_HOST, "port": settings.HTTP_PORT},

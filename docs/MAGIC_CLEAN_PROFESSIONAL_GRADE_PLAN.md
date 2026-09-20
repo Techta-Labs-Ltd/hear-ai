@@ -79,7 +79,7 @@ Implemented locally, with focused coverage for the named safety properties:
 - local startup presence/structure checks for model manifests and referenced Demucs weights,
   plus FFmpeg capability, FFprobe presence, chunk/overlap, bitrate, and engine-revision checks;
   the cached MossFormer and checksum-verified Demucs artifacts are now copied into the intended
-  persistent `/workspace/models` layout and an offline dual-model CUDA smoke test executes them.
+  persistent filesystem-root `/models` layout and an offline dual-model CUDA smoke test executes them.
 
 Verification on 2026-09-03:
 

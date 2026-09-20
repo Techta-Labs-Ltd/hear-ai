@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 
-# Source this file before installing dependencies, downloading model assets, or
-# starting Hear AI on RunPod. It only prepares persistent directories and
-# environment variables; it never installs packages or downloads models.
+# Source this file before installing dependencies or starting Hear AI on RunPod.
+# It prepares root-level model and cache directories. Ray provisions any
+# missing model artifacts when the server starts.
 
 set -e
 
-HEAR_WORKSPACE_ROOT="${HEAR_WORKSPACE_ROOT:-/workspace}"
-
-export MODEL_CACHE_DIR="${HEAR_WORKSPACE_ROOT}/models"
-export FISH_SPEECH_HOME="${HEAR_WORKSPACE_ROOT}/fish-speech"
-export XDG_CACHE_HOME="${HEAR_WORKSPACE_ROOT}/.cache"
+export MODEL_CACHE_DIR="${MODEL_CACHE_DIR:-/models}"
+export FISH_SPEECH_HOME="${FISH_SPEECH_HOME:-/fish-speech}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/cache}"
 export HF_HOME="${XDG_CACHE_HOME}/huggingface"
 export HF_HUB_CACHE="${HF_HOME}/hub"
 export TRANSFORMERS_CACHE="${HF_HOME}/transformers"

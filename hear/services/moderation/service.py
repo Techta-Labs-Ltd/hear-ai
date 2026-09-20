@@ -36,7 +36,7 @@ _HIGH_THRESHOLD = 0.8
 
 
 class ModerationService:
-    async def moderate(self, text: str, blocked_keywords: list[str] = None) -> dict:
+    async def moderate(self, text: str) -> dict:
         if not text or not text.strip():
             return {
                 "flagged": False,
@@ -46,10 +46,7 @@ class ModerationService:
                 "flagged_categories": [],
                 "blocked_words_found": [],
             }
-        if blocked_keywords:
-            harm_keyword_loader.sync_platform_keywords(blocked_keywords)
         text_lower = text.lower()
-        all_keywords = harm_keyword_loader.all_keywords
         built_in_keywords = harm_keyword_loader.harm_keywords
         loop = asyncio.get_event_loop()
         built_in_hits = [kw for kw in built_in_keywords if self._contains_keyword(text_lower, kw)]
@@ -62,7 +59,7 @@ class ModerationService:
                 "flagged_categories": ["Threats / Violence"],
                 "blocked_words_found": built_in_hits,
             }
-        keyword_hits = self._check_keywords(text, blocked_keywords or [])
+        keyword_hits = []
         local_result = await loop.run_in_executor(None, self._classify_local, text)
         scores: dict[str, float] = local_result.get("scores", {})
         max_score: float = local_result.get("max_score", 0.0)
@@ -83,7 +80,7 @@ class ModerationService:
                         lambda: LLMServiceProvider.get_llm_service().moderate(
                             text,
                             detoxify_scores=scores,
-                            harm_keywords=list(all_keywords),
+                            harm_keywords=list(built_in_keywords),
                             is_borderline=True,
                         ),
                     )
@@ -115,7 +112,7 @@ class ModerationService:
                     lambda: LLMServiceProvider.get_llm_service().moderate(
                         text,
                         detoxify_scores=scores,
-                        harm_keywords=list(all_keywords),
+                        harm_keywords=list(built_in_keywords),
                         is_borderline=False,
                     ),
                 )
@@ -201,12 +198,6 @@ class ModerationService:
             return {"intent": "safe", "reason": "", "scores": label_scores}
         except Exception:
             return {"intent": "safe", "reason": "", "scores": {}}
-
-    def _check_keywords(self, text: str, blocked_keywords: list[str]) -> list[str]:
-        if not blocked_keywords:
-            return []
-        text_lower = text.lower()
-        return [kw for kw in blocked_keywords if self._contains_keyword(text_lower, kw)]
 
     def _contains_keyword(self, text_lower: str, keyword: str) -> bool:
         kw = keyword.lower().strip()

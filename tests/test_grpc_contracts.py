@@ -70,7 +70,6 @@ def test_pipeline_contract_has_full_grpc_surface():
         "RollbackPreview",
         "GetPreview",
         "ListDiscovery",
-        "UpdatePlatformSettings",
         "Health",
     }
 

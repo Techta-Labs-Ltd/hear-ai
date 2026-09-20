@@ -5,7 +5,6 @@ from collections import Counter, defaultdict
 
 from hear.core.category_loader import CategoryLabels, category_loader
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
-from hear.core.platform_settings import PlatformSettingsProvider
 from hear.services.llm import LLMServiceProvider
 from hear.services.model_client import ModelClientRegistry
 from hear.utils.content_context import (
@@ -98,12 +97,7 @@ class CategorizationService:
                 "categories": [],
                 "confidence_scores": {},
                 "sentiment": "neutral",
-                "new_tags_added": [],
-                "new_categories_added": [],
-                "settings_applied": False,
             }
-        platform = await PlatformSettingsProvider.fetch_platform_settings()
-        settings_applied = bool(platform.auto_tag_keywords or platform.blocked_keywords)
         data = category_loader.data
         catalog_cats, catalog_tags = self._expanded_catalog_labels(data)
         loop = asyncio.get_event_loop()
@@ -112,14 +106,14 @@ class CategorizationService:
             return await self._categorize_multi_track(
                 track_texts=active_tracks,
                 data=data,
-                platform=platform,
-                settings_applied=settings_applied,
                 max_tags=max_tags,
             )
         layer1 = await loop.run_in_executor(
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
-        tag_pool = self._build_tag_pool(transcript, catalog_tags, layer1["scores"])
+        tag_pool = self._build_tag_pool(
+            transcript, catalog_tags + list(custom_tags or []), layer1["scores"]
+        )
         layer2_cat = await loop.run_in_executor(
             None, self._zero_shot_labels, transcript, catalog_cats
         )
@@ -138,8 +132,6 @@ class CategorizationService:
                     tag_pool=tag_pool,
                     nli_top=nli_top,
                     max_tags=max_tags,
-                    platform=platform,
-                    settings_applied=settings_applied,
                     loop=loop,
                 )
                 if qwen_out is not None:
@@ -155,20 +147,6 @@ class CategorizationService:
         )
         merged = self._merge(layer1, layer2_cat, layer2_tag, data.tags, data.categories, max_tags)
         merged["tags"] = self._normalize_tags(merged["tags"])[:max_tags]
-        new_tags_added = []
-        for tag in merged["tags"]:
-            if tag not in self._normalize_tags(data.tags):
-                category_loader.add_tag(tag)
-                new_tags_added.append(tag)
-        new_categories_added: list[str] = []
-        merged["tags"], merged["categories"], _ = await loop.run_in_executor(
-            None,
-            self._apply_blocked_keywords,
-            transcript,
-            merged["tags"],
-            merged["categories"],
-            platform.blocked_keywords,
-        )
         merged["tags"] = self._ensure_non_empty_tags(
             merged["tags"], merged["categories"], transcript, max_tags
         )
@@ -182,29 +160,17 @@ class CategorizationService:
             transcript, merged["tags"], merged["categories"], max_tags
         )
         merged["tags"] = self._normalize_tags(merged["tags"])[:max_tags]
-        persisted_tags, persisted_cats = category_loader.ensure_labels(
-            merged["tags"], merged["categories"]
-        )
-        for t in persisted_tags:
-            if t not in new_tags_added:
-                new_tags_added.append(t)
-        for c in persisted_cats:
-            if c not in new_categories_added:
-                new_categories_added.append(c)
         return {
             "tags": merged["tags"],
             "categories": merged["categories"],
             "confidence_scores": merged["confidence_scores"],
             "sentiment": sentiment,
-            "new_tags_added": new_tags_added,
-            "new_categories_added": new_categories_added,
-            "settings_applied": settings_applied,
             "llm_used": False,
             "categorizer_mode": "nli",
         }
 
     async def _categorize_multi_track(
-        self, track_texts: dict[str, str], data, platform, settings_applied: bool, max_tags: int
+        self, track_texts: dict[str, str], data, max_tags: int
     ) -> dict:
         """Analyse each track independently then merge results.
 
@@ -218,8 +184,6 @@ class CategorizationService:
         all_categories: list[str] = []
         all_sentiments: list[str] = []
         confidence_scores: dict[str, float] = {}
-        new_tags_added: list[str] = []
-        new_categories_added: list[str] = []
         llm_was_used = False
         per_track: dict[str, dict] = {}
         for track_id, t_text in track_texts.items():
@@ -253,16 +217,12 @@ class CategorizationService:
                         tag_pool=tag_pool,
                         nli_top=nli_top,
                         max_tags=max_tags,
-                        platform=platform,
-                        settings_applied=settings_applied,
                         loop=loop,
                     )
                     if qwen_track is None:
                         raise RuntimeError("qwen_primary returned no result")
                     t_tags = qwen_track["tags"]
                     t_cats = qwen_track["categories"]
-                    track_new_tags = qwen_track.get("new_tags_added", [])
-                    track_new_cats = qwen_track.get("new_categories_added", [])
                     t_sent = qwen_track.get("sentiment", "neutral")
                     per_track[track_id] = {
                         "tags": t_tags,
@@ -273,15 +233,9 @@ class CategorizationService:
                         if tag not in all_tags:
                             all_tags.append(tag)
                             confidence_scores[tag] = 0.85
-                    for nt in track_new_tags:
-                        if nt not in new_tags_added:
-                            new_tags_added.append(nt)
                     for cat in t_cats:
                         if cat not in all_categories:
                             all_categories.append(cat)
-                    for nc in track_new_cats:
-                        if nc not in new_categories_added:
-                            new_categories_added.append(nc)
                     all_sentiments.append(t_sent)
                     llm_was_used = True
                     continue
@@ -311,28 +265,6 @@ class CategorizationService:
                 if cat not in all_categories:
                     all_categories.append(cat)
             all_sentiments.append(t_sent)
-        if platform.blocked_keywords:
-            full_text = " ".join(track_texts.values())
-            all_tags, all_categories, _ = await loop.run_in_executor(
-                None,
-                self._apply_blocked_keywords,
-                full_text,
-                all_tags,
-                all_categories,
-                platform.blocked_keywords,
-            )
-            for tid, t_text in track_texts.items():
-                if tid not in per_track:
-                    continue
-                kept_tags, kept_cats, _ = await loop.run_in_executor(
-                    None,
-                    self._apply_blocked_keywords,
-                    t_text,
-                    per_track[tid]["tags"],
-                    per_track[tid]["categories"],
-                    platform.blocked_keywords,
-                )
-                per_track[tid]["tags"], per_track[tid]["categories"] = (kept_tags, kept_cats)
         all_tags = self._ensure_non_empty_tags(
             all_tags, all_categories, " ".join(track_texts.values()), max_tags
         )
@@ -350,25 +282,16 @@ class CategorizationService:
             "categories": all_categories,
             "confidence_scores": confidence_scores,
             "sentiment": final_sentiment,
-            "new_tags_added": new_tags_added,
-            "new_categories_added": new_categories_added,
-            "settings_applied": settings_applied,
             "llm_used": llm_was_used,
             "categorizer_mode": "qwen_primary" if llm_was_used else "nli",
             "per_track": per_track,
         }
 
-    def _integrate_llm_categorization(
-        self, llm_result: dict
-    ) -> tuple[list[str], list[str], list[str], list[str]]:
-        tags = self._normalize_tags(
-            list(llm_result.get("tags", [])) + list(llm_result.get("new_tags", []))
-        )
+    def _integrate_llm_categorization(self, llm_result: dict) -> tuple[list[str], list[str]]:
+        tags = self._normalize_tags(list(llm_result.get("tags", [])))
         categories: list[str] = []
         seen: set[str] = set()
-        for raw in list(llm_result.get("categories", [])) + list(
-            llm_result.get("new_categories", [])
-        ):
+        for raw in list(llm_result.get("categories", [])):
             if not isinstance(raw, str):
                 continue
             category = re.sub("\\s+", " ", raw.strip())
@@ -378,7 +301,7 @@ class CategorizationService:
             seen.add(key)
             categories.append(category)
         tags, categories = self._sanitize_categorization_labels(tags, categories)
-        return (tags, categories, [], [])
+        return (tags, categories)
 
     def _expanded_catalog_labels(self, data) -> tuple[list[str], list[str]]:
         cats: list[str] = []
@@ -408,8 +331,6 @@ class CategorizationService:
         tag_pool: list[str],
         nli_top: list[str],
         max_tags: int,
-        platform,
-        settings_applied: bool,
         loop,
         max_categories: int = 3,
     ) -> dict | None:
@@ -426,9 +347,7 @@ class CategorizationService:
                 taxonomy_paths=taxonomy_paths,
             ),
         )
-        tags, categories, new_tags_added, new_categories_added = self._integrate_llm_categorization(
-            llm_result
-        )
+        tags, categories = self._integrate_llm_categorization(llm_result)
         tags, categories = self._sanitize_categorization_labels(tags, categories)
         tags, categories = self._apply_editorial_rules(transcript, tags, categories, max_tags)
         tags, categories = self._fill_gaps_from_scores(
@@ -440,34 +359,15 @@ class CategorizationService:
             max_categories=max_categories,
         )
         tags, categories = self._apply_editorial_rules(transcript, tags, categories, max_tags)
-        if platform.blocked_keywords:
-            tags, categories, _ = await loop.run_in_executor(
-                None,
-                self._apply_blocked_keywords,
-                transcript,
-                tags,
-                categories,
-                platform.blocked_keywords,
-            )
         tags = self._ensure_non_empty_tags(tags, categories, transcript, max_tags)
         tags = self._normalize_tags(tags)[:max_tags]
         categories = categories[:max_categories]
-        persisted_tags, persisted_cats = category_loader.ensure_labels(tags, categories)
-        for t in persisted_tags:
-            if t not in new_tags_added:
-                new_tags_added.append(t)
-        for c in persisted_cats:
-            if c not in new_categories_added:
-                new_categories_added.append(c)
         confidence_scores = {t: 0.9 for t in tags}
         return {
             "tags": tags,
             "categories": categories,
             "confidence_scores": confidence_scores,
             "sentiment": llm_result.get("sentiment", "neutral"),
-            "new_tags_added": new_tags_added,
-            "new_categories_added": new_categories_added,
-            "settings_applied": settings_applied,
             "llm_used": True,
             "categorizer_mode": "qwen_primary",
         }
@@ -626,25 +526,6 @@ class CategorizationService:
             transcript, clean_tags, clean_categories
         )
         return (self._normalize_tags(clean_tags)[:max_tags], clean_categories[:3])
-
-    def _apply_blocked_keywords(
-        self, transcript: str, tags: list[str], categories: list[str], blocked_keywords: list[str]
-    ) -> tuple[list[str], list[str], bool]:
-        """Context-aware moderation: scores each blocked keyword against the actual
-        transcript via zero-shot NLI (does this content genuinely discuss that topic?)
-        instead of a blind substring match on tag/category text. Only keywords whose
-        topic is actually present in the content get flagged and stripped."""
-        blocked = [b.strip() for b in blocked_keywords or [] if b and b.strip()]
-        if not blocked or not transcript or (not transcript.strip()):
-            return (tags, categories, False)
-        scores = self._zero_shot_labels(transcript, blocked).get("scores", {})
-        flagged = [kw for kw, score in scores.items() if score >= 0.5]
-        if not flagged:
-            return (tags, categories, False)
-        flagged_lower = [f.lower() for f in flagged]
-        kept_tags = [t for t in tags if not any(bk in t.lower() for bk in flagged_lower)]
-        kept_cats = [c for c in categories if not any(bk in c.lower() for bk in flagged_lower)]
-        return (kept_tags, kept_cats, True)
 
     def _ensure_non_empty_tags(
         self, tags: list[str], categories: list[str], transcript: str, max_tags: int

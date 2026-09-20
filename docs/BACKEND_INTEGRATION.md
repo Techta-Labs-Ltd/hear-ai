@@ -365,7 +365,7 @@ These schemas are reused by the job payloads:
 | `Segment` | `start: double`, `end: double`, `text: string`, `speaker: string`, `words: Word[]` |
 | `Word` | `word: string`, `start: double`, `end: double`, `score: float`, `speaker: string` |
 | `ModerationReply` | `flagged: bool`, `severity: string`, `intent: string`, `reason: string`, `flagged_categories: string[]`, `blocked_words_found: string[]` |
-| `CategorizationReply` | `categories: string[]`, `tags: string[]`, `confidence_scores: Struct`, `sentiment: string`, `new_tags_added: string[]`, `new_categories_added: string[]`, `settings_applied: bool`, `llm_used: bool`, `categorizer_mode: string` |
+| `CategorizationReply` | `categories: string[]`, `tags: string[]`, `confidence_scores: Struct`, `sentiment: string`, `llm_used: bool`, `categorizer_mode: string` |
 | `EnhancedAudio` | `backend_id: string`, `bucket_name: string`, `audio_url: string`, `b2_key: string` |
 | `AudioQuality` | `quality_score: float`, `snr_db: float`, `peak_db: float`, `lufs: float`, `clipping_detected: bool` |
 | `RebuiltAudio` | `backend_id: string`, `bucket_name: string`, `audio_url: string`, `b2_key: string`, `duration: float` |
@@ -780,8 +780,7 @@ Pipeline gRPC:
 - `Moderate`, `Categorize`
 - `CreatePreview`, `ConfirmPreview`, `RemoveSegment`, `RollbackPreview`,
   `GetPreview`
-- `ListDiscovery`,
-  `UpdatePlatformSettings`, `Health`
+- `ListDiscovery`, `Health`
 
 
 There is no `/ws` WebSocket endpoint in Hear AI. The owning backend should
@@ -807,7 +806,6 @@ Every call requires `METADATA`. RPC names below are methods on
 | `RollbackPreview` | `PreviewRequest → RollbackPreviewReply` | Roll back/delete an unconfirmed `preview_id`. |
 | `GetPreview` | `PreviewRequest → Preview` | Fetch persisted preview details and quality metrics. |
 | `ListDiscovery` | `DiscoveryRequest → ListDiscoveryReply` | List `latest` or `trending` discovery items using `limit`/`offset`. |
-| `UpdatePlatformSettings` | `PlatformSettingsRequest → PlatformSettingsReply` | Replace comma-separated blocked and auto-tag keyword sets. |
 | `Health` | `google.protobuf.Empty → HealthReply` | GPU identity/memory and active/queued job counts. |
 
 ### gRPC job submission
@@ -922,17 +920,10 @@ items = client.ListDiscovery(
 )
 ```
 
-### Platform settings and queue/health
+### Queue and health
 
 ```python
 from google.protobuf.empty_pb2 import Empty
-from hear.proto.pipeline_pb2 import PlatformSettingsRequest
-
-settings_reply = client.UpdatePlatformSettings(
-    PlatformSettingsRequest(blocked_keywords="word1,word2",
-                            auto_tag_keywords="news,sports"),
-    metadata=METADATA, timeout=30,
-)
 queue = client.GetQueueStats(Empty(), metadata=METADATA, timeout=10)
 health = client.Health(Empty(), metadata=METADATA, timeout=10)
 ```

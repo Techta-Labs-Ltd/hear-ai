@@ -5,7 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from hear.config import PROJECT_ROOT, Settings
+from hear.config import Settings
 from hear.core.downloader import AudioDownloader
 from hear.core.hear_temp import TempWorkspace
 
@@ -266,9 +266,9 @@ def test_purge_never_removes_unmanaged_legacy_files(monkeypatch, tmp_path):
     assert not os.path.exists(managed)
 
 
-def test_default_audio_directory_is_inside_project_workspace():
+def test_default_audio_directory_is_at_the_filesystem_root():
     runtime = Settings(_env_file=None)
-    assert runtime.HEAR_TEMP_DIR == str(PROJECT_ROOT / "audio")
+    assert runtime.HEAR_TEMP_DIR == "/audio"
     assert not runtime.HEAR_TEMP_DIR.startswith("/tmp")
 
 

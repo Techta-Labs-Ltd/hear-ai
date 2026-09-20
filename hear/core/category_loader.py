@@ -140,7 +140,6 @@ class CategoryLoader:
             ]
 
     def import_discovery_taxonomy(self, taxonomy_paths: list[str]) -> tuple[list[str], list[str]]:
-        """Merge discovery taxonomy into tags + leaf labels only (not full paths as categories)."""
         if not self._loaded:
             self.load()
         added_tags: list[str] = []

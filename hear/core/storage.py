@@ -1,7 +1,4 @@
-"""Job-scoped, encrypted B2 storage configuration and object operations."""
-
 from __future__ import annotations
-
 import hashlib
 import json
 import mimetypes

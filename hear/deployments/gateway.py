@@ -11,7 +11,7 @@ from hear.core.backend_registry import BackendRegistry
 from hear.core.category_loader import category_loader
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.core.health import RayHealthSnapshot, ServiceHealth
-from hear.core.keyword_loader import auto_tag_keyword_loader, harm_keyword_loader
+from hear.core.keyword_loader import harm_keyword_loader
 from hear.core.storage import StorageCredentialsExpiringError
 from hear.models.database import DatabaseRuntime
 from hear.models.schemas import DiscoveryProcessRequest, PipelineRequest, ProcessResponse
@@ -65,7 +65,6 @@ class GrpcGateway:
         category_loader.load()
         discovery_taxonomy_loader.load()
         harm_keyword_loader.load()
-        auto_tag_keyword_loader.load()
         model_client = RayModelClient(
             {
                 "transcription": transcription,
@@ -316,9 +315,6 @@ class GrpcGateway:
 
     async def ListDiscovery(self, request, grpc_context=None):
         return await self._pipeline.ListDiscovery(request, grpc_context)
-
-    async def UpdatePlatformSettings(self, request, grpc_context=None):
-        return await self._pipeline.UpdatePlatformSettings(request, grpc_context)
 
     async def Health(self, request, grpc_context=None):
         return await self._pipeline.Health(request, grpc_context)

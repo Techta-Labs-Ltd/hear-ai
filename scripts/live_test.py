@@ -165,9 +165,6 @@ class LiveTestCommand:
                 "Categorize.categorizer_mode non-empty", reply.categorizer_mode != ""
             )
             LiveTestReporter.check("Categorize.llm_used is bool", isinstance(reply.llm_used, bool))
-            LiveTestReporter.check(
-                "Categorize.settings_applied is bool", isinstance(reply.settings_applied, bool)
-            )
         except grpc.RpcError as e:
             LiveTestReporter.fail("Categorize", f"{e.code()} {e.details()}")
         print("\n=== 6. Job lifecycle (HTTP submit → Subscribe → GetResult → CancelJob) ===")
