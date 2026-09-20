@@ -69,8 +69,6 @@ def test_pipeline_contract_has_full_grpc_surface():
         "RollbackPreview",
         "GetPreview",
         "ListDiscovery",
-        "TrainCategorizer",
-        "IngestCategoryEvent",
         "UpdatePlatformSettings",
         "Health",
     }
@@ -79,13 +77,6 @@ def test_pipeline_contract_has_full_grpc_surface():
 def test_every_pipeline_rpc_has_a_gateway_handler():
     methods = pipeline_pb2.DESCRIPTOR.services_by_name["Pipeline"].methods
     assert all(callable(getattr(GatewayClass, method.name, None)) for method in methods)
-
-
-def test_gateway_does_not_expose_resolver_rpcs():
-    assert not any(
-        callable(getattr(GatewayClass, method, None))
-        for method in ("Resolve", "ResolverHealth", "Rebuild", "Apply")
-    )
 
 
 @pytest.mark.anyio
@@ -155,6 +146,15 @@ def test_same_speaker_grpc_fields_preserve_presence():
     assert explicit_preview.same_speaker is False
 
 
+def test_progress_measurements_distinguish_zero_from_absent():
+    missing = pipeline_pb2.PipelineEvent()
+    measured = pipeline_pb2.PipelineEvent(progress_pct=0, elapsed_seconds=0, estimated_remaining=0)
+    for field in ("progress_pct", "elapsed_seconds", "estimated_remaining"):
+        assert not missing.HasField(field)
+        assert measured.HasField(field)
+        assert getattr(measured, field) == 0
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(("explicit_value", "expected"), [(None, True), (False, False)])
 async def test_create_preview_defaults_same_speaker_only_when_omitted(
@@ -210,7 +210,6 @@ def test_grpc_authentication_rejects_missing_application(monkeypatch):
 
     assert not PipelineGrpcService._authenticated(context)
     assert context.code == grpc.StatusCode.UNAUTHENTICATED
-
 
 
 def test_grpc_authentication_accepts_valid_key(monkeypatch):

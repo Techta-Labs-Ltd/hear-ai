@@ -369,5 +369,5 @@ With Hear AI running, execute the non-destructive live contract test:
 uv run python scripts/live_test.py
 ```
 
-Do not add `--destructive` unless preview confirmation, deletion, training, and
+Do not add `--destructive` unless preview confirmation, deletion, and
 other state-changing operations are intentionally being tested.

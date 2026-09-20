@@ -15,8 +15,7 @@ from hear.core.storage import (
 )
 from hear.models.database import AiTrackJob
 from hear.orchestrator import (
-    NON_RETRYABLE_JOB_ERRORS,
-    RECOVERY_RETRY_LIMIT_ERROR,
+    RECOVERY_INTERRUPTED_ERROR,
     Orchestrator,
 )
 from hear.services.jobs.scheduler import FairJobScheduler, PendingJob
@@ -29,17 +28,12 @@ from hear.services.magic_clean.lineage import (
     MAGIC_CLEAN_SOURCE_PCM_SHA256_KEY,
     MagicCleanLineageError,
 )
-from hear.services.magic_clean.processing.validation import AudioValidationError
 
 FILE_HASH = "a" * 64
 PCM_HASH = "b" * 64
 DELIVERED_FILE_HASH = "c" * 64
 DELIVERED_PCM_HASH = "d" * 64
 LEVELS = {"speech": 100, "music": 10, "background": 10, "cut_silence": False}
-
-
-def test_delivery_integrity_failures_are_not_retried() -> None:
-    assert isinstance(AudioValidationError("invalid delivery"), NON_RETRYABLE_JOB_ERRORS)
 
 
 def test_magic_clean_runtime_requires_full_storage_credential_reserve(
@@ -595,7 +589,7 @@ def test_non_magic_expired_storage_is_terminalized_by_normal_failure(
     asyncio.run(_exercise_non_magic_expired_storage_uses_normal_failure(monkeypatch))
 
 
-async def _exercise_recovery_terminalizes_exhausted_job(monkeypatch, status: str):
+async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
     cls = Orchestrator.func_or_class
     orchestrator = cls.__new__(cls)
     orchestrator._recovery_started = False
@@ -614,9 +608,9 @@ async def _exercise_recovery_terminalizes_exhausted_job(monkeypatch, status: str
     job = SimpleNamespace(
         id="job",
         run_id="run",
-        status=status,
+        status="running",
         job_type="magic_clean",
-        attempts=3,
+        attempts=1,
         current_stage="finalizing",
         error=None,
         completed_at=None,
@@ -625,7 +619,7 @@ async def _exercise_recovery_terminalizes_exhausted_job(monkeypatch, status: str
     track_job = SimpleNamespace(
         job_id="job",
         run_id="run",
-        status=status,
+        status="running",
         current_stage="finalizing",
         error=None,
         completed_at=None,
@@ -685,7 +679,6 @@ async def _exercise_recovery_terminalizes_exhausted_job(monkeypatch, status: str
     async def commit(candidate):
         candidate.commits += 1
 
-    monkeypatch.setattr(settings, "JOB_MAX_RETRIES", 3)
     monkeypatch.setattr(settings, "MAGIC_CLEAN_CLEANUP_GRACE_SECONDS", 120)
     monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
     monkeypatch.setattr("hear.orchestrator.commit_with_retry", commit)
@@ -694,22 +687,19 @@ async def _exercise_recovery_terminalizes_exhausted_job(monkeypatch, status: str
 
     assert job.status == "failed"
     assert job.current_stage is None
-    assert job.error == RECOVERY_RETRY_LIMIT_ERROR
+    assert job.error == RECOVERY_INTERRUPTED_ERROR
     assert job.completed_at is not None
     persisted_tombstone = job.job_options["magic_clean_cleanup_tombstone"]
     assert persisted_tombstone["b2_key"] == tombstone["b2_key"]
     assert persisted_tombstone["run_id"] == tombstone["run_id"]
     assert persisted_tombstone["reason"] == tombstone["reason"]
     assert persisted_tombstone["last_error_type"] == tombstone["last_error_type"]
-    if status == "running":
-        assert persisted_tombstone["not_before"] != old_not_before
-        refreshed_not_before = datetime.fromisoformat(persisted_tombstone["not_before"])
-        assert refreshed_not_before > datetime.now(UTC) + timedelta(seconds=115)
-    else:
-        assert persisted_tombstone["not_before"] == old_not_before
+    assert persisted_tombstone["not_before"] != old_not_before
+    refreshed_not_before = datetime.fromisoformat(persisted_tombstone["not_before"])
+    assert refreshed_not_before > datetime.now(UTC) + timedelta(seconds=115)
     assert track_job.status == "failed"
     assert track_job.current_stage is None
-    assert track_job.error == RECOVERY_RETRY_LIMIT_ERROR
+    assert track_job.error == RECOVERY_INTERRUPTED_ERROR
     assert track_job.completed_at == job.completed_at
     assert track_job.updated_at == job.completed_at
     assert scheduled == []
@@ -718,12 +708,10 @@ async def _exercise_recovery_terminalizes_exhausted_job(monkeypatch, status: str
     assert session.closed is True
 
 
-@pytest.mark.parametrize("status", ["queued", "running"])
-def test_recovery_terminalizes_retry_exhausted_jobs_for_cleanup_reconciliation(
+def test_recovery_terminalizes_interrupted_jobs_for_cleanup_reconciliation(
     monkeypatch,
-    status,
 ) -> None:
-    asyncio.run(_exercise_recovery_terminalizes_exhausted_job(monkeypatch, status))
+    asyncio.run(_exercise_recovery_terminalizes_interrupted_job(monkeypatch))
 
 
 async def _exercise_active_scheduled_run_cancellation():

@@ -21,29 +21,14 @@ from hear.core.hear_temp import (
     hear_temp_directory,
 )
 from hear.core.storage import B2Storage
-from hear.services.magic_clean.processing.noise import NoiseReducer
-from hear.services.model_client import get_model_client
+from hear.core.noise import NoiseReducer
+from hear.services.model_client import RayModelClient
 from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
 from hear.services.transcription.service import TranscriptionService
 
 logger = logging.getLogger(__name__)
 
-_transcriber_instance: TranscriptionService | None = None
-
-
-def _get_transcriber() -> TranscriptionService:
-    global _transcriber_instance
-    if _transcriber_instance is None:
-        _transcriber_instance = TranscriptionService()
-    return _transcriber_instance
-
-
 _recon_payload_logger = logging.getLogger("reconstruct_payload")
-_recon_payload_logger.setLevel(logging.INFO)
-_recon_payload_fh = logging.FileHandler("/workspace/hear-ai/logs/reconstruct_payload.log")
-_recon_payload_fh.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
-_recon_payload_logger.addHandler(_recon_payload_fh)
-_recon_payload_logger.propagate = False
 
 
 @dataclass
@@ -108,7 +93,9 @@ RULES:
 8. Never paraphrase, summarise, add or remove content. Only restructure and annotate.
 9. Output plain text only. One sentence per line. No markdown, no numbering, no commentary, no explanation."""
 
-    def __init__(self):
+    def __init__(self, model_client: RayModelClient, transcriber: TranscriptionService):
+        self._model_client = model_client
+        self._transcriber = transcriber
         self._loaded = False
         self._fishspeech_available = False
         self._noise = NoiseReducer()
@@ -1091,7 +1078,7 @@ RULES:
                 )
             except OSError as exc:
                 logger.warning("Unable to read voice reference %s: %s", reference_audio_path, exc)
-        return await get_model_client().generate_speech(
+        return await self._model_client.generate_speech(
             text=processed_text,
             max_new_tokens=1024,
             references=refs,
@@ -1436,7 +1423,7 @@ RULES:
                 )
 
             pacing_duration = (pacing_end - pacing_start) / self.TARGET_SR
-            transcript = await _get_transcriber().transcribe(
+            transcript = await self._transcriber.transcribe(
                 audio_bytes,
                 track_id=track_id,
                 short_utterance=pacing_duration <= self.VOICE_REFERENCE_SECONDS,

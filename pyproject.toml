@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hear-ai"
 version = "5.0.0"
-description = "Unified Hear audio intelligence and resolver service on Ray Serve"
+description = "Unified Hear audio intelligence service on Ray Serve"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "ray[serve,train]>=2.56,<3",
+    "ray[serve]>=2.56,<3",
     "fastapi>=0.115,<1",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.5,<3",
@@ -22,12 +22,9 @@ dependencies = [
     "transformers>=4.48,<5",
     "accelerate>=0.26",
     "bitsandbytes>=0.43",
-    "sentence-transformers>=3,<4",
     "sentencepiece>=0.2,<0.3",
-    "spacy>=3.8,<4",
-    "whisperx @ git+https://github.com/Ahelsamahy/whisperX.git@qwenasr-and-Forced-aligner",
+    "whisperx @ git+https://github.com/Ahelsamahy/whisperX.git@68a6634d1b9dfbc3ec4ca3ba800d998fc682b56b",
     "qwen-asr>=0.0.6",
-    "rapidfuzz>=3.9,<4",
     "numpy>=1.24.3,<2",
     "soundfile>=0.12,<1",
     "scipy>=1.11,<1.17",
@@ -96,7 +93,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "hear/resolver/tests"]
+testpaths = ["tests"]
 pythonpath = ["."]
 norecursedirs = ["integration"]
 

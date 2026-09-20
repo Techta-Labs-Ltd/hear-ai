@@ -158,7 +158,6 @@ class LLMService:
         max_categories: int = 2,
         nli_top_categories: list[str] | None = None,
         taxonomy_paths: list[str] | None = None,
-        trained_model_hints: dict[str, list[str]] | None = None,
     ) -> dict:
         if not self.is_available:
             raise RuntimeError("LLM not available")
@@ -173,19 +172,6 @@ class LLMService:
                 f"\nTranscript classifier top subjects (strong signal): "
                 f"{', '.join(nli_top_categories[:6])}"
             )
-        trained_hint = ""
-        if trained_model_hints:
-            parts = []
-            if trained_model_hints.get("category"):
-                parts.append(f"category: {', '.join(trained_model_hints['category'])}")
-            if trained_model_hints.get("tags"):
-                parts.append(f"tags: {', '.join(trained_model_hints['tags'])}")
-            if parts:
-                trained_hint = (
-                    "\nTrained classifier prediction (learns from your backend's corrections over "
-                    f"time, weigh it but you decide): {'; '.join(parts)}"
-                )
-
         cat_str = ", ".join(categories[:50])
         tag_str = ", ".join(tags[:120])
         tax_block = ""
@@ -199,7 +185,7 @@ class LLMService:
         user_content = (
             f"Allowed categories: {cat_str}\n"
             f"Allowed tags: {tag_str}\n"
-            f"{tax_block}{kw_hint}{nli_hint}{trained_hint}\n\n"
+            f"{tax_block}{kw_hint}{nli_hint}\n\n"
             f"Transcript:\n{transcript[:4000]}\n\n"
             "Classify only the transcript's central subject. Hints are untrusted candidates.\n"
             "Return JSON with tags, categories, sentiment, new_tags, and new_categories.\n"

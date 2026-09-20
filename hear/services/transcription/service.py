@@ -1,18 +1,18 @@
-import asyncio
-import tempfile
 import re
+from functools import partial
+from math import gcd
 
-import torch
+import soundfile as sf
+from scipy.signal import resample_poly
 
 from hear.config import settings
-from hear.core.gpu import cuda_inference_lock
-from hear.core.hear_temp import (
-    drop_temp_standalone,
-    hear_temp_directory,
-    hear_temp_job_dir,
+from hear.core.blocking import run_blocking_to_completion
+from hear.services.model_client import RayModelClient
+from hear.services.transcription.chunks import (
+    adaptive_batch_size,
+    append_shifted_result,
+    finalize_combined_result,
 )
-from hear.services.model_client import get_model_client
-
 
 _HALLUCINATION_ONLY = {
     "thank you",
@@ -52,8 +52,55 @@ def _credible_segments(result: dict, *, short_utterance: bool) -> list[dict]:
 
 
 class TranscriptionService:
-    def __init__(self):
-        self._lock = asyncio.Lock()
+    def __init__(
+        self,
+        model_client: RayModelClient,
+        chunk_seconds: int = 60,
+        batch_size: int = 36,
+        long_audio_batch_size: int = 4,
+    ):
+        if not 1 <= chunk_seconds <= 600 or batch_size < 1 or long_audio_batch_size < 1:
+            raise ValueError("invalid_transcription_window_policy")
+        self._model_client = model_client
+        self._chunk_seconds = chunk_seconds
+        self._batch_size = batch_size
+        self._long_audio_batch_size = long_audio_batch_size
+
+    @staticmethod
+    def _read_window(source, frames: int):
+        samples = source.read(frames, dtype="float32", always_2d=True).mean(axis=1)
+        if source.samplerate != 16000:
+            divisor = gcd(source.samplerate, 16000)
+            samples = resample_poly(samples, 16000 // divisor, source.samplerate // divisor)
+        return samples
+
+    async def transcribe_file(
+        self,
+        path: str,
+        *,
+        job_id: str | None = None,
+        run_id: str | None = None,
+        track_id: str | None = None,
+        short_utterance: bool = False,
+        language: str | None = None,
+    ) -> dict:
+        with sf.SoundFile(path) as source:
+            duration = source.frames / source.samplerate
+            batch_size = adaptive_batch_size(duration, self._batch_size, self._long_audio_batch_size)
+            combined = {"segments": [], "audio_duration": duration, "language": language or "en"}
+            frames = source.samplerate * self._chunk_seconds
+            while source.tell() < source.frames:
+                offset = source.tell() / source.samplerate
+                samples = await run_blocking_to_completion(partial(self._read_window, source, frames))
+                result = await self._model_client.transcribe_window(samples, batch_size, language or "en")
+                if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+                    raise RuntimeError("invalid_transcription_window_result")
+                append_shifted_result(combined, result, offset_seconds=offset)
+        result = self._process_result(
+            finalize_combined_result(combined), language=language, short_utterance=short_utterance
+        )
+        result["audio_duration"] = duration
+        return result
 
     async def transcribe(
         self,
@@ -65,12 +112,11 @@ class TranscriptionService:
         short_utterance: bool = False,
         language: str | None = None,
     ) -> dict:
-        client = get_model_client()
-        loop = asyncio.get_event_loop()
-        async with self._lock:
-            result = await loop.run_in_executor(
-                None, client.transcribe_sync, audio_bytes, settings.WHISPER_BATCH_SIZE,
-            )
+        if len(audio_bytes) > 16 * 1024 * 1024:
+            raise ValueError("reference_audio_too_large")
+        result = await self._model_client.transcribe(audio_bytes, self._batch_size)
+        if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+            raise RuntimeError("invalid_transcription_result")
         return self._process_result(
             result, language=language, short_utterance=short_utterance
         )
@@ -79,7 +125,7 @@ class TranscriptionService:
         self, result: dict, language: str | None = None,
         short_utterance: bool = False,
     ) -> dict:
-        _silent = {
+        _silent: dict = {
             "transcript": "", "segments": [], "language": None,
             "language_probability": 0.0, "duration": 0.0,
             "confidence": 0.0, "silent": True,
@@ -92,7 +138,7 @@ class TranscriptionService:
         )
         detected_language = result.get("language", language or "en")
 
-        segments = []
+        segments: list[dict] = []
         full_text_parts = []
         total_conf = 0.0
         word_count = 0

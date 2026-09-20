@@ -5,6 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from hear.config import PROJECT_ROOT, Settings
 from hear.core.downloader import download_audio
 from hear.core.hear_temp import (
     cleanup_job_temp,
@@ -162,7 +163,8 @@ async def _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_p
         def stream(*_args, **_kwargs):
             return Response()
 
-    def delayed_convert(_source_path, wav_path):
+    def delayed_convert(_source_path, wav_path, *, preserve_channels):
+        assert preserve_channels is False
         conversion_started.set()
         assert release_conversion.wait(timeout=5)
         with open(wav_path, "wb") as output:
@@ -236,7 +238,8 @@ def test_download_audio_can_decode_source_to_wav(monkeypatch, tmp_path):
         def stream(self, *args, **kwargs):
             return Response()
 
-    def fake_convert(source_path, wav_path):
+    def fake_convert(source_path, wav_path, *, preserve_channels):
+        assert preserve_channels is False
         with open(source_path, "rb") as source, open(wav_path, "wb") as output:
             assert source.read() == payload
             output.write(b"RIFF decoded wav")
@@ -293,7 +296,6 @@ def test_purge_never_removes_unmanaged_legacy_files(monkeypatch, tmp_path):
 
 
 def test_default_audio_directory_is_inside_project_workspace():
-    from hear.config import PROJECT_ROOT, Settings
 
     runtime = Settings(_env_file=None)
 

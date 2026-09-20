@@ -64,8 +64,6 @@ EVERY_RPC = {
     "RollbackPreview": ("PreviewRequest", "RollbackPreviewReply"),
     "GetPreview": ("PreviewRequest", "Preview"),
     "ListDiscovery": ("DiscoveryRequest", "ListDiscoveryReply"),
-    "TrainCategorizer": ("TrainRequest", "TrainReply"),
-    "IngestCategoryEvent": ("CategoryEvent", "IngestReply"),
     "UpdatePlatformSettings": ("PlatformSettingsRequest", "PlatformSettingsReply"),
     "Health": ("Empty", "HealthReply"),
 }
@@ -92,13 +90,6 @@ class TestTypedResponseContract:
 
 
 class TestParseDictMessageConstruction:
-    def test_ingest_reply_accepts_database_uuid(self):
-        example_id = "93d58148-d62f-47b7-b7f4-0a11b5ac86fa"
-        msg = ParseDict(
-            {"status": "accepted", "example_id": example_id},
-            pipeline_pb2.IngestReply(),
-        )
-        assert msg.example_id == example_id
 
     def test_moderation_reply(self):
         d = dict(
@@ -258,17 +249,6 @@ class TestParseDictMessageConstruction:
         assert msg.changes[0].segment_start == 1.0
         assert msg.quality_metrics.passed is True
 
-    def test_train_reply(self):
-        d = dict(status="completed", detail="trained on 50 examples")
-        msg = ParseDict(d, pipeline_pb2.TrainReply(), ignore_unknown_fields=True)
-        assert msg.status == "completed"
-        assert msg.detail == "trained on 50 examples"
-
-    def test_ingest_reply(self):
-        d = dict(status="accepted", example_id="93d58148-d62f-47b7-b7f4-0a11b5ac86fa")
-        msg = ParseDict(d, pipeline_pb2.IngestReply(), ignore_unknown_fields=True)
-        assert msg.status == "accepted"
-        assert msg.example_id == "93d58148-d62f-47b7-b7f4-0a11b5ac86fa"
 
     def test_platform_settings_reply(self):
         d = dict(status="accepted", blocked_keywords_count=3, auto_tag_keywords_count=5)
@@ -499,7 +479,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_success_returns_typed_message(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "secret"), ("application", "hear")))
 
         async def fn():
@@ -517,7 +497,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_auth_rejection_returns_empty_message(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "wrong"),))
 
         async def fn():
@@ -535,7 +515,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_service_error_sets_grpc_code(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "secret"), ("application", "hear")))
 
         async def fn():
@@ -553,7 +533,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_service_error_422_sets_invalid_argument(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "secret"), ("application", "hear")))
 
         async def fn():
@@ -570,7 +550,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_service_error_503_sets_unavailable(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "secret"), ("application", "hear")))
 
         async def fn():
@@ -587,7 +567,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_unknown_exception_sets_internal(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "secret"), ("application", "hear")))
 
         async def fn():
@@ -603,7 +583,7 @@ class TestCallHelper:
     @pytest.mark.anyio
     async def test_service_error_409_sets_already_exists(self, monkeypatch):
         configure_backend_auth(monkeypatch, "secret")
-        svc = PipelineGrpcService(orchestrator=MagicMock())
+        svc = PipelineGrpcService(orchestrator=MagicMock(), operations=MagicMock())
         ctx = FakeContext((("x-api-key", "secret"), ("application", "hear")))
 
         async def fn():

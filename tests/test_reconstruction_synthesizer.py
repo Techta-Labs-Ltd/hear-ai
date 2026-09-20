@@ -19,7 +19,7 @@ def _tone(
 
 
 def test_reconstruction_seed_is_stable_across_retries_and_python_processes():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     first_seed = synthesizer._compute_seed("job-1", "track-1")
 
     assert first_seed == synthesizer._compute_seed("job-1", "track-1")
@@ -29,7 +29,7 @@ def test_reconstruction_seed_is_stable_across_retries_and_python_processes():
 def test_reconstruct_segments_uses_immutable_waveform_for_voice_reference(
     monkeypatch,
 ):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     current_waveform = torch.zeros((1, 2 * synthesizer.TARGET_SR))
     immutable_waveform = torch.ones((1, 2 * synthesizer.TARGET_SR))
     observed = {}
@@ -107,7 +107,7 @@ def test_model_client_forwards_seed_to_fish_deployment():
 
 
 def test_voice_reference_uses_ten_seconds_before_a_middle_edit():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     edit_start = int(14.8 * synthesizer.TARGET_SR)
     edit_end = int(15.2 * synthesizer.TARGET_SR)
@@ -126,7 +126,7 @@ def test_voice_reference_uses_ten_seconds_before_a_middle_edit():
 
 
 def test_voice_reference_uses_clean_audio_after_an_edit_at_track_start():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     edit_end = int(0.3 * synthesizer.TARGET_SR)
 
@@ -143,7 +143,7 @@ def test_voice_reference_uses_clean_audio_after_an_edit_at_track_start():
 
 
 def test_voice_reference_excludes_the_latest_jobs_original_hello_interval():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     edit_start = int(1.921 * synthesizer.TARGET_SR)
     edit_end = int(8.721 * synthesizer.TARGET_SR)
@@ -161,7 +161,7 @@ def test_voice_reference_excludes_the_latest_jobs_original_hello_interval():
 
 
 def test_voice_reference_uses_clean_audio_before_an_edit_at_track_end():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     edit_start = int(29.5 * synthesizer.TARGET_SR)
 
@@ -180,7 +180,7 @@ def test_voice_reference_uses_clean_audio_before_an_edit_at_track_end():
 def test_voice_reference_uses_transcript_aligned_to_expanded_clip(
     monkeypatch, tmp_path
 ):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     reference_path = tmp_path / "reference.wav"
     reference_path.write_bytes(b"reference audio")
@@ -195,8 +195,8 @@ def test_voice_reference_uses_transcript_aligned_to_expanded_clip(
 
     monkeypatch.setattr(synthesizer, "_export_reference_clip", fake_export)
     monkeypatch.setattr(
-        "hear.services.reconstruction.synthesizer._get_transcriber",
-        lambda: SimpleNamespace(transcribe=fake_transcribe),
+        synthesizer, "_transcriber",
+        SimpleNamespace(transcribe=fake_transcribe),
     )
 
     path, text, speaking_rate = asyncio.run(
@@ -218,7 +218,7 @@ def test_voice_reference_uses_transcript_aligned_to_expanded_clip(
 
 
 def test_voice_reference_is_skipped_when_edit_leaves_no_clean_context(monkeypatch):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(2.0)
 
     def fail_export(*_args, **_kwargs):
@@ -243,7 +243,7 @@ def test_voice_reference_is_skipped_when_edit_leaves_no_clean_context(monkeypatc
 def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(
     monkeypatch, tmp_path
 ):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     reference_path = tmp_path / "reference.wav"
     reference_path.write_bytes(b"reference audio")
@@ -271,8 +271,8 @@ def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(
 
     monkeypatch.setattr(synthesizer, "_export_reference_clip", fake_export)
     monkeypatch.setattr(
-        "hear.services.reconstruction.synthesizer._get_transcriber",
-        lambda: SimpleNamespace(transcribe=fake_transcribe),
+        synthesizer, "_transcriber",
+        SimpleNamespace(transcribe=fake_transcribe),
     )
 
     edit_start = int(10.0 * synthesizer.TARGET_SR)
@@ -297,7 +297,7 @@ def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(
 def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(
     monkeypatch, tmp_path
 ):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(40.0)
     reference_path = tmp_path / "reference.wav"
     reference_path.write_bytes(b"reference audio")
@@ -334,8 +334,8 @@ def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(
     monkeypatch.setattr(synthesizer, "_export_reference_clip", fake_export)
     monkeypatch.setattr(synthesizer, "_wav_bytes_from_audio", fake_wav_bytes)
     monkeypatch.setattr(
-        "hear.services.reconstruction.synthesizer._get_transcriber",
-        lambda: SimpleNamespace(transcribe=fake_transcribe),
+        synthesizer, "_transcriber",
+        SimpleNamespace(transcribe=fake_transcribe),
     )
 
     edit_start = 0
@@ -384,7 +384,7 @@ def test_reference_window_excludes_words_cut_by_audio_boundaries():
 
 
 def test_speech_rate_match_safely_moves_fast_tts_toward_source_rate():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     stretched = synthesizer._time_stretch_to_match(
         _tone(1.0),
@@ -398,7 +398,7 @@ def test_speech_rate_match_safely_moves_fast_tts_toward_source_rate():
 
 
 def test_speech_rate_match_safely_moves_slow_tts_toward_source_rate():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     stretched = synthesizer._time_stretch_to_match(
         _tone(2.0),
@@ -412,7 +412,7 @@ def test_speech_rate_match_safely_moves_slow_tts_toward_source_rate():
 
 
 def test_longer_replacement_is_not_forced_into_the_original_interval():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     stretched = synthesizer._time_stretch_to_match(
         _tone(2.0),
@@ -426,7 +426,7 @@ def test_longer_replacement_is_not_forced_into_the_original_interval():
 
 
 def test_latest_live_job_uses_aligned_span_without_hitting_slowdown_floor():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     text = "word " * 40
 
     stretched = synthesizer._time_stretch_to_match(
@@ -441,7 +441,7 @@ def test_latest_live_job_uses_aligned_span_without_hitting_slowdown_floor():
     assert abs(duration - 20.480) < 0.01
 
 def test_splice_never_searches_for_or_deletes_untouched_following_audio(monkeypatch):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     sample_rate = synthesizer.TARGET_SR
     original = _tone(3.0)
     replacement = _tone(1.0)
@@ -461,7 +461,7 @@ def test_splice_never_searches_for_or_deletes_untouched_following_audio(monkeypa
 
 
 def test_speech_rate_fallback_preserves_the_complete_source_span():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     reference = torch.cat(
         [
             torch.zeros((1, synthesizer.TARGET_SR)),
@@ -483,7 +483,7 @@ def test_speech_rate_fallback_preserves_the_complete_source_span():
 
 
 def test_speech_rate_match_bounds_extreme_tempo_changes():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     text = "one two three four"
 
     shortened = synthesizer._time_stretch_to_match(
@@ -506,7 +506,7 @@ def test_speech_rate_match_bounds_extreme_tempo_changes():
 
 
 def test_speech_rate_match_prefers_aligned_asr_rate_over_noisy_reference():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     stretched = synthesizer._time_stretch_to_match(
         _tone(2.0),
@@ -520,7 +520,7 @@ def test_speech_rate_match_prefers_aligned_asr_rate_over_noisy_reference():
 
 
 def test_speech_rate_match_failure_preserves_natural_tts_speed(monkeypatch):
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     def fail_time_stretch(*_args, **_kwargs):
         raise RuntimeError("test failure")
@@ -550,7 +550,7 @@ def test_speech_rate_match_failure_preserves_natural_tts_speed(monkeypatch):
 
 
 def test_speech_rate_match_without_aligned_text_keeps_natural_tts_speed():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     result = synthesizer._time_stretch_to_match(_tone(2.0), _tone(1.0))
 
@@ -558,7 +558,7 @@ def test_speech_rate_match_without_aligned_text_keeps_natural_tts_speed():
 
 
 def test_active_speech_duration_excludes_long_silence():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = torch.cat(
         [
             torch.zeros((1, synthesizer.TARGET_SR)),
@@ -574,7 +574,7 @@ def test_active_speech_duration_excludes_long_silence():
 
 
 def test_source_activity_detector_separates_speech_from_stationary_background():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     background = torch.full(
         (1, 10 * synthesizer.TARGET_SR),
         0.01,
@@ -594,7 +594,7 @@ def test_source_activity_detector_separates_speech_from_stationary_background():
 
 
 def test_source_activity_detector_rejects_uniform_background():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     background = torch.full(
         (1, 10 * synthesizer.TARGET_SR),
         0.01,
@@ -611,13 +611,13 @@ def test_source_activity_detector_rejects_uniform_background():
 
 
 def test_speech_units_ignore_pacing_control_tokens():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     assert synthesizer._speech_units("Hello [pause] there [speaking slowly].") == 2
 
 
 def test_preprocessor_does_not_force_a_pause_after_every_punctuation_mark():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     processed = asyncio.run(synthesizer._preprocess_for_s2("Hello, world. How are you?"))
 
@@ -625,7 +625,7 @@ def test_preprocessor_does_not_force_a_pause_after_every_punctuation_mark():
 
 
 def test_preprocessor_preserves_explicit_paragraph_pause():
-    synthesizer = SpeechSynthesizer()
+    synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
 
     processed = asyncio.run(synthesizer._preprocess_for_s2("First paragraph.\n\nSecond."))
 

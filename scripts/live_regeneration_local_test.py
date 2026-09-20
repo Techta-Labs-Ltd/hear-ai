@@ -9,7 +9,8 @@ import ray
 from ray import serve
 
 from hear.config import settings
-from hear.services.model_client import RayModelClient, set_model_client
+from hear.services.model_client import RayModelClient
+from hear.services.transcription.service import TranscriptionService
 from hear.services.reconstruction.synthesizer import SpeechSynthesizer
 
 AUDIO_ROOT = Path(settings.HEAR_TEMP_DIR)
@@ -71,13 +72,11 @@ async def run_test() -> None:
         transcription_handle = serve.get_deployment_handle(
             "transcription", app_name="hear"
         )
-        set_model_client(
-            RayModelClient({
+        model_client = RayModelClient({
                 "fish_speech": fish_handle,
                 "transcription": transcription_handle,
             })
-        )
-        synthesizer = SpeechSynthesizer()
+        synthesizer = SpeechSynthesizer(model_client, TranscriptionService(model_client))
         synthesizer.load()
         result = await synthesizer.reconstruct_segments(
             original_audio_path=str(INPUT),

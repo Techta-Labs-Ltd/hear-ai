@@ -100,16 +100,6 @@ class PipelineStub(object):
                 request_serializer=hear_dot_proto_dot_pipeline__pb2.DiscoveryRequest.SerializeToString,
                 response_deserializer=hear_dot_proto_dot_pipeline__pb2.ListDiscoveryReply.FromString,
                 _registered_method=True)
-        self.TrainCategorizer = channel.unary_unary(
-                '/hear.pipeline.v1.Pipeline/TrainCategorizer',
-                request_serializer=hear_dot_proto_dot_pipeline__pb2.TrainRequest.SerializeToString,
-                response_deserializer=hear_dot_proto_dot_pipeline__pb2.TrainReply.FromString,
-                _registered_method=True)
-        self.IngestCategoryEvent = channel.unary_unary(
-                '/hear.pipeline.v1.Pipeline/IngestCategoryEvent',
-                request_serializer=hear_dot_proto_dot_pipeline__pb2.CategoryEvent.SerializeToString,
-                response_deserializer=hear_dot_proto_dot_pipeline__pb2.IngestReply.FromString,
-                _registered_method=True)
         self.UpdatePlatformSettings = channel.unary_unary(
                 '/hear.pipeline.v1.Pipeline/UpdatePlatformSettings',
                 request_serializer=hear_dot_proto_dot_pipeline__pb2.PlatformSettingsRequest.SerializeToString,
@@ -203,18 +193,6 @@ class PipelineServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def TrainCategorizer(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def IngestCategoryEvent(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
     def UpdatePlatformSettings(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -294,16 +272,6 @@ def add_PipelineServicer_to_server(servicer, server):
                     servicer.ListDiscovery,
                     request_deserializer=hear_dot_proto_dot_pipeline__pb2.DiscoveryRequest.FromString,
                     response_serializer=hear_dot_proto_dot_pipeline__pb2.ListDiscoveryReply.SerializeToString,
-            ),
-            'TrainCategorizer': grpc.unary_unary_rpc_method_handler(
-                    servicer.TrainCategorizer,
-                    request_deserializer=hear_dot_proto_dot_pipeline__pb2.TrainRequest.FromString,
-                    response_serializer=hear_dot_proto_dot_pipeline__pb2.TrainReply.SerializeToString,
-            ),
-            'IngestCategoryEvent': grpc.unary_unary_rpc_method_handler(
-                    servicer.IngestCategoryEvent,
-                    request_deserializer=hear_dot_proto_dot_pipeline__pb2.CategoryEvent.FromString,
-                    response_serializer=hear_dot_proto_dot_pipeline__pb2.IngestReply.SerializeToString,
             ),
             'UpdatePlatformSettings': grpc.unary_unary_rpc_method_handler(
                     servicer.UpdatePlatformSettings,
@@ -667,60 +635,6 @@ class Pipeline(object):
             '/hear.pipeline.v1.Pipeline/ListDiscovery',
             hear_dot_proto_dot_pipeline__pb2.DiscoveryRequest.SerializeToString,
             hear_dot_proto_dot_pipeline__pb2.ListDiscoveryReply.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def TrainCategorizer(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/hear.pipeline.v1.Pipeline/TrainCategorizer',
-            hear_dot_proto_dot_pipeline__pb2.TrainRequest.SerializeToString,
-            hear_dot_proto_dot_pipeline__pb2.TrainReply.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def IngestCategoryEvent(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/hear.pipeline.v1.Pipeline/IngestCategoryEvent',
-            hear_dot_proto_dot_pipeline__pb2.CategoryEvent.SerializeToString,
-            hear_dot_proto_dot_pipeline__pb2.IngestReply.FromString,
             options,
             channel_credentials,
             insecure,

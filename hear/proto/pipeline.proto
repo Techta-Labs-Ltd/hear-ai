@@ -19,8 +19,6 @@ service Pipeline {
   rpc RollbackPreview (PreviewRequest) returns (RollbackPreviewReply);
   rpc GetPreview (PreviewRequest) returns (Preview);
   rpc ListDiscovery (DiscoveryRequest) returns (ListDiscoveryReply);
-  rpc TrainCategorizer (TrainRequest) returns (TrainReply);
-  rpc IngestCategoryEvent (CategoryEvent) returns (IngestReply);
   rpc UpdatePlatformSettings (PlatformSettingsRequest) returns (PlatformSettingsReply);
   rpc Health (google.protobuf.Empty) returns (HealthReply);
 }
@@ -93,9 +91,9 @@ message PipelineEvent {
   string current_stage = 7;
   string label = 8;
   string description = 9;
-  int32 progress_pct = 10;
-  float elapsed_seconds = 11;
-  float estimated_remaining = 12;
+  optional int32 progress_pct = 10;
+  optional float elapsed_seconds = 11;
+  optional float estimated_remaining = 12;
   string error = 13;
   google.protobuf.Struct result = 14;
   string backend_id = 15;
@@ -275,19 +273,6 @@ message DiscoveryRequest {
   int32 offset = 3;
 }
 
-message TrainRequest {
-  string target = 1;
-}
-
-message CategoryEvent {
-  string event_type = 1;
-  string text = 2;
-  optional string category = 3;
-  repeated string tags = 4;
-  optional string label = 5;
-  optional string source_id = 6;
-}
-
 message PlatformSettingsRequest {
   string blocked_keywords = 1;
   string auto_tag_keywords = 2;
@@ -403,16 +388,6 @@ message ListDiscoveryReply {
   repeated DiscoveryItem items = 5;
 }
 
-message TrainReply {
-  string status = 1;
-  string detail = 2;
-}
-
-message IngestReply {
-  string status = 1;
-  string example_id = 2;
-}
-
 message PlatformSettingsReply {
   string status = 1;
   int32 blocked_keywords_count = 2;
@@ -432,4 +407,10 @@ message HealthReply {
   GpuMemory gpu_memory = 4;
   int32 active_jobs = 5;
   int32 queued_jobs = 6;
+  bool control_ready = 7;
+  string service_epoch = 8;
+  google.protobuf.Struct capabilities = 9;
+  repeated string models_loaded = 10;
+  bool gpu_metrics_available = 11;
+  optional string error = 12;
 }

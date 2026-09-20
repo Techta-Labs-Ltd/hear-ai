@@ -7,7 +7,6 @@ import time
 import traceback
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from pathlib import Path
 
 import sentry_sdk
 from ray import serve
@@ -59,7 +58,6 @@ from hear.services.magic_clean.lineage import (
     resolve_magic_clean_lineage,
 )
 from hear.services.magic_clean.models import DEFAULT_STEM_LEVELS
-from hear.services.magic_clean.processing.validation import AudioValidationError
 from hear.services.model_client import RayModelClient, set_model_client
 from hear.services.moderation.service import ModerationService
 from hear.services.reconstruction.diff import (
@@ -77,25 +75,11 @@ os.environ["HF_DATASETS_OFFLINE"] = os.getenv("HF_DATASETS_OFFLINE", "0")
 
 logger = logging.getLogger(__name__)
 _recon_logger = logging.getLogger("reconstruct")
-_recon_logger.setLevel(logging.INFO)
-if not _recon_logger.handlers:
-    _recon_fh = logging.FileHandler("/workspace/hear-ai/logs/reconstruct.log")
-    _recon_fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-    _recon_logger.addHandler(_recon_fh)
-    _recon_logger.propagate = False
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-RECOVERY_RETRY_LIMIT_ERROR = "job_retry_limit_exhausted"
+RECOVERY_INTERRUPTED_ERROR = "service_restarted"
 RECONSTRUCTION_LINEAGE_JOB_TYPES = {"reconstruct", "edit_transcript"}
 MAX_RECONSTRUCTION_LINEAGE_DEPTH = 32
-NON_RETRYABLE_JOB_ERRORS = (
-    ValueError,
-    TypeError,
-    AttributeError,
-    StorageContextError,
-    AudioValidationError,
-)
-
 
 def _reconstruction_rebuilt_url(result_json: object) -> str:
     """Return the exact persisted rebuilt-track URL from a job result."""
@@ -309,10 +293,8 @@ class Orchestrator:
         self._fish_speech_handle = fish_speech_handle
         self._small_models_handle = small_models_handle
         self._magic_clean_handle = magic_clean_handle
-        self._transcriber = TranscriptionService()
         self._categorizer = CategorizationService()
         self._moderator = ModerationService()
-        self._synthesizer = SpeechSynthesizer()
 
         client = RayModelClient({
             "transcription": transcription_handle,
@@ -321,8 +303,10 @@ class Orchestrator:
             "small_models": small_models_handle,
         })
         set_model_client(client)
+        self._transcriber = TranscriptionService(client)
+        self._synthesizer = SpeechSynthesizer(client, self._transcriber)
 
-        self._event_queues: dict[str, asyncio.Queue] = {}
+        self._event_queues: dict[str, set[asyncio.Queue]] = {}
         self._job_stages: dict[str, str] = {}
         self._job_start_times: dict[str, float] = {}
         self._stage_times: dict[str, dict[str, float]] = {}
@@ -352,94 +336,88 @@ class Orchestrator:
         self._running = False
 
     def _push_event(self, job_id: str, event: dict):
-        queue = self._event_queues.get(job_id)
-        if queue:
-            try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
-        if event.get("event") in ("job_completed", "job_failed", "job_cancelled"):
-            self._event_queues.pop(job_id, None)
+        for queue in tuple(self._event_queues.get(job_id, ())):
+            if queue.full():
+                while not queue.empty():
+                    queue.get_nowait()
+                queue.put_nowait({
+                    "event": "stream_reset",
+                    "job_id": job_id,
+                    "error": "subscriber_overflow_reconnect_required",
+                })
+            else:
+                queue.put_nowait(event.copy())
+
+    def _subscription_snapshot(self, job_id: str) -> dict | None:
+        db = SessionLocal()
+        try:
+            job = db.query(AiJob).filter(AiJob.id == job_id).first()
+            if job is None:
+                return None
+            if (
+                job.status == "queued"
+                and job.job_type == "magic_clean"
+                and job.error == StorageCredentialsExpiringError.code
+            ):
+                return self._magic_clean_storage_refresh_event(
+                    job, previous_stage=job.current_stage
+                )
+            event = {
+                "event": f"job_{job.status}" if job.status in TERMINAL_STATUSES else "job_snapshot",
+                "job_id": job.id,
+                "run_id": job.run_id,
+                "backend_id": job.backend_id,
+                "track_id": job.track_id,
+                "job_type": job.job_type,
+                "status": job.status,
+                "current_stage": job.current_stage,
+                "error": job.error or "",
+            }
+            if job.status == "completed":
+                result = job.result_json or {}
+                event["result"] = result
+                if job.job_type == "audio_tag" and isinstance(result, dict):
+                    for key in ("tags", "categories", "media_file_id", "type"):
+                        if key in result:
+                            event[key] = result[key]
+            return event
+        finally:
+            db.close()
 
     async def subscribe(self, job_id: str):
-        # The job may already be terminal by the time a caller subscribes (it
-        # finished before the gRPC Subscribe call reached us, or the caller
-        # reconnected after the fact) -- in that case there's no live event
-        # queue to wait on, so serve the terminal event straight from the DB
-        # instead of hanging until the 120s heartbeat timeout.
-        if job_id not in self._event_queues:
-            db = SessionLocal()
-            try:
-                job = db.query(AiJob).filter(AiJob.id == job_id).first()
-                if job and job.status in TERMINAL_STATUSES:
-                    if job.status == "completed":
-                        result = job.result_json or {}
-                        event = {
-                            "event": "job_completed",
-                            "job_id": job.id,
-                            "run_id": job.run_id,
-                            "backend_id": job.backend_id,
-                            "track_id": job.track_id,
-                            "job_type": job.job_type,
-                            "status": "completed",
-                            "current_stage": None,
-                            "result": result,
-                        }
-                        if job.job_type == "audio_tag" and isinstance(result, dict):
-                            for key in ("tags", "categories", "media_file_id", "type"):
-                                if key in result:
-                                    event[key] = result[key]
-                        yield event
-                    elif job.status == "failed":
-                        yield {
-                            "event": "job_failed",
-                            "job_id": job.id,
-                            "run_id": job.run_id,
-                            "backend_id": job.backend_id,
-                            "track_id": job.track_id,
-                            "job_type": job.job_type,
-                            "status": job.status,
-                            "error": job.error or "",
-                        }
-                    else:
-                        yield {
-                            "event": "job_cancelled",
-                            "job_id": job.id,
-                            "run_id": job.run_id,
-                            "backend_id": job.backend_id,
-                            "track_id": job.track_id,
-                            "job_type": job.job_type,
-                            "status": "cancelled",
-                            "error": job.error or "",
-                        }
+        queue = asyncio.Queue(maxsize=256)
+        self._event_queues.setdefault(job_id, set()).add(queue)
+        terminal_events = {"job_completed", "job_failed", "job_cancelled"}
+        try:
+            snapshot = self._subscription_snapshot(job_id)
+            if snapshot is not None:
+                yield snapshot
+                if snapshot.get("event") in terminal_events:
                     return
-                if (
-                    job
-                    and job.status == "queued"
-                    and job.job_type == "magic_clean"
-                    and job.error == StorageCredentialsExpiringError.code
-                ):
-                    yield self._magic_clean_storage_refresh_event(
-                        job,
-                        previous_stage=job.current_stage,
-                    )
-            finally:
-                db.close()
-
-        queue = self._event_queues.setdefault(job_id, asyncio.Queue(maxsize=256))
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=120)
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=120)
+                except TimeoutError:
+                    snapshot = self._subscription_snapshot(job_id)
+                    if snapshot is not None and snapshot.get("event") in terminal_events:
+                        yield snapshot
+                        return
+                    yield {"event": "heartbeat", "job_id": job_id}
+                    continue
                 yield event
-                if event.get("event") in (
-                    "job_completed",
-                    "job_failed",
-                    "job_cancelled",
-                ):
+                if event.get("event") in terminal_events:
+                    return
+                if event.get("event") == "stream_reset":
+                    snapshot = self._subscription_snapshot(job_id)
+                    if snapshot is not None:
+                        yield snapshot
+                    return
+        finally:
+            subscribers = self._event_queues.get(job_id)
+            if subscribers is not None:
+                subscribers.discard(queue)
+                if not subscribers:
                     self._event_queues.pop(job_id, None)
-                    break
-            except TimeoutError:
-                yield {"event": "heartbeat", "job_id": job_id}
 
     async def get_stats(self) -> dict:
         fair = self._fair_scheduler.stats()
@@ -458,6 +436,12 @@ class Orchestrator:
     async def process(self, job_id: str, run_id: str):
         async with self._job_slots:
             await self._process(job_id, run_id)
+
+    @staticmethod
+    def _execution_lane(job_type: str) -> str:
+        if job_type in {"reconstruct", "edit_transcript"}:
+            return "reconstruction"
+        return job_type
 
     def _pending_job(self, job_id: str, run_id: str) -> PendingJob | None:
         db = SessionLocal()
@@ -485,6 +469,7 @@ class Orchestrator:
                 run_id=job.run_id,
                 user_id=user_id,
                 job_type=job.job_type or "pipeline",
+                lane=self._execution_lane(job.job_type or "pipeline"),
             )
         finally:
             db.close()
@@ -563,7 +548,6 @@ class Orchestrator:
         if pending is None or not self._fair_scheduler.enqueue(pending):
             return False
         self._scheduled_runs.add(key)
-        self._event_queues.setdefault(job_id, asyncio.Queue(maxsize=256))
         levels = self._magic_clean_levels_from_pending(pending)
         queued = self._fair_scheduler.queued_count
         queue_details = {
@@ -829,7 +813,7 @@ class Orchestrator:
         self._recovery_started = True
         db = SessionLocal()
         try:
-            exhausted_rows = (
+            interrupted_rows = (
                 db.query(
                     AiJob.id,
                     AiJob.run_id,
@@ -837,21 +821,18 @@ class Orchestrator:
                     AiJob.job_type,
                     AiJob.job_options,
                 )
-                .filter(
-                    AiJob.status.in_(["queued", "running"]),
-                    AiJob.attempts >= settings.JOB_MAX_RETRIES,
-                )
+                .filter(AiJob.status == "running")
                 .with_for_update()
                 .all()
             )
-            exhausted = 0
+            interrupted = 0
             recovered_at = datetime.now(UTC)
             exhausted_at = recovered_at.replace(tzinfo=None)
-            for row in exhausted_rows:
+            for row in interrupted_rows:
                 job_values = {
                     AiJob.status: "failed",
                     AiJob.current_stage: None,
-                    AiJob.error: RECOVERY_RETRY_LIMIT_ERROR,
+                    AiJob.error: RECOVERY_INTERRUPTED_ERROR,
                     AiJob.completed_at: exhausted_at,
                 }
                 recovery_options = self._magic_clean_recovery_options(
@@ -868,8 +849,7 @@ class Orchestrator:
                     .filter(
                         AiJob.id == row[0],
                         AiJob.run_id == row[1],
-                        AiJob.status.in_(("queued", "running")),
-                        AiJob.attempts >= settings.JOB_MAX_RETRIES,
+                        AiJob.status == "running",
                     )
                     .update(
                         job_values,
@@ -878,7 +858,7 @@ class Orchestrator:
                 )
                 if transitioned != 1:
                     continue
-                exhausted += 1
+                interrupted += 1
                 (
                     db.query(AiTrackJob)
                     .filter(
@@ -890,7 +870,7 @@ class Orchestrator:
                         {
                             AiTrackJob.status: "failed",
                             AiTrackJob.current_stage: None,
-                            AiTrackJob.error: RECOVERY_RETRY_LIMIT_ERROR,
+                            AiTrackJob.error: RECOVERY_INTERRUPTED_ERROR,
                             AiTrackJob.completed_at: exhausted_at,
                             AiTrackJob.updated_at: exhausted_at,
                         },
@@ -899,10 +879,7 @@ class Orchestrator:
                 )
             rows = (
                 db.query(AiJob.id, AiJob.run_id, AiJob.created_at)
-                .filter(
-                    AiJob.status.in_(["queued", "running"]),
-                    AiJob.attempts < settings.JOB_MAX_RETRIES,
-                )
+                .filter(AiJob.status == "queued")
                 .order_by(AiJob.created_at.asc())
                 .with_for_update()
                 .all()
@@ -914,24 +891,23 @@ class Orchestrator:
                     .filter(
                         AiJob.id == row[0],
                         AiJob.run_id == row[1],
-                        AiJob.status.in_(("queued", "running")),
-                        AiJob.attempts < settings.JOB_MAX_RETRIES,
+                        AiJob.status == "queued",
                     )
                     .update(
-                        {AiJob.status: "queued", AiJob.current_stage: None},
+                        {AiJob.current_stage: None},
                         synchronize_session=False,
                     )
                 )
                 if updated == 1:
                     recovered.append(row)
-            if exhausted or recovered:
+            if interrupted or recovered:
                 await commit_with_retry(db)
             for row in recovered:
                 self._schedule_job(row[0], row[1])
-            if exhausted or recovered:
+            if interrupted or recovered:
                 print(
                     "[ORCHESTRATOR] Recovery complete | "
-                    f"requeued={len(recovered)} exhausted={exhausted}"
+                    f"requeued={len(recovered)} interrupted={interrupted}"
                 )
         finally:
             db.close()
@@ -944,10 +920,7 @@ class Orchestrator:
             try:
                 rows = (
                     db.query(AiJob.id, AiJob.run_id)
-                    .filter(
-                        AiJob.status == "queued",
-                        AiJob.attempts < settings.JOB_MAX_RETRIES,
-                    )
+                    .filter(AiJob.status == "queued")
                     .order_by(AiJob.created_at.asc())
                     .all()
                 )
@@ -972,7 +945,6 @@ class Orchestrator:
                     AiJob.id == job_id,
                     AiJob.run_id == run_id,
                     AiJob.status == "queued",
-                    AiJob.attempts < settings.JOB_MAX_RETRIES,
                 )
                 .with_for_update()
                 .first()
@@ -1071,7 +1043,6 @@ class Orchestrator:
                     )
                     .first()
                 )
-                non_retryable = isinstance(e, NON_RETRYABLE_JOB_ERRORS)
                 sanitized_error = self._sanitize_error(e)
                 failed_stage = job.current_stage or (
                     track_job.current_stage if track_job else None
@@ -1080,69 +1051,8 @@ class Orchestrator:
                     "stage": failed_stage,
                     "error": sanitized_error,
                     "attempt": job.attempts,
-                    "retryable": not non_retryable,
+                    "retryable": False,
                 }
-                if not non_retryable and job.attempts < settings.JOB_MAX_RETRIES:
-                    transitioned = (
-                        fail_db.query(AiJob)
-                        .filter(
-                            AiJob.id == job.id,
-                            AiJob.run_id == run_id,
-                            AiJob.status.in_(("queued", "running")),
-                        )
-                        .update(
-                            {
-                                AiJob.status: "queued",
-                                AiJob.current_stage: None,
-                                AiJob.error: sanitized_error,
-                            },
-                            synchronize_session=False,
-                        )
-                    )
-                    if transitioned != 1:
-                        fail_db.rollback()
-                        return
-                    if track_job:
-                        track_transitioned = (
-                            fail_db.query(AiTrackJob)
-                            .filter(
-                                AiTrackJob.id == track_job.id,
-                                AiTrackJob.job_id == job.id,
-                                AiTrackJob.run_id == run_id,
-                                AiTrackJob.status.in_(("queued", "running")),
-                            )
-                            .update(
-                                {
-                                    AiTrackJob.status: "queued",
-                                    AiTrackJob.current_stage: None,
-                                    AiTrackJob.error: sanitized_error,
-                                    AiTrackJob.attempts: AiTrackJob.attempts + 1,
-                                    AiTrackJob.updated_at: datetime.utcnow(),
-                                },
-                                synchronize_session=False,
-                            )
-                        )
-                        if track_transitioned != 1:
-                            fail_db.rollback()
-                            return
-                    await commit_with_retry(fail_db)
-                    self._push_event(job.id, {
-                        "event": "job_retrying",
-                        "job_id": job.id,
-                        "run_id": job.run_id,
-                        "track_id": job.track_id,
-                        "job_type": job.job_type,
-                        "status": "queued",
-                        "current_stage": failed_stage,
-                        "label": "Stage failed; retrying",
-                        "description": sanitized_error,
-                        "progress_pct": 0,
-                        "result": {"report": failure_report},
-                    })
-                    asyncio.create_task(
-                        self._retry_after(job.id, job.run_id, 15 * job.attempts)
-                    )
-                    return
                 now = datetime.utcnow()
                 transitioned = (
                     fail_db.query(AiJob)
@@ -1216,10 +1126,6 @@ class Orchestrator:
                 self._push_event(failed_sse["job_id"], failed_sse)
             if active:
                 self._active_count -= 1
-
-    async def _retry_after(self, job_id: str, run_id: str, delay_seconds: int) -> None:
-        await asyncio.sleep(min(max(delay_seconds, 1), 60))
-        self._schedule_job(job_id, run_id)
 
     @staticmethod
     def _track_from_job(job: AiJob) -> TrackData:
@@ -1771,10 +1677,11 @@ class Orchestrator:
                 run_id=job.run_id,
                 track_id=track.track_id,
                 purpose="discovery_source",
+                convert_to_wav=True,
+                preserve_channels=True,
             )
-            audio_bytes = await asyncio.to_thread(Path(audio_path).read_bytes)
-            transcript_data = await self._transcriber.transcribe(
-                audio_bytes,
+            transcript_data = await self._transcriber.transcribe_file(
+                audio_path,
                 job_id=job.id,
                 run_id=job.run_id,
                 track_id=track.track_id,
@@ -1841,10 +1748,11 @@ class Orchestrator:
                 track.audio_url, suffix=".wav", db=db,
                 job_id=job.id, run_id=job.run_id, track_id=track.track_id,
                 purpose="pipeline_source",
+                convert_to_wav=True,
+                preserve_channels=True,
             )
-            audio_bytes = await asyncio.to_thread(Path(tmp_path).read_bytes)
-            transcript_data = await self._transcriber.transcribe(
-                audio_bytes, job_id=job.id, run_id=job.run_id,
+            transcript_data = await self._transcriber.transcribe_file(
+                tmp_path, job_id=job.id, run_id=job.run_id,
                 track_id=track.track_id, short_utterance=True,
             )
             transcript_text = self._coerce_transcript_text(
@@ -1873,10 +1781,11 @@ class Orchestrator:
                     (job.input_url or track.audio_url), suffix=".wav", db=db,
                     job_id=job.id, run_id=job.run_id, track_id=track.track_id,
                     purpose="pipeline_source",
+                    convert_to_wav=True,
+                    preserve_channels=True,
                 )
-                audio_bytes = await asyncio.to_thread(Path(tmp_path).read_bytes)
-                transcript_data = await self._transcriber.transcribe(
-                    audio_bytes, job_id=job.id, run_id=job.run_id,
+                transcript_data = await self._transcriber.transcribe_file(
+                    tmp_path, job_id=job.id, run_id=job.run_id,
                     track_id=track.track_id,
                 )
                 transcript_text = self._coerce_transcript_text(
@@ -3100,6 +3009,7 @@ class Orchestrator:
             return
 
     async def _process_edit_transcript(self, job: AiJob, track_job: AiTrackJob, db):
+        _, same_speaker = self._coerce_reconstruct_payload(job.custom_tags or {})
         track = self._track_from_job(job)
         submitted_audio_url = str(
             job.input_url or track.audio_url or ""
@@ -3114,9 +3024,8 @@ class Orchestrator:
             purpose="edit_transcript_source",
             convert_to_wav=True,
         )
-        audio_bytes = await asyncio.to_thread(Path(audio_path).read_bytes)
-        transcript_data = await self._transcriber.transcribe(
-            audio_bytes, job_id=job.id, run_id=job.run_id, track_id=track.track_id,
+        transcript_data = await self._transcriber.transcribe_file(
+            audio_path, job_id=job.id, run_id=job.run_id, track_id=track.track_id,
         )
         original_text = self._coerce_transcript_text(
             (transcript_data or {}).get("transcript", "")
@@ -3145,11 +3054,11 @@ class Orchestrator:
         if not await self._set_stage(db, job, track_job, "reconstructing"):
             return
         rebuilt = await self._synthesizer.reconstruct_segments(
-            voice_reference_audio_path=reconstruction_audio_path,
+            voice_reference_audio_path=reconstruction_audio_path if same_speaker else None,
             original_audio_path=reconstruction_audio_path,
             changes=changes,
             storage=storage_for_job(job),
-            same_speaker=True,
+            same_speaker=same_speaker,
             job_id=job.id, run_id=job.run_id, track_id=track.track_id,
         )
         result = {

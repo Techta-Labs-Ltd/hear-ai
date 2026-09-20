@@ -44,7 +44,11 @@ def validate_runtime(settings: Settings) -> None:
     """Fail before Ray starts when the immutable runtime is incomplete."""
 
     errors: list[str] = []
-    missing_modules = _missing_modules(REQUIRED_MODULES)
+    required_modules = tuple(
+        name for name in REQUIRED_MODULES
+        if name != "fish_speech" or settings.FISH_SPEECH_TTS_ENABLED
+    )
+    missing_modules = _missing_modules(required_modules)
     if missing_modules:
         errors.append("missing Python modules: " + ", ".join(missing_modules))
 
@@ -122,16 +126,20 @@ def validate_runtime(settings: Settings) -> None:
     configured_directories = {
         "QWEN_ASR_MODEL_PATH": settings.QWEN_ASR_MODEL_PATH,
         "ALIGNER_MODEL_PATH": settings.ALIGNER_MODEL_PATH,
-        "LLM_MODEL_PATH": settings.LLM_MODEL_PATH,
         "TOXIC_MODEL_PATH": settings.TOXIC_MODEL_PATH,
         "SENTIMENT_MODEL_PATH": settings.SENTIMENT_MODEL_PATH,
         "NLI_MODEL_PATH": settings.NLI_MODEL_PATH,
-        "FISH_SPEECH_HOME": settings.FISH_SPEECH_HOME,
-        "FISH_SPEECH_CHECKPOINT_PATH": settings.FISH_SPEECH_CHECKPOINT_PATH,
         "MOSSFORMER_MODEL_PATH": settings.MOSSFORMER_MODEL_PATH,
         "DEMUCS_MODEL_PATH": settings.DEMUCS_MODEL_PATH,
         "MODEL_CACHE_DIR": settings.MODEL_CACHE_DIR,
     }
+    if settings.QWEN_LLM_ENABLED:
+        configured_directories["LLM_MODEL_PATH"] = settings.LLM_MODEL_PATH
+    if settings.FISH_SPEECH_TTS_ENABLED:
+        configured_directories.update({
+            "FISH_SPEECH_HOME": settings.FISH_SPEECH_HOME,
+            "FISH_SPEECH_CHECKPOINT_PATH": settings.FISH_SPEECH_CHECKPOINT_PATH,
+        })
     for variable, raw_path in configured_directories.items():
         if not raw_path:
             errors.append(f"{variable} must be configured")
@@ -181,14 +189,14 @@ def validate_runtime(settings: Settings) -> None:
             )
 
     fish_checkpoint = Path(settings.FISH_SPEECH_CHECKPOINT_PATH)
-    codec = fish_checkpoint / "codec.pth"
-    if not codec.is_file():
+    codec = Path(settings.FISH_SPEECH_CODEC_PATH)
+    if settings.FISH_SPEECH_TTS_ENABLED and not codec.is_file():
         errors.append(f"missing Fish Speech checkpoint: {codec}")
     model_files = (
         fish_checkpoint / "model.safetensors",
         fish_checkpoint / "model.safetensors.index.json",
     )
-    if not any(path.is_file() for path in model_files):
+    if settings.FISH_SPEECH_TTS_ENABLED and not any(path.is_file() for path in model_files):
         errors.append(
             "missing Fish Speech model: expected a single or sharded safetensors checkpoint"
         )
@@ -240,14 +248,15 @@ def run(settings: Settings) -> None:
             },
         )
         serve.run(
-            build_application(),
+            build_application(settings),
             blocking=True,
             name=settings.GRPC_APPLICATION_NAME,
             route_prefix="/",
         )
     finally:
         if owns_ray:
-            serve.shutdown()
+            if settings.RAY_ADDRESS == "local":
+                serve.shutdown()
             ray.shutdown()
 
 

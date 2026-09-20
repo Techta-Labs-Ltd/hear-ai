@@ -1,13 +1,8 @@
 import asyncio
 import logging
 import re
-import warnings
 from collections import Counter, defaultdict
 
-from transformers import logging as hf_logging
-
-hf_logging.set_verbosity_error()
-warnings.filterwarnings("ignore", category=FutureWarning, message=".*clean_up_tokenization_spaces.*")
 from hear.core.category_loader import (
     _taxonomy_path_to_tag,
     category_loader,
@@ -20,10 +15,8 @@ from hear.core.content_context import (
 )
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.core.platform_settings import fetch_platform_settings
-from hear.models.database import CategoryTrainingExample, SessionLocal
 from hear.services.llm import get_llm_service
 from hear.services.model_client import get_model_client
-from hear.training import categorizer_infer
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +163,6 @@ class CategorizationService:
             if c not in new_categories_added:
                 new_categories_added.append(c)
 
-        self._log_auto_example(transcript, merged["categories"], merged["tags"])
         return {
             "tags": merged["tags"],
             "categories": merged["categories"],
@@ -183,67 +175,6 @@ class CategorizationService:
             "categorizer_mode": "nli",
         }
 
-    def _log_auto_example(self, transcript: str, categories: list[str], tags: list[str]) -> None:
-        """Every real categorize() call becomes a weakly-labeled training example,
-        distinct from higher-trust backend-verified webhook examples (source=.grpc.)."""
-        if not transcript or not transcript.strip():
-            return
-        db = SessionLocal()
-        try:
-            for cat in (categories or [None]):
-                db.add(CategoryTrainingExample(
-                    source="auto_categorized",
-                    event_type="categorized",
-                    text=transcript[:4000],
-                    category=cat,
-                    tags=tags or [],
-                    label=None,
-                    raw_payload=None,
-                ))
-            db.commit()
-        except Exception:
-            logger.warning("[CATEGORIZER] failed to log auto training example", exc_info=True)
-            db.rollback()
-        finally:
-            db.close()
-
-    def _log_keyword_examples(self, keywords: list[str], label: str) -> None:
-        if not keywords:
-            return
-        db = SessionLocal()
-        try:
-            for kw in keywords:
-                db.add(CategoryTrainingExample(
-                    source="auto_categorized",
-                    event_type=f"keyword_{label}",
-                    text=kw,
-                    category=None,
-                    tags=[kw],
-                    label=label,
-                    raw_payload=None,
-                ))
-            db.commit()
-        except Exception:
-            logger.warning("[CATEGORIZER] failed to log keyword training example", exc_info=True)
-            db.rollback()
-        finally:
-            db.close()
-
-    def _trained_model_fallback(self, target: str, transcript: str, limit: int) -> list[str]:
-        """Predictions from the Ray Train checkpoint (app/training/categorizer_train.py).
-        Used two ways: as a hint fed into the Qwen prompt on every call, and as a
-        last-resort answer when the keyword/NLI/Qwen pipeline found nothing. A no-op
-        returning [] until a checkpoint has been trained via POST /api/v1/admin/train-categorizer."""
-        if not transcript:
-            return []
-        scores = categorizer_infer.predict(target, transcript)
-        if not scores:
-            return []
-        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        picked = [label for label, score in ranked if score >= 0.3][:limit]
-        if picked:
-            logger.info("[CATEGORIZER] trained_model_fallback target=%s picked=%s", target, picked)
-        return picked
 
     # ------------------------------------------------------------------
     # Multi-track
@@ -465,7 +396,6 @@ class CategorizationService:
         max_categories: int = 3,
     ) -> dict | None:
         taxonomy_paths = list(discovery_taxonomy_loader.data.paths)
-        trained_model_hints: dict[str, list[str]] = {}
         llm_result = await loop.run_in_executor(
             None,
             lambda: get_llm_service().categorize(
@@ -476,7 +406,6 @@ class CategorizationService:
                 max_categories=max_categories,
                 nli_top_categories=nli_top,
                 taxonomy_paths=taxonomy_paths,
-                trained_model_hints=trained_model_hints,
             ),
         )
         tags, categories, new_tags_added, new_categories_added = (
@@ -490,10 +419,6 @@ class CategorizationService:
             tags, categories, zero_shot_scores, layer1_scores,
             max_tags=max_tags, max_categories=max_categories,
         )
-        if not categories:
-            categories = self._trained_model_fallback("category", transcript, max_categories)
-        if not tags:
-            tags = self._trained_model_fallback("tags", transcript, max_tags)
         tags, categories = self._apply_editorial_rules(
             transcript, tags, categories, max_tags
         )
@@ -513,7 +438,6 @@ class CategorizationService:
             if c not in new_categories_added:
                 new_categories_added.append(c)
         confidence_scores = {t: 0.9 for t in tags}
-        self._log_auto_example(transcript, categories, tags)
         return {
             "tags": tags,
             "categories": categories,
@@ -713,7 +637,6 @@ class CategorizationService:
         flagged = [kw for kw, score in scores.items() if score >= 0.5]
         if not flagged:
             return tags, categories, False
-        self._log_keyword_examples(flagged, label="blocked")
         flagged_lower = [f.lower() for f in flagged]
         kept_tags = [t for t in tags if not any(bk in t.lower() for bk in flagged_lower)]
         kept_cats = [c for c in categories if not any(bk in c.lower() for bk in flagged_lower)]
@@ -727,9 +650,6 @@ class CategorizationService:
         category_tags = [t for t in category_tags if t]
         if category_tags:
             return self._normalize_tags(category_tags)[:max_tags]
-        trained = self._trained_model_fallback("tags", transcript, max_tags)
-        if trained:
-            return self._normalize_tags(trained)[:max_tags]
         words = [w for w in re.findall(r"[a-zA-Z]{4,}", transcript.lower()) if w not in _STOPWORDS]
         if words:
             return self._normalize_tags([words[0]])[:max_tags]
@@ -834,8 +754,6 @@ class CategorizationService:
             if cat not in cats:
                 cats.insert(0, cat)
 
-        if not cats:
-            cats = self._trained_model_fallback("category", transcript, max_categories)
 
         return cats[:max_categories]
 

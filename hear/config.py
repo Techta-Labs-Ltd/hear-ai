@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -14,19 +15,6 @@ class Settings(BaseSettings):
     GRPC_APPLICATION_NAME: str = "hear"
     GATEWAY_REPLICA_COUNT: int = 2
     LOG_LEVEL: str = "INFO"
-    RESOLVER_CDN_BASE_URL: str = "https://media.hear.surf/runtime/taxonomy"
-    RESOLVER_THRESHOLD_HIGH: float = 85.0
-    RESOLVER_CACHE_NAMESPACE: str = "hear:resolver:"
-    RESOLVER_CACHE_TTL_UTTERANCE: int = 300
-    RESOLVER_CACHE_TTL_ENTITY: int = 600
-    RESOLVER_SEMANTIC_ENABLED: bool = True
-    RESOLVER_SEMANTIC_MODEL: str = ""
-    RESOLVER_SEMANTIC_DEVICE: str = "auto"
-    RESOLVER_SEMANTIC_THRESHOLD: float = 0.55
-    RESOLVER_GPU_MEM_FRACTION: float = 0.03
-    RESOLVER_NUM_GPUS: float = 0.01
-    RESOLVER_REPLICA_COUNT: int = 3
-    RESOLVER_VERSION_SYNC_SECONDS: float = 5.0
     BACKEND_REGISTRY_JSON: str = ""
     STORAGE_CONTEXT_ENCRYPTION_KEY: str = ""
     WHISPER_BATCH_SIZE: int = 36
@@ -38,7 +26,6 @@ class Settings(BaseSettings):
     QWEN_ASR_DTYPE: str = "bfloat16"
     QWEN_ASR_DEVICE_MAP: str = "cuda:0"
     QWEN_LLM_ENABLED: bool = False
-    JOB_MAX_RETRIES: int = 3
     ORCHESTRATOR_MAX_CONCURRENT_JOBS: int = 8
     ORCHESTRATOR_MAX_CONCURRENT_JOBS_PER_USER: int = 3
     MAGIC_CLEAN_REPLICA_COUNT: int = 1
@@ -58,8 +45,7 @@ class Settings(BaseSettings):
         "categorization": 6,
         "magic_clean": 1,
         "rebuild": 2,
-        "reconstruct": 2,
-        "edit_transcript": 2,
+        "reconstruction": 1,
         "discovery": 4,
     }
     ORCHESTRATOR_RECOVERY_SECONDS: float = 15.0
@@ -80,7 +66,9 @@ class Settings(BaseSettings):
     HEAR_TEMP_DIR: str = str(PROJECT_ROOT / "audio")
     AUDIO_CLEANUP_INTERVAL_SECONDS: float = 300.0
     AUDIO_MAX_AGE_SECONDS: float = 24 * 60 * 60
-    TRAINING_CHECKPOINT_DIR: str = "/workspace/checkpoints"
+    AUDIO_DOWNLOAD_MAX_BYTES: int = Field(default=4 * 1024**3, gt=0)
+    AUDIO_DOWNLOAD_READ_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0, allow_inf_nan=False)
+    AUDIO_DECODE_TIMEOUT_SECONDS: float = Field(default=1200.0, gt=0, allow_inf_nan=False)
     MODEL_CACHE_DIR: str = "/workspace/models"
     QWEN_ASR_MODEL_PATH: str = "/workspace/models/qwen3-asr-1.7b"
     ALIGNER_MODEL_PATH: str = "/workspace/models/qwen3-forced-aligner"
@@ -92,7 +80,6 @@ class Settings(BaseSettings):
     DEMUCS_MODEL: str = "htdemucs"
     DEMUCS_MODEL_PATH: str = "/workspace/models/demucs"
 
-    MODERATION_AUTO_LEARN: bool = False
     FISH_SPEECH_TTS_ENABLED: bool = True
     FISH_SPEECH_HOME: str = "/workspace/fish-speech"
     FISH_SPEECH_CHECKPOINT_PATH: str = "/workspace/models/fish-speech/s2-pro"

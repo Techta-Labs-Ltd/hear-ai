@@ -86,7 +86,7 @@ def _validate_magic_clean_storage_ttl(storage: StorageContext) -> None:
         required_storage_ttl = (
             settings.MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS
         )
-        raise ValueError(
+        raise StorageCredentialsExpiringError(
             "magic_clean storage credentials must remain valid for at least "
             f"{required_storage_ttl:g} seconds"
         )

@@ -10,6 +10,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from hear.core.downloader import download_audio
+from hear.services.registry import transcriber
+
 
 async def main():
     audio_url = sys.argv[1] if len(sys.argv) > 1 else None
@@ -19,10 +22,6 @@ async def main():
 
     print(f"Audio URL: {audio_url[:100]}...")
     print()
-
-    # Import services
-    from hear.services.registry import transcriber
-    from hear.core.downloader import download_audio
 
     # Download
     print("Downloading audio...")

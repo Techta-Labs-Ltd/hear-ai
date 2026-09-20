@@ -9,6 +9,7 @@ import pytest
 
 from hear.config import settings
 from hear.core.backend_registry import backend_registry
+from hear.core.storage import StorageCredentialsExpiringError
 from hear.models.database import AiJob
 from hear.models.schemas import PipelineRequest as RequestModel
 from hear.models.schemas import SegmentChange
@@ -224,7 +225,7 @@ def test_magic_clean_requires_cleanup_safe_storage_credential_lifetime():
     assert ordinary["job_type"] == "pipeline"
     required_ttl = settings.MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS
     with pytest.raises(
-        ValueError,
+        StorageCredentialsExpiringError,
         match=rf"remain valid for at least {required_ttl:g} seconds",
     ):
         normalize_request(
@@ -565,7 +566,7 @@ def test_terminal_magic_clean_rejects_short_cleanup_credential_renewal(monkeypat
         lambda _token, **_kwargs: original_request.storage,
     )
 
-    with pytest.raises(ValueError, match="must remain valid"):
+    with pytest.raises(StorageCredentialsExpiringError, match="must remain valid"):
         asyncio.run(JobSubmissionService(orchestrator).submit(refreshed_request))
 
     assert job.storage_context_encrypted == "encrypted-original-context"
@@ -649,7 +650,7 @@ def test_new_magic_clean_with_short_credentials_rolls_back_before_commit(
         lambda _storage: "encrypted-short-lived-context",
     )
 
-    with pytest.raises(ValueError, match="must remain valid"):
+    with pytest.raises(StorageCredentialsExpiringError, match="must remain valid"):
         asyncio.run(JobSubmissionService(SimpleNamespace()).submit(request))
 
     assert db.operations == ["execute"]
@@ -865,7 +866,7 @@ def test_magic_clean_rejects_unsafe_nonterminal_credential_refresh(monkeypatch):
         lambda _token, **_kwargs: original_request.storage,
     )
 
-    with pytest.raises(ValueError, match="must remain valid"):
+    with pytest.raises(StorageCredentialsExpiringError, match="must remain valid"):
         asyncio.run(
             JobSubmissionService(orchestrator).submit(short_lived_request)
         )

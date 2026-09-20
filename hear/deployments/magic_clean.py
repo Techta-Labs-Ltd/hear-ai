@@ -21,6 +21,7 @@ from hear.services.magic_clean.service import MagicCleanAudioEnhancer
         "downscale_delay_s": settings.GPU_ON_DEMAND_IDLE_SECONDS,
     },
     max_ongoing_requests=1,
+    max_queued_requests=4,
     health_check_period_s=10,
     health_check_timeout_s=300,
 )

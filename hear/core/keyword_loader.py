@@ -44,17 +44,6 @@ class HarmKeywordLoader:
         with self._lock:
             return list(self._harm_keywords) + list(self._platform_keywords)
 
-    def add_harm_keyword(self, keyword: str):
-        kw = keyword.strip().lower()
-        if not kw:
-            return
-        with self._lock:
-            if kw in self._harm_keywords:
-                return
-        self._persist(kw, "harm")
-        with self._lock:
-            self._harm_keywords.append(kw)
-
     def sync_platform_keywords(self, keywords: list[str]):
         normalized = [k.strip().lower() for k in keywords if k.strip()]
         db = SessionLocal()
@@ -67,16 +56,6 @@ class HarmKeywordLoader:
             db.close()
         with self._lock:
             self._platform_keywords = normalized
-
-    def _persist(self, keyword: str, kind: str):
-        db = SessionLocal()
-        try:
-            exists = db.query(HarmKeyword).filter(HarmKeyword.keyword == keyword, HarmKeyword.kind == kind).first()
-            if not exists:
-                db.add(HarmKeyword(keyword=keyword, kind=kind))
-                db.commit()
-        finally:
-            db.close()
 
 
 harm_keyword_loader = HarmKeywordLoader()

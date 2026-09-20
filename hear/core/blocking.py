@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from concurrent.futures import Executor, ThreadPoolExecutor
+from functools import partial
 
 
 async def run_blocking_to_completion[T](
     function: Callable[[], T],
     *,
     on_cancel: Callable[[], object] | None = None,
+    executor: Executor | None = None,
 ) -> T:
     """Wait for a blocking worker to stop before propagating cancellation.
 
@@ -17,7 +20,7 @@ async def run_blocking_to_completion[T](
     artifact. Returning control while that writer is still active lets cleanup
     race the write, so cancellation is deferred until the worker has stopped.
     """
-    future = asyncio.get_running_loop().run_in_executor(None, function)
+    future = asyncio.get_running_loop().run_in_executor(executor, function)
     cancellation: asyncio.CancelledError | None = None
     while True:
         try:
@@ -51,6 +54,30 @@ async def run_blocking_to_completion[T](
         if cancellation is not None:
             raise cancellation
         return result
+
+
+class NativeWorker:
+    def __init__(self, name: str):
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=name)
+        self._slot = asyncio.Lock()
+        self._closed = False
+
+    async def run(self, function, *args, **kwargs):
+        async with self._slot:
+            if self._closed:
+                raise RuntimeError("native_worker_closed")
+            return await run_blocking_to_completion(
+                partial(function, *args, **kwargs), executor=self._executor
+            )
+
+    async def close(self):
+        self._closed = True
+        async with self._slot:
+            self.shutdown()
+
+    def shutdown(self):
+        self._closed = True
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
 
 async def run_awaitable_to_completion[T](

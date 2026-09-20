@@ -28,7 +28,7 @@ from hear.services.magic_clean.models import (
 from hear.services.magic_clean.pipeline import MagicCleanPipeline
 from hear.services.magic_clean.processing.dynamics import DynamicsProcessor
 from hear.services.magic_clean.processing.mossformer import MossFormer2Enhancer
-from hear.services.magic_clean.processing.noise import NoiseReducer
+from hear.core.noise import NoiseReducer
 from hear.services.magic_clean.processing.quality import QualityMetrics
 from hear.services.magic_clean.processing.silence import SilenceProcessor
 from hear.services.magic_clean.processing.speech import SpeechProcessor

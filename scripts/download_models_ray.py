@@ -17,7 +17,6 @@ MODEL_MANIFEST = {
         "cardiffnlp/twitter-roberta-base-sentiment-latest"
     ),
     "nli-distilroberta": "cross-encoder/nli-distilroberta-base",
-    "all-minilm-l6-v2": "sentence-transformers/all-MiniLM-L6-v2",
     "fish-speech/s2-pro": "fishaudio/s2-pro",
     "mossformer2-se-48k": "alibabasglab/MossFormer2_SE_48K",
 }

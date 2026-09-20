@@ -4,7 +4,7 @@
 **Scope:** production entry point, Ray Serve application graph, HTTP/gRPC
 transport, authentication and authorization, PostgreSQL job state, scheduling,
 audio acquisition and delivery, model deployments, reconstruction, Magic
-Clean, resolver wiring, observability, tests, and engineering quality.
+Clean, observability, tests, and engineering quality.
 
 ## Executive summary
 
@@ -18,7 +18,7 @@ The system nevertheless has several production-readiness blockers. The most
 important are:
 
 1. Discovery results are not filtered by authenticated backend.
-2. Any authenticated backend can invoke global training and settings mutations.
+2. Any authenticated backend can invoke global settings mutations.
 3. User-supplied audio URLs lack SSRF protection, byte/duration limits, and a
    finite read deadline.
 4. Readiness does not verify PostgreSQL or required model deployments.
@@ -28,8 +28,6 @@ important are:
 8. Several job stage streams contradict their declared contracts.
 9. Static analysis is not clean: Ruff reports 771 violations and Mypy reports
    153 errors in 22 source files.
-10. The resolver deployment exists in source but is not wired into the
-    production application or gRPC server.
 
 The configured non-live test suite passes, but it does not exercise a real Ray
 cluster, PostgreSQL recovery, object storage, GPU inference, cancellation during
@@ -48,7 +46,7 @@ The review traced repository behavior from these sources:
 - `hear/models/database.py` and `hear/core/db_gate.py`
 - `hear/core/backend_registry.py`, `storage.py`, `downloader.py`, and
   `hear_temp.py`
-- model, transcription, Magic Clean, reconstruction, resolver, and training
+- model, transcription, Magic Clean, reconstruction
   services
 - protobuf contracts and the configured tests
 
@@ -146,28 +144,27 @@ guarantee documented for gRPC traffic.
 
 **Evidence**
 
-`TrainCategorizer`, `IngestCategoryEvent`, and `UpdatePlatformSettings` use the
+`UpdatePlatformSettings` uses the
 same service-key authentication as ordinary job consumers. The registry stores
 identity and storage allow-lists but no roles or capabilities.
 
 **Impact**
 
 Any backend credential can mutate global moderation keywords, global auto-tag
-behavior, training data, and model-training state. A compromised ordinary
+behavior. A compromised ordinary
 backend key becomes a control-plane credential.
 
 **Required change**
 
 - Add explicit backend capabilities, for example:
-  `jobs.submit`, `jobs.read`, `discovery.read`, `training.ingest`,
-  `training.run`, and `platform.settings.write`.
+  `jobs.submit`, `jobs.read`, `discovery.read`, and `platform.settings.write`.
 - Default registrations to least privilege.
 - Require the relevant capability before invoking an operation.
 - Separate service identities for control-plane automation and customer/backend
   job traffic.
 - Write an audit record containing actor backend, operation, timestamp, request
   fingerprint, and result. Never store secrets or full sensitive content.
-- Add rate limits and concurrency limits for training operations.
+- Add rate limits and concurrency limits for settings mutations.
 
 **Acceptance criteria**
 
@@ -236,7 +233,7 @@ job-type capability.
 - Make readiness verify PostgreSQL with a bounded query, orchestrator response,
   schema version, and required deployment health.
 - Report per-capability readiness: transcription, Magic Clean, regeneration,
-  categorization, resolver, storage/temp capacity.
+  categorization, storage/temp capacity.
 - Reject only affected job types when an optional capability is unavailable.
 - Include stable machine-readable failure codes but not paths containing
   secrets or infrastructure credentials.
@@ -494,7 +491,7 @@ are unconstrained strings.
 - Make ownership and required identities non-null.
 - Use timezone-aware UTC columns and values.
 - Constrain status/job type or validate them in a single domain layer.
-- Add retention policies for jobs, events, previews, and training examples.
+- Add retention policies for jobs, events, and previews.
 
 ### SYS-013: intermediate event history is not durable
 
@@ -530,26 +527,6 @@ capacity.
 - Traces spanning HTTP submission, durable claim, model calls, upload, and gRPC
   result recovery.
 - Alerts tied to user impact and per-job-type readiness.
-
-### SYS-015: resolver is not part of the deployed application graph
-
-**Evidence**
-
-`ResolverDeployment` and resolver protobufs exist, but
-`hear/deployments/app.py` does not bind the resolver and `main.py` registers
-only the Pipeline servicer.
-
-**Impact**
-
-Repository layout and README language imply a unified resolver service that is
-not reachable through the documented production entry point.
-
-**Required decision**
-
-- If resolver is in scope, bind it into the application and register its gRPC
-  servicer with independent health/readiness and resource budgeting.
-- If it is intentionally separate/dormant, state that clearly and remove dead
-  production wiring assumptions.
 
 ### SYS-016: typed payload completeness is inconsistent
 
@@ -631,7 +608,6 @@ without duplicate execution or leaked artifacts.
 - Tune replica counts and admission limits from measured data.
 - Add full metrics, dashboards, traces, and alerts.
 - Establish objective and human audio-quality gates.
-- Decide and implement resolver production wiring.
 
 **Exit gate:** target load is sustained with bounded p95/p99 latency, no OOM,
 and approved audio-quality results.
@@ -662,7 +638,6 @@ and approved audio-quality results.
 | P2 | Typed payload completeness | API/ML | Protobuf golden tests |
 | P2 | Durable event history | Data/orchestrator | Cursor replay tests |
 | P2 | Observability | Platform | Dashboard/alert drill |
-| P2 | Resolver scope/wiring decision | Architecture | Production contract test |
 | P2 | Audio-quality corpus and gates | Audio/QA | Objective + human evaluation |
 
 ## Production release checklist

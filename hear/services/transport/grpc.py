@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Awaitable, Callable
@@ -12,11 +13,10 @@ from ray.serve.handle import DeploymentHandle
 
 from hear.config import settings
 from hear.core.backend_registry import service_key_backend
-from hear.models.schemas import StorageContext
 from hear.models.database import AiJob, SessionLocal
+from hear.models.schemas import StorageContext
 from hear.proto import pipeline_pb2
 from hear.services.transport.operations import Operations
-
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +51,9 @@ JOB_TYPE_PAYLOAD_MAP: dict[str, tuple[str, type]] = {
 
 
 class PipelineGrpcService:
-    def __init__(self, orchestrator: DeploymentHandle) -> None:
+    def __init__(self, orchestrator: DeploymentHandle, operations: Operations) -> None:
         self._orchestrator = orchestrator
-        self._operations = Operations()
+        self._operations = operations
 
     @staticmethod
     def _backend_id(context) -> str | None:
@@ -142,12 +142,12 @@ class PipelineGrpcService:
                 current_stage=raw.get("current_stage") or "",
                 label=raw.get("label") or "",
                 description=raw.get("description") or "",
-                progress_pct=raw.get("progress_pct") or 0,
-                elapsed_seconds=raw.get("elapsed_seconds") or 0.0,
-                estimated_remaining=raw.get("estimated_remaining") or 0.0,
                 error=raw.get("error") or "",
                 backend_id=raw.get("backend_id") or "",
             )
+            for field in ("progress_pct", "elapsed_seconds", "estimated_remaining"):
+                if raw.get(field) is not None:
+                    setattr(event, field, raw[field])
             if raw.get("result"):
                 event.result.CopyFrom(_struct(raw["result"]))
             yield event
@@ -330,30 +330,6 @@ class PipelineGrpcService:
             pipeline_pb2.ListDiscoveryReply,
         )
 
-    async def TrainCategorizer(self, request, context=None):
-        return await self._call(
-            context,
-            lambda: self._operations.train(request.target or "category"),
-            pipeline_pb2.TrainReply,
-        )
-
-    async def IngestCategoryEvent(self, request, context=None):
-        async def _ingest() -> dict:
-            return await self._operations.ingest_category_event(
-                {
-                    "event_type": request.event_type,
-                    "text": request.text,
-                    "category": (
-                        request.category if request.HasField("category") else None
-                    ),
-                    "tags": list(request.tags),
-                    "label": request.label if request.HasField("label") else None,
-                    "source_id": (
-                        request.source_id if request.HasField("source_id") else None
-                    ),
-                }
-            )
-        return await self._call(context, _ingest, pipeline_pb2.IngestReply)
 
     async def UpdatePlatformSettings(self, request, context=None):
         return await self._call(
@@ -366,7 +342,13 @@ class PipelineGrpcService:
         )
 
     async def health_data(self) -> dict:
-        queue = await self._orchestrator.get_stats.remote()
+        try:
+            async with asyncio.timeout(2.0):
+                queue = await self._orchestrator.get_stats.remote()
+        except Exception:
+            result = await self._operations.health({})
+            result.update(status="unavailable", control_ready=False, error="orchestrator_unavailable")
+            return result
         return await self._operations.health(queue)
 
     async def Health(self, request, context=None):

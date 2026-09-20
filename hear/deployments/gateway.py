@@ -10,17 +10,26 @@ from hear.config import settings
 from hear.core.backend_registry import authenticate_backend, service_key_backend
 from hear.core.category_loader import category_loader
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
+from hear.core.health import RayHealthSnapshot, ServiceHealth
 from hear.core.keyword_loader import auto_tag_keyword_loader, harm_keyword_loader
+from hear.core.storage import StorageCredentialsExpiringError
 from hear.models.database import init_db
 from hear.models.schemas import DiscoveryProcessRequest, PipelineRequest, ProcessResponse
 from hear.proto import pipeline_pb2
+from hear.services.categorization.service import CategorizationService
 from hear.services.jobs.submission import (
     JobSubmissionService,
     SubmissionConflictError,
     SubmissionUnavailableError,
 )
 from hear.services.model_client import RayModelClient, set_model_client
+from hear.services.moderation.service import ModerationService
+from hear.services.reconstruction.quality import RegenerationQualityAssessor
+from hear.services.reconstruction.service import RegenerationService
+from hear.services.reconstruction.synthesizer import SpeechSynthesizer
+from hear.services.transcription.service import TranscriptionService
 from hear.services.transport.grpc import PipelineGrpcService
+from hear.services.transport.operations import Operations
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +77,19 @@ class GrpcGateway:
             }
         )
         set_model_client(model_client)
-        self._pipeline = PipelineGrpcService(orchestrator)
+        operations = Operations(
+            ModerationService(),
+            CategorizationService(),
+            RegenerationService(
+                SpeechSynthesizer(model_client, TranscriptionService(model_client)),
+                RegenerationQualityAssessor(),
+            ),
+            ServiceHealth(RayHealthSnapshot(
+                settings.GRPC_APPLICATION_NAME,
+                ("transcription", "small_models", "llm", "fish_speech", "magic_clean"),
+            )),
+        )
+        self._pipeline = PipelineGrpcService(orchestrator, operations)
         self._submission = JobSubmissionService(orchestrator)
         self._audio_cleanup = audio_cleanup
         orchestrator.recover_jobs.remote()
@@ -91,7 +112,7 @@ class GrpcGateway:
     @http_app.get("/ready", tags=["system"])
     async def http_ready(self):
         pipeline = await self._pipeline.health_data()
-        ready = pipeline.get("status") in {"healthy", "ready", "running"}
+        ready = pipeline.get("control_ready", False)
         payload = {"status": "ready" if ready else "loading"}
         return JSONResponse(payload, status_code=200 if ready else 503)
 
@@ -118,6 +139,8 @@ class GrpcGateway:
             raise HTTPException(status_code=401, detail="invalid service key")
         try:
             result = await self._submission.submit(body)
+        except StorageCredentialsExpiringError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except SubmissionConflictError as exc:
@@ -251,6 +274,9 @@ class GrpcGateway:
         except SubmissionConflictError as exc:
             code = grpc.StatusCode.ALREADY_EXISTS
             detail = str(exc)
+        except StorageCredentialsExpiringError as exc:
+            code = grpc.StatusCode.FAILED_PRECONDITION
+            detail = exc.code
         except SubmissionUnavailableError as exc:
             code = grpc.StatusCode.UNAVAILABLE
             detail = str(exc)
@@ -305,11 +331,6 @@ class GrpcGateway:
     async def ListDiscovery(self, request, grpc_context=None):
         return await self._pipeline.ListDiscovery(request, grpc_context)
 
-    async def TrainCategorizer(self, request, grpc_context=None):
-        return await self._pipeline.TrainCategorizer(request, grpc_context)
-
-    async def IngestCategoryEvent(self, request, grpc_context=None):
-        return await self._pipeline.IngestCategoryEvent(request, grpc_context)
 
     async def UpdatePlatformSettings(self, request, grpc_context=None):
         return await self._pipeline.UpdatePlatformSettings(request, grpc_context)

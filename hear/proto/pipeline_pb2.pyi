@@ -20,8 +20,26 @@ class SegmentChange(_message.Message):
     original_text: str
     def __init__(self, segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., new_text: _Optional[str] = ..., original_text: _Optional[str] = ...) -> None: ...
 
+class StorageContext(_message.Message):
+    __slots__ = ("endpoint_url", "bucket_name", "key_id", "application_key", "folder_prefix", "public_base_url", "expires_at")
+    ENDPOINT_URL_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    KEY_ID_FIELD_NUMBER: _ClassVar[int]
+    APPLICATION_KEY_FIELD_NUMBER: _ClassVar[int]
+    FOLDER_PREFIX_FIELD_NUMBER: _ClassVar[int]
+    PUBLIC_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_FIELD_NUMBER: _ClassVar[int]
+    endpoint_url: str
+    bucket_name: str
+    key_id: str
+    application_key: str
+    folder_prefix: str
+    public_base_url: str
+    expires_at: str
+    def __init__(self, endpoint_url: _Optional[str] = ..., bucket_name: _Optional[str] = ..., key_id: _Optional[str] = ..., application_key: _Optional[str] = ..., folder_prefix: _Optional[str] = ..., public_base_url: _Optional[str] = ..., expires_at: _Optional[str] = ...) -> None: ...
+
 class SubmitJobRequest(_message.Message):
-    __slots__ = ("job_id", "track_id", "job_type", "max_tags", "audio_url", "edited_transcript", "changes", "same_speaker", "grouped", "group_id", "kind", "source", "track_count", "speed_multipliers", "playback_instruction", "user_id", "speech", "music", "background", "type", "media_file_id", "cut_silence")
+    __slots__ = ("job_id", "track_id", "job_type", "max_tags", "audio_url", "edited_transcript", "changes", "same_speaker", "grouped", "group_id", "kind", "source", "track_count", "speed_multipliers", "playback_instruction", "user_id", "speech", "music", "background", "type", "media_file_id", "cut_silence", "backend_id", "storage")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -44,6 +62,8 @@ class SubmitJobRequest(_message.Message):
     TYPE_FIELD_NUMBER: _ClassVar[int]
     MEDIA_FILE_ID_FIELD_NUMBER: _ClassVar[int]
     CUT_SILENCE_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
+    STORAGE_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     track_id: str
     job_type: str
@@ -66,19 +86,23 @@ class SubmitJobRequest(_message.Message):
     type: str
     media_file_id: str
     cut_silence: bool
-    def __init__(self, job_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., max_tags: _Optional[int] = ..., audio_url: _Optional[str] = ..., edited_transcript: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., same_speaker: bool = ..., grouped: bool = ..., group_id: _Optional[str] = ..., kind: _Optional[str] = ..., source: _Optional[str] = ..., track_count: _Optional[int] = ..., speed_multipliers: _Optional[_Iterable[float]] = ..., playback_instruction: _Optional[str] = ..., user_id: _Optional[str] = ..., speech: _Optional[int] = ..., music: _Optional[int] = ..., background: _Optional[int] = ..., type: _Optional[str] = ..., media_file_id: _Optional[str] = ..., cut_silence: bool = ...) -> None: ...
+    backend_id: str
+    storage: StorageContext
+    def __init__(self, job_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., max_tags: _Optional[int] = ..., audio_url: _Optional[str] = ..., edited_transcript: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., same_speaker: bool = ..., grouped: bool = ..., group_id: _Optional[str] = ..., kind: _Optional[str] = ..., source: _Optional[str] = ..., track_count: _Optional[int] = ..., speed_multipliers: _Optional[_Iterable[float]] = ..., playback_instruction: _Optional[str] = ..., user_id: _Optional[str] = ..., speech: _Optional[int] = ..., music: _Optional[int] = ..., background: _Optional[int] = ..., type: _Optional[str] = ..., media_file_id: _Optional[str] = ..., cut_silence: bool = ..., backend_id: _Optional[str] = ..., storage: _Optional[_Union[StorageContext, _Mapping]] = ...) -> None: ...
 
 class SubmitJobResponse(_message.Message):
-    __slots__ = ("job_id", "run_id", "status", "error")
+    __slots__ = ("job_id", "run_id", "status", "error", "backend_id")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     job_id: str
     run_id: str
     status: str
     error: str
-    def __init__(self, job_id: _Optional[str] = ..., run_id: _Optional[str] = ..., status: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+    backend_id: str
+    def __init__(self, job_id: _Optional[str] = ..., run_id: _Optional[str] = ..., status: _Optional[str] = ..., error: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class SubscribeRequest(_message.Message):
     __slots__ = ("job_id",)
@@ -87,7 +111,7 @@ class SubscribeRequest(_message.Message):
     def __init__(self, job_id: _Optional[str] = ...) -> None: ...
 
 class PipelineEvent(_message.Message):
-    __slots__ = ("event", "job_id", "run_id", "track_id", "job_type", "status", "current_stage", "label", "description", "progress_pct", "elapsed_seconds", "estimated_remaining", "error", "result")
+    __slots__ = ("event", "job_id", "run_id", "track_id", "job_type", "status", "current_stage", "label", "description", "progress_pct", "elapsed_seconds", "estimated_remaining", "error", "result", "backend_id")
     EVENT_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
@@ -102,6 +126,7 @@ class PipelineEvent(_message.Message):
     ESTIMATED_REMAINING_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     RESULT_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     event: str
     job_id: str
     run_id: str
@@ -116,7 +141,8 @@ class PipelineEvent(_message.Message):
     estimated_remaining: float
     error: str
     result: _struct_pb2.Struct
-    def __init__(self, event: _Optional[str] = ..., job_id: _Optional[str] = ..., run_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., status: _Optional[str] = ..., current_stage: _Optional[str] = ..., label: _Optional[str] = ..., description: _Optional[str] = ..., progress_pct: _Optional[int] = ..., elapsed_seconds: _Optional[float] = ..., estimated_remaining: _Optional[float] = ..., error: _Optional[str] = ..., result: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+    backend_id: str
+    def __init__(self, event: _Optional[str] = ..., job_id: _Optional[str] = ..., run_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., status: _Optional[str] = ..., current_stage: _Optional[str] = ..., label: _Optional[str] = ..., description: _Optional[str] = ..., progress_pct: _Optional[int] = ..., elapsed_seconds: _Optional[float] = ..., estimated_remaining: _Optional[float] = ..., error: _Optional[str] = ..., result: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class GetResultRequest(_message.Message):
     __slots__ = ("job_id",)
@@ -179,12 +205,16 @@ class QualityMetrics(_message.Message):
     def __init__(self, dnsmos_ovr: _Optional[float] = ..., loudness_match_db: _Optional[float] = ..., duration_delta_ms: _Optional[float] = ..., clipping_detected: bool = ..., passed: bool = ...) -> None: ...
 
 class EnhancedAudio(_message.Message):
-    __slots__ = ("audio_url", "b2_key")
+    __slots__ = ("audio_url", "b2_key", "bucket_name", "backend_id")
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     B2_KEY_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     audio_url: str
     b2_key: str
-    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ...) -> None: ...
+    bucket_name: str
+    backend_id: str
+    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class AudioQuality(_message.Message):
     __slots__ = ("quality_score", "snr_db", "peak_db", "lufs", "clipping_detected")
@@ -201,30 +231,38 @@ class AudioQuality(_message.Message):
     def __init__(self, quality_score: _Optional[float] = ..., snr_db: _Optional[float] = ..., peak_db: _Optional[float] = ..., lufs: _Optional[float] = ..., clipping_detected: bool = ...) -> None: ...
 
 class RebuiltAudio(_message.Message):
-    __slots__ = ("audio_url", "b2_key", "duration")
+    __slots__ = ("audio_url", "b2_key", "duration", "bucket_name", "backend_id")
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     B2_KEY_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     audio_url: str
     b2_key: str
     duration: float
-    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., duration: _Optional[float] = ...) -> None: ...
+    bucket_name: str
+    backend_id: str
+    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., duration: _Optional[float] = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class SegmentAudio(_message.Message):
-    __slots__ = ("segment_start", "segment_end", "b2_key", "audio_url", "duration", "is_deletion")
+    __slots__ = ("segment_start", "segment_end", "b2_key", "audio_url", "duration", "is_deletion", "bucket_name", "backend_id")
     SEGMENT_START_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_END_FIELD_NUMBER: _ClassVar[int]
     B2_KEY_FIELD_NUMBER: _ClassVar[int]
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
     IS_DELETION_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     segment_start: float
     segment_end: float
     b2_key: str
     audio_url: str
     duration: float
     is_deletion: bool
-    def __init__(self, segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., b2_key: _Optional[str] = ..., audio_url: _Optional[str] = ..., duration: _Optional[float] = ..., is_deletion: bool = ...) -> None: ...
+    bucket_name: str
+    backend_id: str
+    def __init__(self, segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., b2_key: _Optional[str] = ..., audio_url: _Optional[str] = ..., duration: _Optional[float] = ..., is_deletion: bool = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class PipelinePayload(_message.Message):
     __slots__ = ("source_audio_url", "transcription", "moderation", "categorization", "edited_transcript", "discovery", "content_description", "compressed_audio", "report", "flagged")
@@ -301,7 +339,8 @@ class ReconstructPayload(_message.Message):
     def __init__(self, edited_transcript: _Optional[str] = ..., rebuilt_audio: _Optional[_Union[RebuiltAudio, _Mapping]] = ..., is_regenerated: bool = ..., transcription: _Optional[_Union[TranscriptionObject, _Mapping]] = ..., moderation: _Optional[_Union[ModerationReply, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[SegmentAudio, _Mapping]]] = ...) -> None: ...
 
 class JobResult(_message.Message):
-    __slots__ = ("job_id", "run_id", "track_id", "job_type", "status", "current_stage", "error", "pipeline", "transcription", "audio_tag", "magic_clean", "reconstruct")
+    __slots__ = ("backend_id", "job_id", "run_id", "track_id", "job_type", "status", "current_stage", "error", "pipeline", "transcription", "audio_tag", "magic_clean", "reconstruct")
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     RUN_ID_FIELD_NUMBER: _ClassVar[int]
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
@@ -314,6 +353,7 @@ class JobResult(_message.Message):
     AUDIO_TAG_FIELD_NUMBER: _ClassVar[int]
     MAGIC_CLEAN_FIELD_NUMBER: _ClassVar[int]
     RECONSTRUCT_FIELD_NUMBER: _ClassVar[int]
+    backend_id: str
     job_id: str
     run_id: str
     track_id: str
@@ -326,7 +366,7 @@ class JobResult(_message.Message):
     audio_tag: AudioTagPayload
     magic_clean: MagicCleanPayload
     reconstruct: ReconstructPayload
-    def __init__(self, job_id: _Optional[str] = ..., run_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., status: _Optional[str] = ..., current_stage: _Optional[str] = ..., error: _Optional[str] = ..., pipeline: _Optional[_Union[PipelinePayload, _Mapping]] = ..., transcription: _Optional[_Union[TranscriptionPayload, _Mapping]] = ..., audio_tag: _Optional[_Union[AudioTagPayload, _Mapping]] = ..., magic_clean: _Optional[_Union[MagicCleanPayload, _Mapping]] = ..., reconstruct: _Optional[_Union[ReconstructPayload, _Mapping]] = ...) -> None: ...
+    def __init__(self, backend_id: _Optional[str] = ..., job_id: _Optional[str] = ..., run_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., status: _Optional[str] = ..., current_stage: _Optional[str] = ..., error: _Optional[str] = ..., pipeline: _Optional[_Union[PipelinePayload, _Mapping]] = ..., transcription: _Optional[_Union[TranscriptionPayload, _Mapping]] = ..., audio_tag: _Optional[_Union[AudioTagPayload, _Mapping]] = ..., magic_clean: _Optional[_Union[MagicCleanPayload, _Mapping]] = ..., reconstruct: _Optional[_Union[ReconstructPayload, _Mapping]] = ...) -> None: ...
 
 class TextRequest(_message.Message):
     __slots__ = ("text",)
@@ -345,7 +385,7 @@ class CategorizeRequest(_message.Message):
     def __init__(self, text: _Optional[str] = ..., custom_tags: _Optional[_Iterable[str]] = ..., max_tags: _Optional[int] = ...) -> None: ...
 
 class ReconstructRequest(_message.Message):
-    __slots__ = ("audio_url", "track_id", "changes", "segment_start", "segment_end", "new_text", "same_speaker")
+    __slots__ = ("audio_url", "track_id", "changes", "segment_start", "segment_end", "new_text", "same_speaker", "backend_id", "storage")
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
     CHANGES_FIELD_NUMBER: _ClassVar[int]
@@ -353,6 +393,8 @@ class ReconstructRequest(_message.Message):
     SEGMENT_END_FIELD_NUMBER: _ClassVar[int]
     NEW_TEXT_FIELD_NUMBER: _ClassVar[int]
     SAME_SPEAKER_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
+    STORAGE_FIELD_NUMBER: _ClassVar[int]
     audio_url: str
     track_id: str
     changes: _containers.RepeatedCompositeFieldContainer[SegmentChange]
@@ -360,7 +402,9 @@ class ReconstructRequest(_message.Message):
     segment_end: float
     new_text: str
     same_speaker: bool
-    def __init__(self, audio_url: _Optional[str] = ..., track_id: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., new_text: _Optional[str] = ..., same_speaker: bool = ...) -> None: ...
+    backend_id: str
+    storage: StorageContext
+    def __init__(self, audio_url: _Optional[str] = ..., track_id: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., new_text: _Optional[str] = ..., same_speaker: bool = ..., backend_id: _Optional[str] = ..., storage: _Optional[_Union[StorageContext, _Mapping]] = ...) -> None: ...
 
 class PreviewRequest(_message.Message):
     __slots__ = ("preview_id", "track_id", "user_id")
@@ -373,18 +417,22 @@ class PreviewRequest(_message.Message):
     def __init__(self, preview_id: _Optional[str] = ..., track_id: _Optional[str] = ..., user_id: _Optional[str] = ...) -> None: ...
 
 class RemoveSegmentRequest(_message.Message):
-    __slots__ = ("track_id", "audio_url", "segment_start", "segment_end", "user_id")
+    __slots__ = ("track_id", "audio_url", "segment_start", "segment_end", "user_id", "backend_id", "storage")
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_START_FIELD_NUMBER: _ClassVar[int]
     SEGMENT_END_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
+    STORAGE_FIELD_NUMBER: _ClassVar[int]
     track_id: str
     audio_url: str
     segment_start: float
     segment_end: float
     user_id: str
-    def __init__(self, track_id: _Optional[str] = ..., audio_url: _Optional[str] = ..., segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., user_id: _Optional[str] = ...) -> None: ...
+    backend_id: str
+    storage: StorageContext
+    def __init__(self, track_id: _Optional[str] = ..., audio_url: _Optional[str] = ..., segment_start: _Optional[float] = ..., segment_end: _Optional[float] = ..., user_id: _Optional[str] = ..., backend_id: _Optional[str] = ..., storage: _Optional[_Union[StorageContext, _Mapping]] = ...) -> None: ...
 
 class DiscoveryRequest(_message.Message):
     __slots__ = ("sort", "limit", "offset")
@@ -395,28 +443,6 @@ class DiscoveryRequest(_message.Message):
     limit: int
     offset: int
     def __init__(self, sort: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
-
-class TrainRequest(_message.Message):
-    __slots__ = ("target",)
-    TARGET_FIELD_NUMBER: _ClassVar[int]
-    target: str
-    def __init__(self, target: _Optional[str] = ...) -> None: ...
-
-class CategoryEvent(_message.Message):
-    __slots__ = ("event_type", "text", "category", "tags", "label", "source_id")
-    EVENT_TYPE_FIELD_NUMBER: _ClassVar[int]
-    TEXT_FIELD_NUMBER: _ClassVar[int]
-    CATEGORY_FIELD_NUMBER: _ClassVar[int]
-    TAGS_FIELD_NUMBER: _ClassVar[int]
-    LABEL_FIELD_NUMBER: _ClassVar[int]
-    SOURCE_ID_FIELD_NUMBER: _ClassVar[int]
-    event_type: str
-    text: str
-    category: str
-    tags: _containers.RepeatedScalarFieldContainer[str]
-    label: str
-    source_id: str
-    def __init__(self, event_type: _Optional[str] = ..., text: _Optional[str] = ..., category: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ..., label: _Optional[str] = ..., source_id: _Optional[str] = ...) -> None: ...
 
 class PlatformSettingsRequest(_message.Message):
     __slots__ = ("blocked_keywords", "auto_tag_keywords")
@@ -479,7 +505,7 @@ class CategorizationReply(_message.Message):
     def __init__(self, categories: _Optional[_Iterable[str]] = ..., tags: _Optional[_Iterable[str]] = ..., confidence_scores: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., sentiment: _Optional[str] = ..., new_tags_added: _Optional[_Iterable[str]] = ..., new_categories_added: _Optional[_Iterable[str]] = ..., settings_applied: bool = ..., llm_used: bool = ..., categorizer_mode: _Optional[str] = ...) -> None: ...
 
 class CreatePreviewReply(_message.Message):
-    __slots__ = ("preview_id", "preview_audio_url", "preview_duration", "quality_metrics", "expires_at", "segments_applied", "track_id", "segments")
+    __slots__ = ("preview_id", "preview_audio_url", "preview_duration", "quality_metrics", "expires_at", "segments_applied", "track_id", "segments", "b2_key", "bucket_name", "backend_id")
     PREVIEW_ID_FIELD_NUMBER: _ClassVar[int]
     PREVIEW_AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     PREVIEW_DURATION_FIELD_NUMBER: _ClassVar[int]
@@ -488,6 +514,9 @@ class CreatePreviewReply(_message.Message):
     SEGMENTS_APPLIED_FIELD_NUMBER: _ClassVar[int]
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
     SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    B2_KEY_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     preview_id: str
     preview_audio_url: str
     preview_duration: float
@@ -496,10 +525,13 @@ class CreatePreviewReply(_message.Message):
     segments_applied: int
     track_id: str
     segments: _containers.RepeatedCompositeFieldContainer[SegmentAudio]
-    def __init__(self, preview_id: _Optional[str] = ..., preview_audio_url: _Optional[str] = ..., preview_duration: _Optional[float] = ..., quality_metrics: _Optional[_Union[QualityMetrics, _Mapping]] = ..., expires_at: _Optional[str] = ..., segments_applied: _Optional[int] = ..., track_id: _Optional[str] = ..., segments: _Optional[_Iterable[_Union[SegmentAudio, _Mapping]]] = ...) -> None: ...
+    b2_key: str
+    bucket_name: str
+    backend_id: str
+    def __init__(self, preview_id: _Optional[str] = ..., preview_audio_url: _Optional[str] = ..., preview_duration: _Optional[float] = ..., quality_metrics: _Optional[_Union[QualityMetrics, _Mapping]] = ..., expires_at: _Optional[str] = ..., segments_applied: _Optional[int] = ..., track_id: _Optional[str] = ..., segments: _Optional[_Iterable[_Union[SegmentAudio, _Mapping]]] = ..., b2_key: _Optional[str] = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class ConfirmPreviewReply(_message.Message):
-    __slots__ = ("audio_url", "b2_key", "duration", "track_id", "user_id", "job_type", "action", "status")
+    __slots__ = ("audio_url", "b2_key", "duration", "track_id", "user_id", "job_type", "action", "status", "bucket_name", "backend_id")
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     B2_KEY_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
@@ -508,6 +540,8 @@ class ConfirmPreviewReply(_message.Message):
     JOB_TYPE_FIELD_NUMBER: _ClassVar[int]
     ACTION_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     audio_url: str
     b2_key: str
     duration: float
@@ -516,10 +550,12 @@ class ConfirmPreviewReply(_message.Message):
     job_type: str
     action: str
     status: str
-    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., duration: _Optional[float] = ..., track_id: _Optional[str] = ..., user_id: _Optional[str] = ..., job_type: _Optional[str] = ..., action: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+    bucket_name: str
+    backend_id: str
+    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., duration: _Optional[float] = ..., track_id: _Optional[str] = ..., user_id: _Optional[str] = ..., job_type: _Optional[str] = ..., action: _Optional[str] = ..., status: _Optional[str] = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class RemoveSegmentReply(_message.Message):
-    __slots__ = ("audio_url", "b2_key", "duration", "segments_removed", "removed_duration", "track_id", "user_id", "job_type", "action", "status")
+    __slots__ = ("audio_url", "b2_key", "duration", "segments_removed", "removed_duration", "track_id", "user_id", "job_type", "action", "status", "bucket_name", "backend_id")
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
     B2_KEY_FIELD_NUMBER: _ClassVar[int]
     DURATION_FIELD_NUMBER: _ClassVar[int]
@@ -530,6 +566,8 @@ class RemoveSegmentReply(_message.Message):
     JOB_TYPE_FIELD_NUMBER: _ClassVar[int]
     ACTION_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     audio_url: str
     b2_key: str
     duration: float
@@ -540,7 +578,9 @@ class RemoveSegmentReply(_message.Message):
     job_type: str
     action: str
     status: str
-    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., duration: _Optional[float] = ..., segments_removed: _Optional[int] = ..., removed_duration: _Optional[float] = ..., track_id: _Optional[str] = ..., user_id: _Optional[str] = ..., job_type: _Optional[str] = ..., action: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
+    bucket_name: str
+    backend_id: str
+    def __init__(self, audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., duration: _Optional[float] = ..., segments_removed: _Optional[int] = ..., removed_duration: _Optional[float] = ..., track_id: _Optional[str] = ..., user_id: _Optional[str] = ..., job_type: _Optional[str] = ..., action: _Optional[str] = ..., status: _Optional[str] = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class RollbackPreviewReply(_message.Message):
     __slots__ = ("preview_id", "status")
@@ -551,7 +591,7 @@ class RollbackPreviewReply(_message.Message):
     def __init__(self, preview_id: _Optional[str] = ..., status: _Optional[str] = ...) -> None: ...
 
 class Preview(_message.Message):
-    __slots__ = ("preview_id", "track_id", "audio_url", "b2_key", "status", "expires_at", "changes", "same_speaker", "created_at", "user_id", "quality_metrics")
+    __slots__ = ("preview_id", "track_id", "audio_url", "b2_key", "status", "expires_at", "changes", "same_speaker", "created_at", "user_id", "quality_metrics", "bucket_name", "backend_id")
     PREVIEW_ID_FIELD_NUMBER: _ClassVar[int]
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
     AUDIO_URL_FIELD_NUMBER: _ClassVar[int]
@@ -563,6 +603,8 @@ class Preview(_message.Message):
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     QUALITY_METRICS_FIELD_NUMBER: _ClassVar[int]
+    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
+    BACKEND_ID_FIELD_NUMBER: _ClassVar[int]
     preview_id: str
     track_id: str
     audio_url: str
@@ -574,7 +616,9 @@ class Preview(_message.Message):
     created_at: str
     user_id: str
     quality_metrics: QualityMetrics
-    def __init__(self, preview_id: _Optional[str] = ..., track_id: _Optional[str] = ..., audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., status: _Optional[str] = ..., expires_at: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., same_speaker: bool = ..., created_at: _Optional[str] = ..., user_id: _Optional[str] = ..., quality_metrics: _Optional[_Union[QualityMetrics, _Mapping]] = ...) -> None: ...
+    bucket_name: str
+    backend_id: str
+    def __init__(self, preview_id: _Optional[str] = ..., track_id: _Optional[str] = ..., audio_url: _Optional[str] = ..., b2_key: _Optional[str] = ..., status: _Optional[str] = ..., expires_at: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., same_speaker: bool = ..., created_at: _Optional[str] = ..., user_id: _Optional[str] = ..., quality_metrics: _Optional[_Union[QualityMetrics, _Mapping]] = ..., bucket_name: _Optional[str] = ..., backend_id: _Optional[str] = ...) -> None: ...
 
 class DiscoveryItem(_message.Message):
     __slots__ = ("track_id", "job_id", "discovery", "latest_at", "published_at", "trending_score", "completed_at")
@@ -608,22 +652,6 @@ class ListDiscoveryReply(_message.Message):
     items: _containers.RepeatedCompositeFieldContainer[DiscoveryItem]
     def __init__(self, sort: _Optional[str] = ..., limit: _Optional[int] = ..., offset: _Optional[int] = ..., total: _Optional[int] = ..., items: _Optional[_Iterable[_Union[DiscoveryItem, _Mapping]]] = ...) -> None: ...
 
-class TrainReply(_message.Message):
-    __slots__ = ("status", "detail")
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    DETAIL_FIELD_NUMBER: _ClassVar[int]
-    status: str
-    detail: str
-    def __init__(self, status: _Optional[str] = ..., detail: _Optional[str] = ...) -> None: ...
-
-class IngestReply(_message.Message):
-    __slots__ = ("status", "example_id")
-    STATUS_FIELD_NUMBER: _ClassVar[int]
-    EXAMPLE_ID_FIELD_NUMBER: _ClassVar[int]
-    status: str
-    example_id: str
-    def __init__(self, status: _Optional[str] = ..., example_id: _Optional[str] = ...) -> None: ...
-
 class PlatformSettingsReply(_message.Message):
     __slots__ = ("status", "blocked_keywords_count", "auto_tag_keywords_count")
     STATUS_FIELD_NUMBER: _ClassVar[int]
@@ -645,17 +673,29 @@ class GpuMemory(_message.Message):
     def __init__(self, free_mb: _Optional[float] = ..., used_mb: _Optional[float] = ..., total_mb: _Optional[float] = ...) -> None: ...
 
 class HealthReply(_message.Message):
-    __slots__ = ("status", "gpu_available", "gpu_name", "gpu_memory", "active_jobs", "queued_jobs")
+    __slots__ = ("status", "gpu_available", "gpu_name", "gpu_memory", "active_jobs", "queued_jobs", "control_ready", "service_epoch", "capabilities", "models_loaded", "gpu_metrics_available", "error")
     STATUS_FIELD_NUMBER: _ClassVar[int]
     GPU_AVAILABLE_FIELD_NUMBER: _ClassVar[int]
     GPU_NAME_FIELD_NUMBER: _ClassVar[int]
     GPU_MEMORY_FIELD_NUMBER: _ClassVar[int]
     ACTIVE_JOBS_FIELD_NUMBER: _ClassVar[int]
     QUEUED_JOBS_FIELD_NUMBER: _ClassVar[int]
+    CONTROL_READY_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_EPOCH_FIELD_NUMBER: _ClassVar[int]
+    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    MODELS_LOADED_FIELD_NUMBER: _ClassVar[int]
+    GPU_METRICS_AVAILABLE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
     status: str
     gpu_available: bool
     gpu_name: str
     gpu_memory: GpuMemory
     active_jobs: int
     queued_jobs: int
-    def __init__(self, status: _Optional[str] = ..., gpu_available: bool = ..., gpu_name: _Optional[str] = ..., gpu_memory: _Optional[_Union[GpuMemory, _Mapping]] = ..., active_jobs: _Optional[int] = ..., queued_jobs: _Optional[int] = ...) -> None: ...
+    control_ready: bool
+    service_epoch: str
+    capabilities: _struct_pb2.Struct
+    models_loaded: _containers.RepeatedScalarFieldContainer[str]
+    gpu_metrics_available: bool
+    error: str
+    def __init__(self, status: _Optional[str] = ..., gpu_available: bool = ..., gpu_name: _Optional[str] = ..., gpu_memory: _Optional[_Union[GpuMemory, _Mapping]] = ..., active_jobs: _Optional[int] = ..., queued_jobs: _Optional[int] = ..., control_ready: bool = ..., service_epoch: _Optional[str] = ..., capabilities: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., models_loaded: _Optional[_Iterable[str]] = ..., gpu_metrics_available: bool = ..., error: _Optional[str] = ...) -> None: ...

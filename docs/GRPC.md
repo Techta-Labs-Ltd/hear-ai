@@ -1,6 +1,6 @@
 # gRPC interface
 
-Ray Serve exposes both protobuf services on `GRPC_PORT` (default `50051`).
+Ray Serve exposes the Pipeline protobuf service on `GRPC_PORT` (default `50051`).
 Clients must attach `application=hear` and `x-api-key` metadata.
 
 The same Ray Serve application exposes FastAPI health and readiness probes on
@@ -18,8 +18,7 @@ is intentionally empty so multi-hour results remain compact.
 - `Moderate`, `Categorize`, `ListDiscovery`
 - `CreatePreview`, `ConfirmPreview`, `RemoveSegment`,
   `RollbackPreview`, `GetPreview`
-- `TrainCategorizer`, `IngestCategoryEvent`,
-  `UpdatePlatformSettings`
+- `UpdatePlatformSettings`
 - `Health`
 
 `Subscribe` is a server stream and emits stage, heartbeat, completion, failure,
@@ -31,20 +30,9 @@ Jobs are submitted only through authenticated `POST /process`. The Hear
 backend then opens `Subscribe` with the returned `job_id`; reconnecting after a
 terminal event replays the persisted completion, failure, or cancellation.
 
-## Resolver
-
-- `Resolve`
-- `ResolverHealth`
-- `Rebuild`
-- `Apply`
-
-Resolver state is owned by its Ray deployment. Rebuild operations no longer
-coordinate replicas through an HTTP endpoint.
-
 ## Error handling
 
 Invalid requests use `INVALID_ARGUMENT`, missing resources use `NOT_FOUND`,
-duplicate active jobs use `ALREADY_EXISTS`, unavailable models or resolver
-indexes use `UNAVAILABLE`, and invalid credentials use `UNAUTHENTICATED`.
+duplicate active jobs use `ALREADY_EXISTS`, unavailable models use `UNAVAILABLE`, and invalid credentials use `UNAUTHENTICATED`.
 Unexpected internal errors are logged and returned as `INTERNAL` without
 leaking implementation details.

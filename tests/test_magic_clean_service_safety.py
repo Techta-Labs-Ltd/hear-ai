@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from hear.deployments.magic_clean import MagicCleanDeployment
-from hear.services.magic_clean.blocking import run_awaitable_to_completion
+from hear.core.blocking import run_awaitable_to_completion
 from hear.services.magic_clean.models import DEFAULT_STEM_LEVELS, StemLevels
 from hear.services.magic_clean.service import (
     MagicCleanAudioEnhancer,

@@ -51,7 +51,7 @@ curl --fail "$HEAR_HTTP_URL/ready"
 ```
 
 Submit production work only after `/ready` returns `200`. `/health` reports
-GPU, queue, pipeline, and resolver state.
+GPU, queue, and pipeline state.
 
 ## Submit through `/process`
 
@@ -487,7 +487,7 @@ terminal success is emitted.
     "source_audio_url":"https://storage.example/track.mp3",
     "transcription":{"transcript":"Spoken content.","language":"en","confidence":0.98,"segments":[{"start":0.1,"end":2.4,"text":"Spoken content.","words":[{"word":"Spoken","start":0.1,"end":0.8,"score":0.99}]}]},
     "moderation":{"flagged":false,"severity":"none","intent":"safe","reason":"No harmful content detected"},
-    "categorization":{"categories":["Technology"],"tags":["ai"],"confidence_scores":{"Technology":0.91},"sentiment":"neutral","categorizer_mode":"trained"},
+    "categorization":{"categories":["Technology"],"tags":["ai"],"confidence_scores":{"Technology":0.91},"sentiment":"neutral","categorizer_mode":"nli"},
     "discovery":{"main_topic":"Artificial intelligence","summary_short":"A short summary"},
     "content_description":"A discussion about artificial intelligence.",
     "compressed_audio":{"audio_url":"https://storage.example/output.mp3","b2_key":"audio/output.mp3","format":"mp3"},
@@ -551,7 +551,7 @@ If no content is detected, `pipeline.report` contains
   "pipeline":{
     "transcription":{"transcript":"Technology and science content.","language":"en","confidence":0.98},
     "moderation":{"flagged":false,"severity":"none","intent":"safe"},
-    "categorization":{"categories":["Technology","Science"],"tags":["ai","research"],"confidence_scores":{"Technology":0.94,"Science":0.82},"sentiment":"neutral","llm_used":false,"categorizer_mode":"trained"},
+    "categorization":{"categories":["Technology","Science"],"tags":["ai","research"],"confidence_scores":{"Technology":0.94,"Science":0.82},"sentiment":"neutral","llm_used":false,"categorizer_mode":"nli"},
     "discovery":{"main_topic":"Technology research"}
   }
 }
@@ -780,10 +780,9 @@ Pipeline gRPC:
 - `Moderate`, `Categorize`
 - `CreatePreview`, `ConfirmPreview`, `RemoveSegment`, `RollbackPreview`,
   `GetPreview`
-- `ListDiscovery`, `TrainCategorizer`, `IngestCategoryEvent`,
+- `ListDiscovery`,
   `UpdatePlatformSettings`, `Health`
 
-Resolver gRPC: `Resolve`, `ResolverHealth`, `Rebuild`, `Apply`.
 
 There is no `/ws` WebSocket endpoint in Hear AI. The owning backend should
 forward gRPC updates to browser/mobile clients.
@@ -808,8 +807,6 @@ Every call requires `METADATA`. RPC names below are methods on
 | `RollbackPreview` | `PreviewRequest → RollbackPreviewReply` | Roll back/delete an unconfirmed `preview_id`. |
 | `GetPreview` | `PreviewRequest → Preview` | Fetch persisted preview details and quality metrics. |
 | `ListDiscovery` | `DiscoveryRequest → ListDiscoveryReply` | List `latest` or `trending` discovery items using `limit`/`offset`. |
-| `TrainCategorizer` | `TrainRequest → TrainReply` | Train target `category`, `tags`, or `harm`; result/metrics are encoded in `detail`. |
-| `IngestCategoryEvent` | `CategoryEvent → IngestReply` | Store a training event and return its UUID `example_id`. |
 | `UpdatePlatformSettings` | `PlatformSettingsRequest → PlatformSettingsReply` | Replace comma-separated blocked and auto-tag keyword sets. |
 | `Health` | `google.protobuf.Empty → HealthReply` | GPU identity/memory and active/queued job counts. |
 
@@ -925,26 +922,6 @@ items = client.ListDiscovery(
 )
 ```
 
-### Training data and model training
-
-```python
-from hear.proto.pipeline_pb2 import CategoryEvent, TrainRequest
-
-ingested = client.IngestCategoryEvent(
-    CategoryEvent(event_type="category_feedback", text="example text",
-                  category="Nature", source_id="backend-event-123"),
-    metadata=METADATA, timeout=30,
-)
-
-trained = client.TrainCategorizer(
-    TrainRequest(target="category"), metadata=METADATA, timeout=900
-)
-```
-
-`CategoryEvent` supports optional `category`, repeated `tags`, optional
-`label`, and optional backend `source_id`. Harm labels are `safe` or `harmful`.
-Valid training targets are `category`, `tags`, and `harm`.
-
 ### Platform settings and queue/health
 
 ```python
@@ -958,37 +935,6 @@ settings_reply = client.UpdatePlatformSettings(
 )
 queue = client.GetQueueStats(Empty(), metadata=METADATA, timeout=10)
 health = client.Health(Empty(), metadata=METADATA, timeout=10)
-```
-
-## Complete Resolver gRPC reference
-
-RPCs are methods on `hear.resolver.v1.Resolver` and use the same metadata.
-
-| RPC | Request → response | Purpose |
-| --- | --- | --- |
-| `Resolve` | `ResolveRequest → ResolveReply` | Resolve an `utterance` for a `country_code` into category, creator, organisation, location, tags, temporal data, free text, action, and candidates. |
-| `ResolverHealth` | `HealthRequest → HealthReply` | Return resolver status, taxonomy version, and readiness. |
-| `Rebuild` | `RebuildRequest → RebuildReply` | Build/load the requested taxonomy `version` (or latest when supported). |
-| `Apply` | `RebuildRequest → RebuildReply` | Apply the requested built taxonomy version. |
-
-```python
-from hear.proto.resolver_pb2 import HealthRequest, RebuildRequest, ResolveRequest
-from hear.proto.resolver_pb2_grpc import ResolverStub
-
-resolver = ResolverStub(channel)
-resolved = resolver.Resolve(
-    ResolveRequest(utterance="play jazz music", country_code="US"),
-    metadata=METADATA, timeout=10,
-)
-resolver_health = resolver.ResolverHealth(
-    HealthRequest(), metadata=METADATA, timeout=10
-)
-rebuilt = resolver.Rebuild(
-    RebuildRequest(version=19), metadata=METADATA, timeout=600
-)
-applied = resolver.Apply(
-    RebuildRequest(version=19), metadata=METADATA, timeout=60
-)
 ```
 
 ## gRPC error policy

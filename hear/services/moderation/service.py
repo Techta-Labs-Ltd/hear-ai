@@ -2,11 +2,9 @@ import asyncio
 import logging
 import re
 
-from hear.config import settings
 from hear.core.keyword_loader import harm_keyword_loader
 from hear.services.llm import get_llm_service
 from hear.services.model_client import get_model_client
-from hear.training.harm_infer import predict as predict_harm
 
 logger = logging.getLogger(__name__)
 
@@ -63,18 +61,6 @@ class ModerationService:
         built_in_keywords = harm_keyword_loader.harm_keywords
         loop = asyncio.get_event_loop()
 
-        harm_score = await loop.run_in_executor(None, predict_harm, text)
-
-        if harm_score > 0.80:
-            return {
-                "flagged": True,
-                "severity": SEVERITY_HIGH,
-                "intent": "harmful",
-                "reason": f"ML harm classifier flagged content (score {harm_score:.2f})",
-                "flagged_categories": ["Threats / Violence"],
-                "blocked_words_found": [],
-            }
-
         built_in_hits = [
             kw for kw in built_in_keywords
             if self._contains_keyword(text_lower, kw)
@@ -117,8 +103,6 @@ class ModerationService:
                             is_borderline=True,
                         ),
                     )
-                    if result["flagged"] and result["intent"] == "harmful" and self._should_auto_learn():
-                        self._learn_phrases(text)
                     return result
                 except Exception as exc:
                     logger.warning(
@@ -130,10 +114,6 @@ class ModerationService:
             flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
             intent = intent_result.get("intent", "safe")
             reason = self._build_reason(local_result, intent_result, keyword_hits, intent, severity)
-            if flagged and intent == "harmful":
-                nli_scores = intent_result.get("scores", {})
-                if max((nli_scores.get(l, 0) for l in HARMFUL_INTENT_LABELS), default=0) >= 0.70 and self._should_auto_learn():
-                    self._learn_phrases(text)
             return {
                 "flagged": flagged,
                 "severity": severity,
@@ -157,16 +137,12 @@ class ModerationService:
                 )
                 result["severity"] = severity
                 result["flagged"] = True
-                if result["intent"] != "safe" and self._should_auto_learn():
-                    self._learn_phrases(text)
                 return result
             except Exception as exc:
                 logger.warning(
                     "[MODERATION] Qwen failed on high-score (%.2f) (%s) — using toxic-bert result",
                     max_score, exc,
                 )
-        if self._should_auto_learn():
-            self._learn_phrases(text)
         return {
             "flagged": True,
             "severity": severity,
@@ -214,17 +190,6 @@ class ModerationService:
             return SEVERITY_MEDIUM
         return SEVERITY_LOW
 
-    def _learn_phrases(self, text: str):
-        existing = set(harm_keyword_loader.all_keywords)
-        sentences = re.split(r"[.!?\n]+", text.lower())
-        for sentence in sentences:
-            phrase = sentence.strip().strip("\"'").strip()
-            if not phrase:
-                continue
-            word_count = len(phrase.split())
-            if 2 <= word_count <= 10 and phrase not in existing:
-                harm_keyword_loader.add_harm_keyword(phrase)
-                print(f"[MODERATION] Learned new harm phrase: {phrase!r}")
 
     def _classify_intent(self, text: str) -> dict:
         try:
@@ -274,8 +239,6 @@ class ModerationService:
         pattern = rf"(?<!\w){re.escape(kw)}(?!\w)"
         return re.search(pattern, text_lower) is not None
 
-    def _should_auto_learn(self) -> bool:
-        return bool(settings.MODERATION_AUTO_LEARN)
 
     def _compute_severity(self, local_result: dict, intent_result: dict) -> str:
         intent = intent_result.get("intent", "safe")

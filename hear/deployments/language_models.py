@@ -1,6 +1,7 @@
 import gc
 import logging
-import httpx
+from typing import Any
+
 import torch
 from ray import serve
 from transformers import (
@@ -11,6 +12,7 @@ from transformers import (
 )
 
 from hear.config import settings
+from hear.core.blocking import NativeWorker
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +20,14 @@ logger = logging.getLogger(__name__)
     name="small_models",
     ray_actor_options={"num_gpus": 0.10, "num_cpus": 0.3},
     num_replicas=1,
+    max_ongoing_requests=1,
+    max_queued_requests=4,
     health_check_period_s=10,
     health_check_timeout_s=30,
 )
 class SmallModelsDeployment:
     def __init__(self) -> None:
+        self._worker = NativeWorker("small-models")
         logger.info("Loading toxic-bert ...")
         self._toxic = pipeline(
             "text-classification",
@@ -47,10 +52,13 @@ class SmallModelsDeployment:
         logger.info("small_models all loaded")
 
     async def __call__(self, request: dict) -> dict:
+        return await self._worker.run(self._infer, request)
+
+    def _infer(self, request: dict) -> dict:
         model_name: str = request.get("model_name", "")
         text: str = request.get("text", "")
-        candidates: Optional[list[str]] = request.get("candidates")
-        hypothesis_template: Optional[str] = request.get("hypothesis_template")
+        candidates: list[str] | None = request.get("candidates")
+        hypothesis_template: str | None = request.get("hypothesis_template")
         try:
             if model_name == "toxic_bert":
                 result = self._toxic(text[:512], truncation=True)
@@ -64,17 +72,27 @@ class SmallModelsDeployment:
                     nli_kwargs["hypothesis_template"] = hypothesis_template
                 result = self._nli(text[:1024], candidates or [], **nli_kwargs)
                 return {"labels": result["labels"], "scores": result["scores"]}
-            return {}
+            raise ValueError("unsupported_small_model")
         except Exception as e:
             logger.error("small_models inference error: %s", e)
             raise
 
-    def __del__(self) -> None:
+    async def close(self) -> None:
+        if hasattr(self, "_worker"):
+            await self._worker.close()
+        self._release()
+
+    def _release(self) -> None:
         for attr in ("_toxic", "_sentiment", "_nli"):
             if hasattr(self, attr):
                 delattr(self, attr)
         gc.collect()
         torch.cuda.empty_cache()
+
+    def __del__(self) -> None:
+        if hasattr(self, "_worker"):
+            self._worker.shutdown()
+        self._release()
 
 
 @serve.deployment(
@@ -85,12 +103,15 @@ class SmallModelsDeployment:
         "max_replicas": 1,
         "target_num_ongoing_requests_per_replica": 1,
     },
+    max_ongoing_requests=1,
+    max_queued_requests=4,
     health_check_period_s=30,
     health_check_timeout_s=600,
     graceful_shutdown_timeout_s=60,
 )
 class LLMDeployment:
     def __init__(self) -> None:
+        self._worker = NativeWorker("llm")
         logger.info("Loading Qwen2.5-7B-Instruct (4-bit quantized) ...")
         self._tokenizer = AutoTokenizer.from_pretrained(
             settings.LLM_MODEL_PATH,
@@ -111,6 +132,9 @@ class LLMDeployment:
         logger.info("LLM ready")
 
     async def generate(self, messages: list[dict], max_tokens: int) -> str:
+        return await self._worker.run(self._generate, messages, max_tokens)
+
+    def _generate(self, messages: list[dict], max_tokens: int) -> str:
         prompt = self._tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True,
         )
@@ -125,26 +149,26 @@ class LLMDeployment:
         return response.strip()
 
     async def generate_batch(self, items: list[tuple[list[dict], int]]) -> list[str]:
+        if len(items) > 8:
+            raise ValueError("llm_batch_too_large")
         results = []
         for messages, max_tokens in items:
-            prompt = self._tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True,
-            )
-            inputs = self._tokenizer(prompt, return_tensors="pt").to("cuda")
-            with torch.no_grad():
-                output = self._model.generate(
-                    **inputs, max_new_tokens=max_tokens, temperature=0.7, top_p=0.9, do_sample=True,
-                )
-            response = self._tokenizer.decode(
-                output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True,
-            )
-            results.append(response.strip())
+            results.append(await self.generate(messages, max_tokens))
         return results
 
-    def __del__(self) -> None:
+    async def close(self) -> None:
+        if hasattr(self, "_worker"):
+            await self._worker.close()
+        self._release()
+
+    def _release(self) -> None:
         for attr in ("_model", "_tokenizer"):
             if hasattr(self, attr):
                 delattr(self, attr)
         gc.collect()
         torch.cuda.empty_cache()
 
+    def __del__(self) -> None:
+        if hasattr(self, "_worker"):
+            self._worker.shutdown()
+        self._release()

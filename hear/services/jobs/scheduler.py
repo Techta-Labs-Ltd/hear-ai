@@ -12,10 +12,15 @@ class PendingJob:
     run_id: str
     user_id: str
     job_type: str
+    lane: str | None = None
 
     @property
     def key(self) -> tuple[str, str]:
         return self.job_id, self.run_id
+
+    @property
+    def admission_type(self) -> str:
+        return self.lane or self.job_type
 
 
 class FairJobScheduler:
@@ -84,10 +89,11 @@ class FairJobScheduler:
                 self._queues.pop(user_id, None)
                 continue
             job = queue[0]
-            type_limit = self.type_limits.get(job.job_type, self.max_active)
+            admission_type = job.admission_type
+            type_limit = self.type_limits.get(admission_type, self.max_active)
             eligible = (
                 self._active_by_user[user_id] < self.max_active_per_user
-                and self._active_by_type[job.job_type] < type_limit
+                and self._active_by_type[admission_type] < type_limit
             )
             self._users.append(user_id)
             if not eligible:
@@ -96,7 +102,7 @@ class FairJobScheduler:
             self._queued.discard(job.key)
             self._active[job.key] = job
             self._active_by_user[user_id] += 1
-            self._active_by_type[job.job_type] += 1
+            self._active_by_type[admission_type] += 1
             if not queue:
                 self._drop_user(user_id)
             return job
@@ -107,7 +113,7 @@ class FairJobScheduler:
         if active is None:
             return
         self._active_by_user[active.user_id] -= 1
-        self._active_by_type[active.job_type] -= 1
+        self._active_by_type[active.admission_type] -= 1
 
     def stats(self) -> dict:
         return {

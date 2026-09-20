@@ -7,13 +7,12 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-import torchaudio
 import whisperx
-from whisperx.asr_qwen import load_model as load_qwen_asr_model
 from ray import serve
+from whisperx.asr_qwen import load_model as load_qwen_asr_model
 
 from hear.config import settings
+from hear.core.blocking import NativeWorker
 from hear.core.hear_temp import hear_temp_directory
 from hear.services.transcription.chunks import (
     adaptive_batch_size,
@@ -23,15 +22,6 @@ from hear.services.transcription.chunks import (
 )
 
 logger = logging.getLogger(__name__)
-
-_ORIG_PAD = F.pad
-
-def _patched_pad(input, pad, mode="constant", value=None):
-    if isinstance(input, np.ndarray):
-        input = torch.from_numpy(input)
-    return _ORIG_PAD(input, pad, mode=mode, value=value)
-
-F.pad = _patched_pad
 
 @serve.deployment(
     name="transcription",
@@ -44,11 +34,14 @@ F.pad = _patched_pad
         "downscale_delay_s": 600.0,
     },
     health_check_period_s=5,
+    max_ongoing_requests=1,
+    max_queued_requests=4,
     health_check_timeout_s=300,
     graceful_shutdown_timeout_s=30,
 )
 class TranscriptionDeployment:
     def __init__(self) -> None:
+        self._worker = NativeWorker("transcription")
         self._cuda_healthy = True
         logger.info("Loading WhisperX Qwen3-ASR + Qwen3 ForcedAligner ...")
         self._asr = load_qwen_asr_model(
@@ -80,6 +73,32 @@ class TranscriptionDeployment:
         logger.info("WhisperX Qwen3-ASR + Qwen3 ForcedAligner ready")
 
     async def transcribe(self, audio_bytes: bytes, batch_size: int) -> str:
+        if len(audio_bytes) > 16 * 1024 * 1024:
+            raise ValueError("reference_audio_too_large")
+        return await self._worker.run(self._transcribe, audio_bytes, batch_size)
+
+    async def transcribe_window(self, samples, batch_size: int, language: str) -> dict:
+        if not isinstance(samples, np.ndarray) or samples.ndim != 1:
+            raise ValueError("invalid_transcription_window")
+        if not 0 < samples.size <= 600 * 16000 or not np.isfinite(samples).all():
+            raise ValueError("invalid_transcription_window")
+        if not 1 <= batch_size <= settings.WHISPER_BATCH_SIZE:
+            raise ValueError("invalid_transcription_batch")
+        return await self._worker.run(self._transcribe_window, samples, batch_size, language)
+
+    def _transcribe_window(self, samples, batch_size: int, language: str) -> dict:
+        try:
+            with torch.no_grad():
+                result = self._asr.transcribe(samples, batch_size=batch_size, language=language)
+            if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+                raise RuntimeError("invalid_transcription_window_result")
+            return result
+        except RuntimeError as exc:
+            if "cuda" in str(exc).lower() or "out of memory" in str(exc).lower():
+                self._cuda_healthy = False
+            raise
+
+    def _transcribe(self, audio_bytes: bytes, batch_size: int) -> str:
         with tempfile.NamedTemporaryFile(
             suffix=".wav", delete=False, dir=hear_temp_directory()
         ) as f:
@@ -117,9 +136,6 @@ class TranscriptionDeployment:
                 del result
                 torch.cuda.empty_cache()
             return json.dumps(finalize_combined_result(combined))
-        except (IndexError, ValueError) as e:
-            logger.warning("Transcription produced no output (likely no speech detected): %s", e)
-            return json.dumps({"segments": [], "language": "en", "text": ""})
         except RuntimeError as exc:
             if "cuda" in str(exc).lower() or "out of memory" in str(exc).lower():
                 self._cuda_healthy = False
@@ -137,10 +153,19 @@ class TranscriptionDeployment:
         if not self._cuda_healthy:
             raise RuntimeError("transcription CUDA context requires replica restart")
 
-    def __del__(self) -> None:
+    async def close(self) -> None:
+        if hasattr(self, "_worker"):
+            await self._worker.close()
+        self._release()
+
+    def _release(self) -> None:
         for attr in ("_asr",):
             if hasattr(self, attr):
                 delattr(self, attr)
         gc.collect()
         torch.cuda.empty_cache()
 
+    def __del__(self) -> None:
+        if hasattr(self, "_worker"):
+            self._worker.shutdown()
+        self._release()

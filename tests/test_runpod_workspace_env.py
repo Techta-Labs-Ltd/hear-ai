@@ -24,7 +24,6 @@ def test_runpod_workspace_script_prepares_only_local_directories(tmp_path):
         str(tmp_path / ".cache/uv"),
     ]
     assert (tmp_path / "fish-speech").is_dir()
-    assert (tmp_path / "checkpoints").is_dir()
 
 
 def test_runpod_workspace_script_contains_no_download_command():

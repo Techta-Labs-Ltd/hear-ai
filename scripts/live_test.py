@@ -6,7 +6,7 @@ Usage:
 
 All Pipeline RPCs are tested against live deployments. The test skips
 state-mutating calls (CreatePreview, ConfirmPreview, RemoveSegment,
-RollbackPreview, TrainCategorizer, IngestCategoryEvent,
+RollbackPreview,
 UpdatePlatformSettings) unless --destructive is passed.
 """
 
@@ -52,8 +52,6 @@ from google.protobuf.empty_pb2 import Empty as Empty
 
 from hear.proto import pipeline_pb2
 from hear.proto.pipeline_pb2_grpc import PipelineStub
-from hear.proto.resolver_pb2 import HealthRequest, ResolveRequest
-from hear.proto.resolver_pb2_grpc import ResolverStub
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--destructive", action="store_true", help="Run state-mutating RPCs too")
@@ -108,7 +106,6 @@ except Exception as e:
     sys.exit(1)
 
 p_stub = PipelineStub(ch)
-r_stub = ResolverStub(ch)
 
 # ---------------------------------------------------------------------------
 # 2. Health
@@ -335,32 +332,6 @@ try:
         check("DiscoveryItem has discovery Struct", item.HasField("discovery"))
 except grpc.RpcError as e:
     fail("ListDiscovery", f"{e.code()} {e.details()}")
-
-# ---------------------------------------------------------------------------
-# 10. Resolver RPCs
-# ---------------------------------------------------------------------------
-print("\n=== 10. Resolver ===")
-
-try:
-    reply = r_stub.ResolverHealth(HealthRequest(), timeout=10, metadata=METADATA)
-    check("ResolverHealth returns typed message", type(reply).DESCRIPTOR.name == "HealthReply" or True)
-    check("ResolverHealth.ready is bool", isinstance(reply.ready, bool))
-    check("ResolverHealth.version >= 0", reply.version >= 0)
-    ok("ResolverHealth", f"status={reply.status} ready={reply.ready} version={reply.version}")
-except grpc.RpcError as e:
-    fail("ResolverHealth", f"{e.code()} {e.details()}")
-
-try:
-    reply = r_stub.Resolve(
-        ResolveRequest(utterance="play jazz music", country_code="US"),
-        timeout=10,
-        metadata=METADATA,
-    )
-    check("Resolve returns typed message", type(reply).DESCRIPTOR.name == "ResolveReply" or type(reply).__class__.__name__ == "ResolveReply")
-    check("Resolve.version >= 0", reply.version >= 0)
-    check("Resolve has structured resolution", bool(reply.category.name or reply.action or reply.tags))
-except grpc.RpcError as e:
-    fail("Resolve", f"{e.code()} {e.details()}")
 
 # ---------------------------------------------------------------------------
 # 11. Auth — unauthenticated call

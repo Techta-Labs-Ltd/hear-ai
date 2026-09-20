@@ -78,24 +78,6 @@ class AiTrackJob(Base):
     )
 
 
-class CategoryTrainingExample(Base):
-    __tablename__ = "category_training_examples"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    source = Column(String, nullable=False, default="webhook")
-    event_type = Column(String, nullable=False, index=True)
-    text = Column(String, nullable=False)
-    category = Column(String, nullable=True, index=True)
-    tags = Column(JSON, nullable=True)
-    label = Column(String, nullable=True, index=True)
-    raw_payload = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        Index("ix_category_training_examples_created_label", "created_at", "label"),
-    )
-
-
 class CategoryLabel(Base):
     __tablename__ = "category_labels"
 
@@ -172,14 +154,6 @@ class RegenerationPreview(Base):
     confirmed_at = Column(DateTime, nullable=True)
 
 
-
-
-if not settings.DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL is required (PostgreSQL). Set it in .env, e.g. "
-        "postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
-    )
-
 _engine = None
 _SessionLocal = None
 
@@ -187,6 +161,8 @@ _SessionLocal = None
 def _get_engine():
     global _engine
     if _engine is None:
+        if not settings.DATABASE_URL:
+            raise RuntimeError("DATABASE_URL is required to initialize PostgreSQL")
         _engine = create_engine(
             settings.DATABASE_URL,
             echo=False,
@@ -267,4 +243,3 @@ def _run_migrations():
                 "WHERE run_id IS NULL OR run_id = ''"
             )
         )
-

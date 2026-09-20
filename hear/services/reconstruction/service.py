@@ -39,9 +39,13 @@ class PreviewResult:
 
 
 class RegenerationService:
-    def __init__(self, synthesizer: SpeechSynthesizer):
+    def __init__(
+        self,
+        synthesizer: SpeechSynthesizer,
+        quality_assessor: RegenerationQualityAssessor,
+    ):
         self._synthesizer = synthesizer
-        self._quality_assessor = RegenerationQualityAssessor()
+        self._quality_assessor = quality_assessor
 
     async def create_preview(
         self,
@@ -85,7 +89,7 @@ class RegenerationService:
                     orig_sr,
                     self._synthesizer.TARGET_SR,
                 )
-            quality_metrics = {}
+            quality_metrics: dict = {}
             preview_dl_path = None
             try:
                 preview_dl_path = await asyncio.get_event_loop().run_in_executor(
@@ -127,7 +131,11 @@ class RegenerationService:
                 }
             except Exception as e:
                 logger.warning("Quality assessment failed for preview: %s", e)
-                quality_metrics = {"passed": True, "error": str(e)}
+                quality_metrics = {
+                    "passed": False,
+                    "status": "unavailable",
+                    "error": "quality_assessment_failed",
+                }
             finally:
                 if preview_dl_path:
                     drop_temp_standalone(preview_dl_path)
@@ -199,6 +207,10 @@ class RegenerationService:
             ).first()
             if not preview:
                 raise ValueError(f"Preview {preview_id} not found or not pending")
+            if preview.expires_at <= datetime.utcnow():
+                raise ValueError("preview_expired")
+            if (preview.quality_metrics or {}).get("passed") is not True:
+                raise ValueError("preview_quality_not_passed")
             preview.status = "confirmed"
             preview.confirmed_at = datetime.utcnow()
             await self._commit(db)

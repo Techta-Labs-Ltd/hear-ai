@@ -4,6 +4,10 @@ Hear AI is one Python project containing the audio intelligence pipeline,
 and model deployments. Ray Serve owns model lifecycle,
 scheduling, the FastAPI ingress, and the built-in gRPC proxy.
 
+The staged refactor is tracked in [implementation status](04_IMPLEMENTATION_STATUS.md).
+Required backend changes are in [the backend handoff](05_HEAR_BACKEND_HANDOFF.md).
+The active runtime is still the legacy protocol; backend-owned execution is not enabled.
+
 ## Runtime architecture
 
 ```text
@@ -194,9 +198,8 @@ the deployment image.
 - `main.py`: only production entry point
 - `hear/config.py`: unified settings
 - `hear/deployments/`: Ray models, audio cleanup, orchestrator, and FastAPI/gRPC gateway graph
-- `hear/proto/`: Pipeline and Resolver protobuf contracts/stubs
+- `hear/proto/`: Pipeline protobuf contracts/stubs
 - `hear/services/`: application and audio-processing services
-- `hear/resolver/`: resolver domain implementation
 - `tests/`: unit, contract, and integration tests
 
 Outbound HTTP/S3 integrations to the Hear backend, taxonomy CDN, and object

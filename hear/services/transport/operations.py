@@ -1,27 +1,18 @@
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
 import uuid
 
-import torch
-
+from hear.core.backend_registry import validate_storage_for_backend
 from hear.core.category_loader import category_loader
 from hear.core.discovery_sort import VALID_DISCOVERY_SORTS, sort_discovery_items
-from hear.core.backend_registry import validate_storage_for_backend
+from hear.core.health import ServiceHealth
 from hear.core.keyword_loader import auto_tag_keyword_loader, harm_keyword_loader
 from hear.core.storage import B2Storage
+from hear.models.database import AiTrackJob, SessionLocal
 from hear.models.schemas import StorageContext
-from hear.models.database import AiTrackJob, CategoryTrainingExample, SessionLocal
 from hear.services.categorization.service import CategorizationService
 from hear.services.moderation.service import ModerationService
 from hear.services.reconstruction.service import RegenerationService
-from hear.services.reconstruction.synthesizer import SpeechSynthesizer
-from hear.training.categorizer_train import ray_train_categorizer
-
-
-logger = logging.getLogger(__name__)
 
 
 class ServiceError(Exception):
@@ -32,11 +23,17 @@ class ServiceError(Exception):
 
 
 class Operations:
-    def __init__(self) -> None:
-        self._moderator = ModerationService()
-        self._categorizer = CategorizationService()
-        self._regeneration = RegenerationService(SpeechSynthesizer())
-        self._training_tasks: dict[str, asyncio.Task] = {}
+    def __init__(
+        self,
+        moderator: ModerationService,
+        categorizer: CategorizationService,
+        regeneration: RegenerationService,
+        health: ServiceHealth,
+    ) -> None:
+        self._moderator = moderator
+        self._categorizer = categorizer
+        self._regeneration = regeneration
+        self._health = health
 
     async def moderate(self, text: str) -> dict:
         return await self._moderator.moderate(text)
@@ -229,84 +226,6 @@ class Operations:
         finally:
             db.close()
 
-    async def train(self, target: str) -> dict:
-        if target not in {"category", "tags", "harm"}:
-            raise ServiceError(422, "target must be category, tags, or harm")
-        result = await asyncio.to_thread(ray_train_categorizer, target=target)
-        if isinstance(result, dict) and not result.get("error"):
-            from hear.training.categorizer_infer import invalidate_classifier
-
-            invalidate_classifier(target)
-        if not isinstance(result, dict):
-            return {"status": "completed", "detail": str(result)}
-        if result.get("error"):
-            return {"status": "skipped", "detail": str(result["error"])}
-        return {
-            "status": "completed",
-            "detail": json.dumps(result, default=str, sort_keys=True),
-        }
-    def _schedule_training(self, targets: set[str]) -> None:
-        """Start one background Ray Train run per target without blocking ingestion."""
-        tasks = getattr(self, "_training_tasks", None)
-        if tasks is None:
-            tasks = self._training_tasks = {}
-        for target in targets:
-            current = tasks.get(target)
-            if current is not None and not current.done():
-                continue
-            task = asyncio.create_task(self._run_automatic_training(target))
-            tasks[target] = task
-
-    async def _run_automatic_training(self, target: str) -> None:
-        try:
-            result = await asyncio.to_thread(ray_train_categorizer, target=target)
-            if result.get("error"):
-                logger.info("automatic %s training deferred: %s", target, result["error"])
-                return
-            from hear.training.categorizer_infer import invalidate_classifier
-
-            invalidate_classifier(target)
-            logger.info("automatic %s training completed: %s", target, result)
-        except Exception:
-            logger.exception("automatic %s training failed", target)
-        finally:
-            tasks = getattr(self, "_training_tasks", {})
-            current = tasks.get(target)
-            if current is asyncio.current_task():
-                tasks.pop(target, None)
-
-
-    async def ingest_category_event(self, event: dict) -> dict:
-        example = CategoryTrainingExample(
-            source="grpc",
-            event_type=event["event_type"],
-            text=event["text"],
-            category=event.get("category"),
-            tags=event.get("tags") or [],
-            label=event.get("label"),
-            raw_payload=event,
-        )
-        db = SessionLocal()
-        try:
-            db.add(example)
-            db.commit()
-            example_id = example.id
-        finally:
-            db.close()
-        if event.get("category"):
-            category_loader.add_category(event["category"])
-        for tag in event.get("tags") or []:
-            category_loader.add_tag(tag)
-        targets = set()
-        if event.get("category"):
-            targets.add("category")
-        if event.get("tags"):
-            targets.add("tags")
-        if event.get("label") in {"harmful", "safe"}:
-            targets.add("harm")
-        self._schedule_training(targets)
-        return {"status": "accepted", "example_id": example_id}
-
     async def update_platform_settings(
         self,
         blocked_keywords: str,
@@ -318,37 +237,8 @@ class Operations:
         ]
         harm_keyword_loader.sync_platform_keywords(blocked)
         auto_tag_keyword_loader.sync(auto_tags)
-        db = SessionLocal()
-        try:
-            for keyword in auto_tags:
-                category_loader.add_tag(keyword)
-                db.add(
-                    CategoryTrainingExample(
-                        source="grpc",
-                        event_type="auto_tag_keyword",
-                        text=keyword,
-                        tags=[f"#{keyword.lstrip('#')}"],
-                        label="auto_tag",
-                    )
-                )
-            for keyword in blocked:
-                db.add(
-                    CategoryTrainingExample(
-                        source="grpc",
-                        event_type="blocked_keyword",
-                        text=keyword,
-                        label="harmful",
-                    )
-                )
-            db.commit()
-        finally:
-            db.close()
-        targets = set()
-        if auto_tags:
-            targets.add("tags")
-        if blocked:
-            targets.add("harm")
-        self._schedule_training(targets)
+        for keyword in auto_tags:
+            category_loader.add_tag(keyword)
         return {
             "status": "accepted",
             "blocked_keywords_count": len(blocked),
@@ -356,22 +246,4 @@ class Operations:
         }
 
     async def health(self, queue: dict) -> dict:
-        available = torch.cuda.is_available()
-        memory: dict[str, float] = {}
-        gpu_name = ""
-        if available:
-            gpu_name = torch.cuda.get_device_name(0)
-            free, total = torch.cuda.mem_get_info()
-            memory = {
-                "free_mb": round(free / 1e6, 1),
-                "used_mb": round((total - free) / 1e6, 1),
-                "total_mb": round(total / 1e6, 1),
-            }
-        return {
-            "status": "healthy",
-            "gpu_available": available,
-            "gpu_name": gpu_name,
-            "gpu_memory": memory,
-            "active_jobs": queue.get("active", 0),
-            "queued_jobs": queue.get("queued", 0),
-        }
+        return await self._health.read(queue)

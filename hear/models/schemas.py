@@ -222,25 +222,6 @@ class DiscoveryCatalogResponse(BaseModel):
     items: list[DiscoveryCatalogItem]
 
 
-class CategoryWebhookEvent(BaseModel):
-    event_type: str
-    text: str
-    category: Optional[str] = None
-    tags: list[str] = Field(default_factory=list)
-    label: Optional[str] = None
-    source_id: Optional[str] = None
-
-
-class CategoryWebhookResponse(BaseModel):
-    status: str = "accepted"
-    example_id: str
-
-
-class TrainCategorizerResponse(BaseModel):
-    status: str
-    detail: str = ""
-
-
 class PlatformSettingsWebhookEvent(BaseModel):
     blocked_keywords: str = ""    # comma-separated, e.g. "spam,scam,fraud"
     auto_tag_keywords: str = ""   # comma-separated, e.g. "news,breaking,exclusive,interview,report"

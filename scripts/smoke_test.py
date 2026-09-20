@@ -28,26 +28,12 @@ import grpc as _grpc
 
 from hear.proto.pipeline_pb2 import GetResultRequest, SubscribeRequest
 from hear.proto.pipeline_pb2_grpc import PipelineStub
-from hear.proto.resolver_pb2 import HealthRequest, ResolveRequest
-from hear.proto.resolver_pb2_grpc import ResolverStub
 
 ch = _grpc.insecure_channel("localhost:50051")
 _grpc.channel_ready_future(ch).result(timeout=10)
 print("gRPC channel: CONNECTED")
 
 metadata = (("x-api-key", HEAR_SERVICE_KEY), ("application", "hear"))
-
-r_stub = ResolverStub(ch)
-reply = r_stub.Resolve(
-    ResolveRequest(utterance="play jazz music", country_code="US"),
-    timeout=10,
-    metadata=metadata,
-)
-print(f"Resolve: cat={reply.category.name if reply.category else 'none'}")
-print(
-    "Resolver health:",
-    r_stub.ResolverHealth(HealthRequest(), timeout=5, metadata=metadata),
-)
 
 p_stub = PipelineStub(ch)
 try:

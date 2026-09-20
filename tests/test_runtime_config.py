@@ -3,9 +3,11 @@ import json
 from pathlib import Path
 
 import pytest
+import torch.nn.functional as F
 from cryptography.fernet import Fernet
 
 from hear.config import Settings
+from hear.deployments import app, fish_speech, transcription
 from main import validate_runtime
 
 
@@ -33,10 +35,15 @@ def configured_settings(model_dir: Path, **overrides) -> Settings:
         "DEMUCS_MODEL_PATH": str(model_dir),
         "FISH_SPEECH_HOME": str(model_dir),
         "FISH_SPEECH_CHECKPOINT_PATH": str(model_dir),
-        "RESOLVER_SEMANTIC_MODEL": str(model_dir),
+        "FISH_SPEECH_CODEC_PATH": str(model_dir / "codec.pth"),
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
+
+
+@pytest.fixture(autouse=True)
+def installed_runtime_modules(monkeypatch):
+    monkeypatch.setattr("main._missing_modules", lambda _names: [])
 
 
 def test_runtime_validation_accepts_preprovisioned_artifacts(tmp_path):
@@ -101,7 +108,6 @@ def test_durable_defaults_use_workspace():
     assert defaults.MODEL_CACHE_DIR == "/workspace/models"
     assert defaults.QWEN_ASR_MODEL_PATH == "/workspace/models/qwen3-asr-1.7b"
     assert defaults.MOSSFORMER_MODEL_PATH == "/workspace/models/mossformer2-se-48k"
-    assert defaults.TRAINING_CHECKPOINT_DIR == "/workspace/checkpoints"
     assert defaults.FISH_SPEECH_HOME == "/workspace/fish-speech"
     assert defaults.FISH_SPEECH_CHECKPOINT_PATH.startswith("/workspace/models/")
     assert defaults.FISH_SPEECH_CODEC_PATH.startswith("/workspace/models/")
@@ -110,16 +116,13 @@ def test_durable_defaults_use_workspace():
 def test_durable_paths_allow_environment_overrides(monkeypatch, tmp_path):
     model_root = tmp_path / "models"
     fish_root = tmp_path / "fish-speech"
-    checkpoint_root = tmp_path / "checkpoints"
     monkeypatch.setenv("MODEL_CACHE_DIR", str(model_root))
     monkeypatch.setenv("FISH_SPEECH_HOME", str(fish_root))
-    monkeypatch.setenv("TRAINING_CHECKPOINT_DIR", str(checkpoint_root))
 
     configured = Settings(_env_file=None)
 
     assert configured.MODEL_CACHE_DIR == str(model_root)
     assert configured.FISH_SPEECH_HOME == str(fish_root)
-    assert configured.TRAINING_CHECKPOINT_DIR == str(checkpoint_root)
 
 
 def test_magic_clean_has_a_demucs_model_default(tmp_path):
@@ -184,15 +187,12 @@ def test_default_single_gpu_deployment_budget_allows_one_heavy_actor(tmp_path):
         0.20  # transcription
         + 0.10  # small models
         + 0.25  # LLM
-        + (runtime.RESOLVER_NUM_GPUS * runtime.RESOLVER_REPLICA_COUNT)
         + 0.05  # orchestrator
     )
     on_demand = 0.35
 
     assert runtime.MAGIC_CLEAN_REPLICA_COUNT == 1
     assert runtime.FISH_SPEECH_REPLICA_COUNT == 1
-    assert runtime.RESOLVER_REPLICA_COUNT == 3
-    assert runtime.RESOLVER_NUM_GPUS == 0.01
     assert resident + on_demand <= 1.0
     assert resident + (2 * on_demand) > 1.0
 
@@ -202,15 +202,11 @@ def test_on_demand_gpu_models_have_a_short_idle_timeout(tmp_path):
 
 
 def test_fish_speech_deployment_imports_startup_dependencies():
-    from hear.deployments import fish_speech
-
-    assert fish_speech.os.path is not None
+    assert callable(fish_speech.FishSpeechDeployment.func_or_class)
     assert callable(fish_speech.time.time)
 
 
 def test_transcription_deployment_uses_qwen_backend(monkeypatch):
-    from hear.deployments import transcription
-
     captured = {}
 
     def fake_load(model_path, **kwargs):
@@ -229,22 +225,30 @@ def test_transcription_deployment_uses_qwen_backend(monkeypatch):
 
 
 def test_transcription_deployment_imports_cleanup_dependency():
-    from hear.deployments import transcription
-
     assert callable(transcription.os.unlink)
 
 
-def test_ray_graph_uses_audio_cleanup_and_not_resolver():
-    from hear.deployments import app
+def test_transcription_import_preserves_torch_padding():
+    assert F.pad.__module__ == "torch.nn.functional"
 
-    source = Path(app.__file__).read_text()
 
-    assert "AudioCleanupDeployment.bind()" in source
-    assert "ResolverDeployment" not in source
+def test_ray_graph_uses_audio_cleanup(monkeypatch):
+    calls = []
+
+    def bind(module_name, class_name, *dependencies):
+        calls.append((module_name, class_name, dependencies))
+        return class_name
+
+    monkeypatch.setattr(app.ApplicationBuilder, "_bind", staticmethod(bind))
+    runtime = Settings(_env_file=None, QWEN_LLM_ENABLED=False, FISH_SPEECH_TTS_ENABLED=False)
+    assert app.build_application(runtime) == "GrpcGateway"
+    assert "AudioCleanupDeployment" in [call[1] for call in calls]
+    assert "FishSpeechDeployment" not in [call[1] for call in calls]
+    assert "LLMDeployment" not in [call[1] for call in calls]
+    assert calls[-1][2][-1] is None
 
 
 def test_main_registers_only_pipeline_grpc_service():
     source = Path(__import__("main").__file__).read_text()
 
     assert "add_PipelineServicer_to_server" in source
-    assert "add_ResolverServicer_to_server" not in source

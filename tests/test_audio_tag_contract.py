@@ -57,7 +57,7 @@ async def _assert_audio_tag_pipeline_stops_after_transcription(monkeypatch, tmp_
     orchestrator = orchestrator_class.__new__(orchestrator_class)
     orchestrator._set_stage = AsyncMock(return_value=True)
     orchestrator._transcriber = SimpleNamespace(
-        transcribe=AsyncMock(return_value=transcription)
+        transcribe_file=AsyncMock(return_value=transcription)
     )
     orchestrator._moderator = SimpleNamespace(moderate=AsyncMock())
     orchestrator._categorizer = SimpleNamespace(
@@ -95,8 +95,8 @@ async def _assert_audio_tag_pipeline_stops_after_transcription(monkeypatch, tmp_
             "suggestions": ["#construction", "#news"],
         }
     ]
-    orchestrator._transcriber.transcribe.assert_awaited_once_with(
-        b"audio fixture",
+    orchestrator._transcriber.transcribe_file.assert_awaited_once_with(
+        str(audio_path),
         job_id="job-1",
         run_id="run-1",
         track_id="track-1",

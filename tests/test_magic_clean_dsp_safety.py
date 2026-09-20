@@ -12,7 +12,7 @@ from hear.services.magic_clean.processing.mossformer import (
     MossFormer2Enhancer,
     MossFormerOutputError,
 )
-from hear.services.magic_clean.processing.noise import NoiseReducer
+from hear.core.noise import NoiseReducer
 from hear.services.magic_clean.processing.silence import SilenceProcessor
 from hear.services.magic_clean.processing.stems import StemSeparator
 
