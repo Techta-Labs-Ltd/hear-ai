@@ -39,7 +39,7 @@ class StorageContext(_message.Message):
     def __init__(self, endpoint_url: _Optional[str] = ..., bucket_name: _Optional[str] = ..., key_id: _Optional[str] = ..., application_key: _Optional[str] = ..., folder_prefix: _Optional[str] = ..., public_base_url: _Optional[str] = ..., expires_at: _Optional[str] = ...) -> None: ...
 
 class SubmitJobRequest(_message.Message):
-    __slots__ = ("job_id", "track_id", "job_type", "max_tags", "audio_url", "edited_transcript", "changes", "same_speaker", "grouped", "group_id", "kind", "source", "track_count", "speed_multipliers", "playback_instruction", "user_id", "speech", "music", "background", "type", "media_file_id", "cut_silence", "backend_id", "storage")
+    __slots__ = ("job_id", "track_id", "job_type", "max_tags", "audio_url", "edited_transcript", "changes", "same_speaker", "grouped", "group_id", "kind", "source", "track_count", "playback_instruction", "user_id", "speech", "music", "background", "type", "media_file_id", "cut_silence", "backend_id", "storage")
     JOB_ID_FIELD_NUMBER: _ClassVar[int]
     TRACK_ID_FIELD_NUMBER: _ClassVar[int]
     JOB_TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -53,7 +53,6 @@ class SubmitJobRequest(_message.Message):
     KIND_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     TRACK_COUNT_FIELD_NUMBER: _ClassVar[int]
-    SPEED_MULTIPLIERS_FIELD_NUMBER: _ClassVar[int]
     PLAYBACK_INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SPEECH_FIELD_NUMBER: _ClassVar[int]
@@ -77,7 +76,6 @@ class SubmitJobRequest(_message.Message):
     kind: str
     source: str
     track_count: int
-    speed_multipliers: _containers.RepeatedScalarFieldContainer[float]
     playback_instruction: str
     user_id: str
     speech: int
@@ -88,7 +86,7 @@ class SubmitJobRequest(_message.Message):
     cut_silence: bool
     backend_id: str
     storage: StorageContext
-    def __init__(self, job_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., max_tags: _Optional[int] = ..., audio_url: _Optional[str] = ..., edited_transcript: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., same_speaker: bool = ..., grouped: bool = ..., group_id: _Optional[str] = ..., kind: _Optional[str] = ..., source: _Optional[str] = ..., track_count: _Optional[int] = ..., speed_multipliers: _Optional[_Iterable[float]] = ..., playback_instruction: _Optional[str] = ..., user_id: _Optional[str] = ..., speech: _Optional[int] = ..., music: _Optional[int] = ..., background: _Optional[int] = ..., type: _Optional[str] = ..., media_file_id: _Optional[str] = ..., cut_silence: bool = ..., backend_id: _Optional[str] = ..., storage: _Optional[_Union[StorageContext, _Mapping]] = ...) -> None: ...
+    def __init__(self, job_id: _Optional[str] = ..., track_id: _Optional[str] = ..., job_type: _Optional[str] = ..., max_tags: _Optional[int] = ..., audio_url: _Optional[str] = ..., edited_transcript: _Optional[str] = ..., changes: _Optional[_Iterable[_Union[SegmentChange, _Mapping]]] = ..., same_speaker: bool = ..., grouped: bool = ..., group_id: _Optional[str] = ..., kind: _Optional[str] = ..., source: _Optional[str] = ..., track_count: _Optional[int] = ..., playback_instruction: _Optional[str] = ..., user_id: _Optional[str] = ..., speech: _Optional[int] = ..., music: _Optional[int] = ..., background: _Optional[int] = ..., type: _Optional[str] = ..., media_file_id: _Optional[str] = ..., cut_silence: bool = ..., backend_id: _Optional[str] = ..., storage: _Optional[_Union[StorageContext, _Mapping]] = ...) -> None: ...
 
 class SubmitJobResponse(_message.Message):
     __slots__ = ("job_id", "run_id", "status", "error", "backend_id")

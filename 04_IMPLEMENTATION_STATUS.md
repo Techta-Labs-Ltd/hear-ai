@@ -63,7 +63,7 @@ The earlier explicit instruction to remove training remains in effect pending cl
 | A29–A31 | Training remains removed and import-time warning configuration removed; full immutable tenant-policy/global-client migration remains |
 | A32 | Additive health/presence protocol changes; ExecuteAttempt and backend-owned compatibility routing remain |
 | A33 | Conflicts with prior explicit removal instruction; not restored |
-| A34 | Prior AI resolver removal retained; backend resolver/speed verification not performed |
+| A34 | Prior AI resolver removal retained; backend resolver verification not performed |
 | A35 | Live synthesis tool migrated to explicit clients; complete operational/tooling consolidation remains |
 | A36 | Focused regression tests added; T01–T44 are not all satisfied |
 

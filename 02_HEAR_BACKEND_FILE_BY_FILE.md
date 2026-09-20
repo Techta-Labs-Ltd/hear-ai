@@ -353,16 +353,16 @@ Persist decisions and next_attempt_at/block reason before releasing a claim. Kee
 
 | File | Direct implementation changes |
 |---|---|
-| `service.py` | Keep AudioSourceMutationService.replace_source and its expected_audio_revision check. Make transaction ownership explicit so result/approval state, source mutation and journal append can commit atomically. Remove hidden nested commits from the domain operation after callers are migrated; the top-level use case owns commit. Persist post-commit waveform/speed/catalog/cleanup intents before delivery so a process crash cannot lose them. |
+| `service.py` | Keep AudioSourceMutationService.replace_source and its expected_audio_revision check. Make transaction ownership explicit so result/approval state, source mutation and journal append can commit atomically. Remove hidden nested commits from the domain operation after callers are migrated; the top-level use case owns commit. Persist post-commit waveform/catalog/cleanup intents before delivery so a process crash cannot lose them. |
 | `repository.py` | Keep lock_track and current revision validation; add only the missing canonical/idempotency queries. Use the same transaction as approval/result application and require current source revision. |
-| `policies.py` | Retain preserve_publication and derived-asset invalidation/scheduling policies. Keep generation-on-publish rules in the current publish policy, not another flag. Do not schedule speed layers for unapproved previews. |
+| `policies.py` | Retain preserve_publication and derived-asset invalidation/scheduling policies. Keep generation-on-publish rules in the current publish policy, not another flag. |
 | `types.py` | Keep AudioSourceChangeReason/Policy/Result; include producing job/attempt/source identity where needed without duplicating AudioTrack.audio_revision. |
 | `factory.py` | Compose concrete transaction-scoped collaborators once. Pass the real EventJournal, waveform scheduler, invalidator and cleanup/catalog collaborators; avoid creating unrelated hidden global clients. |
 | `__init__.py` | Export the stable service/factory/types only. |
 
 The current replace_source already preserves publication when policy allows and uses expected_audio_revision. Retain those safeguards; do not reimplement them separately inside AI handlers. Keep actual updated duration from the accepted candidate. Repeated approval must not increment audio_revision twice.
 
-Do not wait for waveform generation during publish/source mutation. Schedule waveform and speed work independently through existing owners. A waveform event must never become a trigger for speed layers. Use an idempotent canonical-revision key for derivative work and stable 1x source reuse.
+Do not wait for waveform generation during publish/source mutation. Use an idempotent canonical-revision key for derivative work.
 
 **Done when:** T30–T33/T39/T42 pass with failures between source commit and task delivery.
 
@@ -419,7 +419,7 @@ Create additive migrations in the project's actual migration directory after che
 
 Preserve backend `services/resolver/`; remove calls to the AI resolver after verifying equivalent current backend resolver behaviour. Do not redesign Alexa recognition in this migration.
 
-Preserve `services/speed_render/`, including its canonical revision/projection behaviour, and `services/waveform/service.py`. Use these existing owners after AI speed removal. Do not render speeds for previews, regenerate 1x unnecessarily, require waveform completion for publish or schedule speed work from waveform events. Audit the producing task/event keys and use canonical audio_revision for idempotency.
+Preserve `services/waveform/service.py`. Do not require waveform completion for publish. Audit the producing task/event keys and use canonical audio_revision for idempotency.
 
 Preserve existing catalog indexing, settings, content flagging, publication, email and user/organisation permission services. Move only the named AI-owned data/operations into their appropriate existing owner. Do not refactor payment/authentication/other providers merely because they share BaseService or worker infrastructure.
 

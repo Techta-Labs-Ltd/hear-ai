@@ -90,7 +90,7 @@ Read section IDs in [02_HEAR_BACKEND_FILE_BY_FILE.md](02_HEAR_BACKEND_FILE_BY_FI
 | A17/A19/A27/A28 | transcription, enhancement, Fish Speech, small-model and LLM deployments |
 | A32 | pipeline proto, generated .py/.pyi files, transport compatibility and resolver protocol removal |
 | A33 | all seven identified training files and dataset/model ownership |
-| A34 | resolver package/deployment removal and speed/prompt distinction |
+| A34 | resolver package/deployment removal and playback-prompt retention |
 | A35 | all eight identified scripts, cleanup tooling, docs and package imports |
 | A36 | unit/contract/GPU/storage/failure testing and final deletion scan |
 
@@ -104,7 +104,7 @@ Read section IDs in [02_HEAR_BACKEND_FILE_BY_FILE.md](02_HEAR_BACKEND_FILE_BY_FI
 | B24 | all six identified audio_source files; existing audio_revision and canonical mutation |
 | B25 | health/probe/policies/repository and incident dedupe/delivery |
 | B26–B27 | creator/schema/approval routes, protocol/stubs, configuration, composition and migrations |
-| B28 | preserved backend resolver, speed rendering, waveform, catalog and unrelated product owners |
+| B28 | preserved backend resolver, waveform, catalog and unrelated product owners |
 | B29 | final dispositions and production gate |
 
 ## Status discipline

@@ -1095,7 +1095,6 @@ def test_legacy_job_without_storage_cannot_match_current_request():
             "grouped": False,
             "kind": "track",
             "track_count": 1,
-            "speed_multipliers": [],
             "user_id": "user",
         },
     )

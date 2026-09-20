@@ -25,8 +25,8 @@ The maps cover every identified Hear-AI package and every identified file in its
 | Approval | Approve the exact candidate that was previewed. Confirmation must not run synthesis again. |
 | Publication | Preserve published state during background processing and failure. Use the existing canonical audio-source mutation service and existing publish policy. |
 | Notifications | Commit durable events before delivery. Reuse backend SSE, WebSocket, AI notification, health and incident services. |
-| Removed AI responsibilities | Remove AI SQL jobs, preview persistence, catalogue mutation, business retry ownership, resolver and speed generation after their caller/data gates pass. |
-| Retained backend responsibilities | Keep backend PostgreSQL, relevant Redis uses, resolver, speed rendering, waveform rendering, source ownership and publication controls. |
+| Removed AI responsibilities | Remove AI SQL jobs, preview persistence, catalogue mutation, business retry ownership and resolver responsibilities after their caller/data gates pass. |
+| Retained backend responsibilities | Keep backend PostgreSQL, relevant Redis uses, resolver, waveform rendering, source ownership and publication controls. |
 
 ## 3. Code cleanliness rules
 
@@ -96,7 +96,7 @@ Reuse current backend status values, including `dispatching` and `awaiting_appro
 | `awaiting_approval` | Durable candidate is ready for a user decision | No GPU or dispatch slot held. Do not extend approval expiry on every notification. |
 | `completed`, `failed`, `cancelled` | Final processing/business outcome under existing contract | Terminal writes are monotonic. |
 
-Keep job processing status separate from `AudioTrack.status`. Respect `pipeline.generate_on_publish_only`. Do not run pipeline unexpectedly when that policy defers it until publication. Keep waveform and speed work behind their existing canonical-revision policy; waveform completion must not trigger speed generation. A publish request must not wait for waveform work.
+Keep job processing status separate from `AudioTrack.status`. Respect `pipeline.generate_on_publish_only`. Do not run pipeline unexpectedly when that policy defers it until publication. Keep waveform work behind its existing canonical-revision policy. A publish request must not wait for waveform work.
 
 ## 8. Downtime rules
 
@@ -127,7 +127,7 @@ Do not mark a package complete merely because a test file exists. Record actual 
 | P05 Bounded audio/model boundaries | Replace whole-file bytes with disk-backed decoding and bounded windows. Move model work to window methods, keep responsive lifecycle/cancellation and measured GPU concurrency. | T25–T29. Long-file memory/disk bounded, correct timestamps and no leaked workspaces/native jobs. |
 | P06 Preview/source ownership | Move AI preview records to existing backend job metadata/approval. Approve exact artifact with revision check; route all canonical changes through audio_source service. | T30–T33. Double approval idempotent; no resynthesis; published tracks survive failure. |
 | P07 Health and delivery | Implement real capability probe, outbox-backed job/incident notifications, journal replay, startup reconciliation and planned drain. | T34–T37. Recovery after both services restart and after Redis/SSE/email interruption. |
-| P08 Remove misplaced persistence/features | Migrate previews, lineage, catalogue/keyword/training data and cleanup ownership; move resolver/speed callers; drain legacy jobs. Remove AI SQL/Redis/application retry files only after dependency scan. | T38–T40. No remaining live AI SQL consumers; training and discovery still work; Alexa/resolver/speed behaviour preserved. |
+| P08 Remove misplaced persistence/features | Migrate previews, lineage, catalogue/keyword/training data and cleanup ownership; move resolver callers; drain legacy jobs. Remove AI SQL/Redis/application retry files only after dependency scan. | T38–T40. No remaining live AI SQL consumers; training and discovery still work; Alexa/resolver behaviour preserved. |
 | P09 Production release | Test real GPU/audio/storage stack, mixed-family fairness, full pod loss and rolling replacement. Canary new attempts; preserve rollback readers and source revisions. | T41–T44. Record measured performance and every skipped test. No production-ready claim on HTTP 200 alone. |
 
 Some work overlaps, but deletion never precedes its ownership replacement. P04 can run with compatibility adapters until P05 changes model transport. Each adapter must be removed or explicitly retained for v1 only before P08 closes.
@@ -188,7 +188,7 @@ Apply these fixes to the existing path first, with tests; do not wait for the fu
 | T36 | More than one page of active jobs is reconciled after restart; no first-500-only recovery. |
 | T37 | Planned drain rejects new execution, bounds existing work and preserves results after replacement. |
 | T38 | Migrated worker startup and dependency scan contain no live AI SQL/Redis job/preview/training persistence requirement. |
-| T39 | Backend resolver and existing speed URLs remain functional after AI-side removal; 1x source reuse and waveform policy remain intact. |
+| T39 | Backend resolver URLs remain functional after AI-side removal; waveform policy remains intact. |
 | T40 | Every migrated legacy pending result/preview/cleanup record has an explicit owner and retention/rollback disposition. |
 | T41 | Kill worker during download, inference, encoding, upload and report; correct result or retry follows without stale deletion. |
 | T42 | Restart backend after result receipt before apply and after apply before notify; visible mutation and notification are idempotent. |

@@ -840,8 +840,8 @@ accepted = client.SubmitJob(
 ```
 
 `SubmitJobRequest` also supports `edited_transcript`, repeated `changes`,
-`same_speaker`, grouping fields, `source`, `track_count`, speed/playback
-fields, Magic Clean percentages, `type`, and `media_file_id`. It does not have
+`same_speaker`, grouping fields, `source`, `track_count`, playback
+instructions, Magic Clean percentages, `type`, and `media_file_id`. It does not have
 `track_exists`; protobuf field number 17 is reserved.
 
 ### Direct moderation and categorization

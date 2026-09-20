@@ -239,7 +239,6 @@ class GrpcGateway:
                 kind=request.kind or "track",
                 source=request.source if request.HasField("source") else None,
                 track_count=request.track_count or 1,
-                speed_multipliers=list(request.speed_multipliers),
                 playback_instruction=request.playback_instruction
                 if request.HasField("playback_instruction")
                 else None,

@@ -26,7 +26,7 @@ Set offline library behaviour and logging before importing model packages. Remov
 
 Use deployment configuration to start independent enabled graphs. Distinguish connecting to an externally managed Ray cluster from creating a local development runtime. Do not shut down a shared Serve instance simply because this driver attached to it. Own-and-close rules must match what this process actually created. Keep Ray administrative interfaces private.
 
-**Delete here after P08:** AI database validation, runtime DDL dependencies, legacy orchestrator recovery launch, resolver/speed startup wiring and required modules that no longer have callers. Never download models, regenerate stubs, install packages or run schema migrations on application startup.
+**Delete here after P08:** AI database validation, runtime DDL dependencies, legacy orchestrator recovery launch, resolver startup wiring and required modules that no longer have callers. Never download models, regenerate stubs, install packages or run schema migrations on application startup.
 
 **Done when:** T01, T05, T19, T37 and T38 pass; an unavailable optional model does not prevent the gateway and unrelated capabilities from starting.
 
@@ -42,7 +42,7 @@ Make `QWEN_LLM_ENABLED` and Fish/capability enablement actually control graph co
 
 Repair the legacy storage TTL pair with the backend in P01. Do not set an invented new expiry on unchanged provider credentials. For new execution, consume the actual attempt grant and its validity; remove the universal Magic-Clean-only 24-hour waiting reserve after the backend queue and refresh path are active.
 
-Remove `DATABASE_URL`, `DB_*`, `ORCHESTRATOR_*` business retry/queue options and storage-context-at-rest encryption options from the final AI execution profile only after their consumers migrate. Remove AI `RESOLVER_*`, `PIPELINE_SPEED_MULTIPLIERS` and obsolete settings after caller removal. Keep delivery bitrate/sample-rate/chunking and reconstruction timing settings. Do not confuse reconstruction tempo correction with Alexa speed generation.
+Remove `DATABASE_URL`, `DB_*`, `ORCHESTRATOR_*` business retry/queue options and storage-context-at-rest encryption options from the final AI execution profile only after their consumers migrate. Remove AI `RESOLVER_*` and obsolete settings after caller removal. Keep delivery bitrate/sample-rate/chunking and reconstruction timing settings.
 
 Add the minimal missing settings for backend control endpoint/auth, selected protocol/profile, attempt deadlines, capability/resource budgets, window/input/disk bounds, TLS and controlled log level. Document units and required relationships in the runbook rather than duplicating settings in multiple environment files. Exclude secrets from logs and settings dumps.
 
@@ -547,17 +547,17 @@ Preserve the feature before deleting SQL packages: dataset creation, training re
 
 **Done when:** T23/T24/T38/T40 plus an explicit seed → train → review → pin → infer integration test pass.
 
-## A34. Resolver and speed removal — `hear/resolver/`, `deployments/resolver.py`, resolver proto, speed references
+## A34. Resolver removal — `hear/resolver/`, `deployments/resolver.py`, resolver proto
 
 **Action: remove these responsibilities from AI only. Package P08.**
 
 Remove AI resolver deployment/entry-point registration, resolver package, its dedicated tests/configuration/proto generation and runtime dependencies after proving backend resolver callers are active. Remove stale project description/docs referring to a combined AI/resolver server. Do not delete backend resolver classes or public Alexa functionality.
 
-Remove AI speed-generation task code and its imports/dispatch/settings/proto fields through the compatibility gate. `scripts/generate_alexa_playback.py` is an identified script to inspect: classify pre-recorded playback prompt generation separately from generating per-track speed layers. Move supported one-time prompt generation to controlled tooling or retain it there; do not blindly delete required Alexa prompt assets because of its name.
+Remove obsolete task code and its imports, dispatch, settings, and protocol fields through the compatibility gate. `scripts/generate_alexa_playback.py` is pre-recorded playback prompt generation; retain it as supported controlled tooling.
 
-Reserve removed protocol fields. Preserve required source delivery encoding and reconstruction pitch/tempo adjustment. Move per-track speed rendering to the established backend/CPU renderer, keeping 1x source reuse, current URLs and canonical-source revision invalidation. Do not regenerate speeds for transient preview artifacts or trigger speed work from waveform completion.
+Reserve removed protocol fields. Preserve required source delivery encoding and reconstruction pitch/tempo adjustment.
 
-**Done when:** T39/T40 pass and no AI runtime resolver/speed caller remains. Delete only identified obsolete code, not every function containing the word speed.
+**Done when:** T39/T40 pass and no AI runtime resolver caller remains.
 
 ## A35. Scripts, cleanup tools and operational documentation
 
@@ -569,7 +569,7 @@ Reserve removed protocol fields. Preserve required source delivery encoding and 
 | `scripts/runpod-workspace-env.sh` | Keep deterministic persistent cache/workspace configuration; do not install/update packages implicitly. Align paths with Settings and actual mounts. |
 | `scripts/postgres-env.sh`, `scripts/sync-postgres-password.sh` | Retain only for legacy drain/operator migration. Remove from final AI runtime instructions and repository after AI SQL ownership is gone; do not alter backend database secrets. |
 | `scripts/live_test.py`, `scripts/live_regeneration_local_test.py`, `scripts/smoke_test.py` | Consolidate repeated transport setup, point to supported versioned endpoints, require explicit nonproduction/test data and actual expected assertions. No embedded service/storage credentials or automatic production destructive actions. |
-| `scripts/generate_alexa_playback.py` | Apply the explicit prompt-versus-speed classification in A34, then preserve/move only the supported tooling responsibility. |
+| `scripts/generate_alexa_playback.py` | Retain as controlled tooling for supported playback prompt generation. |
 | `tools/clean_temp.py` | Use the same workspace policy as A10, not independent recursive deletion rules. |
 | `README.md` | Replace stale orchestration/default counts with actual final responsibilities and startup commands. Document legacy drain separately, not contradictory parallel instructions. |
 | `docs/BACKEND_INTEGRATION.md`, `docs/PER_BACKEND_JOB_INTEGRATION.md`, `docs/GRPC.md` | Document one shared versioned contract: ownership, identity, lease, error classes, manifests, replay and exact preview approval. Remove contradictions about callbacks/health or which side stores jobs. |
@@ -585,7 +585,7 @@ Add focused test modules for constructor injection/import safety, protocol/ident
 
 Keep current golden audio and public result fixtures before changing DSP. Use fakes for external model/storage/control boundaries in unit tests, then run real Ray multi-replica, GPU, FFmpeg and scoped-storage integration tests. A fake-model success is not model validation. Test longest-supported recordings and mixed traffic rather than only short clips.
 
-Before removing AI persistence, list every remaining reference to AiJob, AiTrackJob, RegenerationPreview, CategoryTrainingExample, SessionLocal, init_db, commit_with_retry, storage_for_job and encrypted storage contexts. Resolve every live owner; no broad exception that hides the missing DB. Also scan global get/set model/LLM/discovery clients, unbounded file-byte loads, resolver/speed registrations, hardcoded FileHandlers and detached task registries.
+Before removing AI persistence, list every remaining reference to AiJob, AiTrackJob, RegenerationPreview, CategoryTrainingExample, SessionLocal, init_db, commit_with_retry, storage_for_job and encrypted storage contexts. Resolve every live owner; no broad exception that hides the missing DB. Also scan global get/set model/LLM/discovery clients, unbounded file-byte loads, resolver registrations, hardcoded FileHandlers and detached task registries.
 
 Require the implementation agent to report actual changed paths, removed paths, constructors/callers migrated, package gates passed, exact tests run and blockers. Do not report “everything working” because imports or mocked tests pass. Complete T01–T44 across both repositories.
 

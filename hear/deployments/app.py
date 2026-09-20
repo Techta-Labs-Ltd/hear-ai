@@ -1,5 +1,4 @@
 from importlib import import_module
-
 from hear.config import Settings, settings
 
 

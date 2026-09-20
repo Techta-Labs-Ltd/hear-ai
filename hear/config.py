@@ -58,7 +58,6 @@ class Settings(BaseSettings):
     DB_POOL_PRE_PING: bool = True
     DB_STATEMENT_TIMEOUT_MS: int = 60000
 
-    PIPELINE_SPEED_MULTIPLIERS: str = "0.5,0.75,0.9,1.1,1.25,1.5,2.0,3.0"
     PIPELINE_MP3_BITRATE_KBPS: int = 96
 
     DISCOVERY_METADATA_ENABLED: bool = True

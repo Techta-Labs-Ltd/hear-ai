@@ -69,7 +69,7 @@ Resolver and training RPCs were removed under the earlier explicit user instruct
 | `services/ai/reconciler.py` | Paginate due/expired/ambiguous attempts, inspect the known manifest before replacement, and schedule application/delivery/cleanup separately. Do not stop at the first 500 jobs or use process-local subscriptions as durable inventory. |
 | System-health/probe/policy/repository and system-incidents services | Real bounded AI probe, capability-aware hysteresis, epoch tracking, one deduplicated outage/recovery incident. Cold/disabled/busy are not identical to service down. Probe even when no jobs run. |
 | Creator/job/preview routes, API schemas, app/worker lifespan and configuration | Compose injected services; preserve public shapes and permission checks; expose latest processing state separately from published track state. Add protocol/lease/grant limits without duplicate endpoint aliases or session singletons. |
-| Backend resolver, speed renderer, waveform, catalogue and publication services | Preserve existing owners. Remove AI resolver/speed dependencies after verified migration. Waveform completion must not trigger speeds and publication must not wait for waveform generation. |
+| Backend resolver, waveform, catalogue and publication services | Preserve existing owners. Remove AI resolver dependencies after verified migration. Publication must not wait for waveform generation. |
 
 ## 3. Joint cutover contract — not yet shipped
 

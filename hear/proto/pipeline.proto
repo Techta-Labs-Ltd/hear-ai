@@ -54,7 +54,7 @@ message SubmitJobRequest {
   string kind = 11;
   optional string source = 12;
   int32 track_count = 13;
-  repeated double speed_multipliers = 14;
+  reserved 14;
   optional string playback_instruction = 15;
   optional string user_id = 16;
   reserved 17;

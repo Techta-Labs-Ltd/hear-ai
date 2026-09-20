@@ -20,7 +20,7 @@ PIPELINE = [
     Stage("moderating", "Checking content safety", "Running content moderation checks", 30, 45),
     Stage("categorizing", "Tagging content", "Categorizing by topic and theme", 45, 55),
     Stage("discovering", "Building discovery", "Creating content profile", 55, 60),
-    Stage("compressing", "Creating audio variants", "Generating MP3 and speed layers", 60, 100),
+    Stage("compressing", "Optimizing audio", "Generating optimized MP3 audio", 60, 100),
 ]
 EDIT_TRANSCRIPT = [
     Stage("downloading", "Downloading audio", "Fetching source audio", 0, 10),
