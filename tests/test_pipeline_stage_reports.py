@@ -34,14 +34,10 @@ def test_stage_result_is_emitted_as_incremental_grpc_payload():
     orchestrator = orchestrator_class.__new__(orchestrator_class)
     events = []
     orchestrator._push_event = lambda job_id, event: events.append(event)
-    job = SimpleNamespace(
-        id="job-1", run_id="run-1", job_type="pipeline"
-    )
+    job = SimpleNamespace(id="job-1", run_id="run-1", job_type="pipeline")
     track_job = SimpleNamespace(track_id="track-1")
 
-    orchestrator._push_stage_result(
-        job, track_job, "transcribing", {"transcript": "Hello"}
-    )
+    orchestrator._push_stage_result(job, track_job, "transcribing", {"transcript": "Hello"})
 
     assert events[0]["event"] == "stage_result"
     assert events[0]["progress_pct"] == 25

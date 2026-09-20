@@ -1,17 +1,7 @@
-from datetime import datetime
 import uuid
+from datetime import datetime
 
-from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    DateTime,
-    JSON,
-    Boolean,
-    create_engine,
-    text,
-    Index,
-)
+from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, String, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from hear.config import settings
@@ -23,7 +13,6 @@ class Base(DeclarativeBase):
 
 class AiJob(Base):
     __tablename__ = "ai_jobs"
-
     id = Column(String, primary_key=True)
     backend_id = Column(String, nullable=True, index=True)
     storage_context_encrypted = Column(String, nullable=True)
@@ -53,7 +42,6 @@ class AiJob(Base):
 
 class AiTrackJob(Base):
     __tablename__ = "ai_track_jobs"
-
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String, nullable=False, index=True)
     run_id = Column(String, nullable=False, index=True)
@@ -72,15 +60,11 @@ class AiTrackJob(Base):
     completed_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
     is_regenerated = Column(Boolean, default=False)
-
-    __table_args__ = (
-        Index("ix_ai_track_jobs_job_run", "job_id", "run_id"),
-    )
+    __table_args__ = (Index("ix_ai_track_jobs_job_run", "job_id", "run_id"),)
 
 
 class CategoryLabel(Base):
     __tablename__ = "category_labels"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -88,7 +72,6 @@ class CategoryLabel(Base):
 
 class TagLabel(Base):
     __tablename__ = "tag_labels"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -96,7 +79,6 @@ class TagLabel(Base):
 
 class KeywordRule(Base):
     __tablename__ = "keyword_rules"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     pattern = Column(String, nullable=False, unique=True)
     tag = Column(String, nullable=False)
@@ -105,7 +87,6 @@ class KeywordRule(Base):
 
 class TaxonomyPath(Base):
     __tablename__ = "taxonomy_paths"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     path = Column(String, nullable=False, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -113,20 +94,15 @@ class TaxonomyPath(Base):
 
 class HarmKeyword(Base):
     __tablename__ = "harm_keywords"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     keyword = Column(String, nullable=False, index=True)
-    kind = Column(String, nullable=False, index=True)  # "harm" | "platform"
+    kind = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        Index("ix_harm_keywords_keyword_kind", "keyword", "kind", unique=True),
-    )
+    __table_args__ = (Index("ix_harm_keywords_keyword_kind", "keyword", "kind", unique=True),)
 
 
 class AutoTagKeyword(Base):
     __tablename__ = "auto_tag_keywords"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     keyword = Column(String, nullable=False, unique=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -134,7 +110,6 @@ class AutoTagKeyword(Base):
 
 class RegenerationPreview(Base):
     __tablename__ = "regeneration_previews"
-
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String, index=True)
     backend_id = Column(String, nullable=True, index=True)
@@ -154,42 +129,65 @@ class RegenerationPreview(Base):
     confirmed_at = Column(DateTime, nullable=True)
 
 
-_engine = None
-_SessionLocal = None
+class DatabaseRuntime:
+    _engine = None
+    _SessionLocal = None
 
+    @classmethod
+    def _get_engine(cls):
+        if cls._engine is None:
+            if not settings.DATABASE_URL:
+                raise RuntimeError("DATABASE_URL is required to initialize PostgreSQL")
+            cls._engine = create_engine(
+                settings.DATABASE_URL,
+                echo=False,
+                pool_pre_ping=settings.DB_POOL_PRE_PING,
+                pool_size=settings.DB_POOL_SIZE,
+                max_overflow=settings.DB_MAX_OVERFLOW,
+                pool_timeout=settings.DB_POOL_TIMEOUT,
+                pool_recycle=settings.DB_POOL_RECYCLE,
+                connect_args={
+                    "options": f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS} -c application_name=hear-ai",
+                    "connect_timeout": 10,
+                },
+            )
+        return cls._engine
 
-def _get_engine():
-    global _engine
-    if _engine is None:
-        if not settings.DATABASE_URL:
-            raise RuntimeError("DATABASE_URL is required to initialize PostgreSQL")
-        _engine = create_engine(
-            settings.DATABASE_URL,
-            echo=False,
-            pool_pre_ping=settings.DB_POOL_PRE_PING,
-            pool_size=settings.DB_POOL_SIZE,
-            max_overflow=settings.DB_MAX_OVERFLOW,
-            pool_timeout=settings.DB_POOL_TIMEOUT,
-            pool_recycle=settings.DB_POOL_RECYCLE,
-            connect_args={
-                "options": (
-                    f"-c statement_timeout={settings.DB_STATEMENT_TIMEOUT_MS} "
-                    f"-c application_name=hear-ai"
-                ),
-                "connect_timeout": 10,
-            },
-        )
-    return _engine
+    @classmethod
+    def SessionLocal(cls):
+        if cls._SessionLocal is None:
+            cls._SessionLocal = sessionmaker(
+                bind=cls._get_engine(), expire_on_commit=False, autoflush=True
+            )
+        return cls._SessionLocal()
 
+    @staticmethod
+    def get_engine():
+        return DatabaseRuntime._get_engine()
 
-def SessionLocal():
-    global _SessionLocal
-    if _SessionLocal is None:
-        _SessionLocal = sessionmaker(bind=_get_engine(), expire_on_commit=False, autoflush=True)
-    return _SessionLocal()
+    @staticmethod
+    def init_db():
+        eng = DatabaseRuntime.get_engine()
+        with eng.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        Base.metadata.create_all(bind=eng)
+        DatabaseRuntime._run_migrations()
 
-def get_engine():
-    return _get_engine()
+    @staticmethod
+    def _run_migrations():
+        eng = DatabaseRuntime.get_engine()
+        with eng.begin() as conn:
+            for table_name, column_name, column_def in MIGRATIONS:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_def}"
+                    )
+                )
+            conn.execute(
+                text(
+                    "UPDATE ai_jobs SET run_id = gen_random_uuid()::text WHERE run_id IS NULL OR run_id = ''"
+                )
+            )
 
 
 MIGRATIONS = [
@@ -217,29 +215,3 @@ MIGRATIONS = [
     ("regeneration_previews", "confirmed_at", "TIMESTAMP"),
     ("ai_track_jobs", "is_regenerated", "BOOLEAN DEFAULT FALSE"),
 ]
-
-
-def init_db():
-    eng = get_engine()
-    with eng.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-    Base.metadata.create_all(bind=eng)
-    _run_migrations()
-
-
-def _run_migrations():
-    eng = get_engine()
-    with eng.begin() as conn:
-        for table_name, column_name, column_def in MIGRATIONS:
-            conn.execute(
-                text(
-                    f'ALTER TABLE {table_name} '
-                    f'ADD COLUMN IF NOT EXISTS {column_name} {column_def}'
-                )
-            )
-        conn.execute(
-            text(
-                "UPDATE ai_jobs SET run_id = gen_random_uuid()::text "
-                "WHERE run_id IS NULL OR run_id = ''"
-            )
-        )

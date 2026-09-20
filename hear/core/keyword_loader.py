@@ -1,6 +1,6 @@
 import threading
 
-from hear.models.database import AutoTagKeyword, HarmKeyword, SessionLocal
+from hear.models.database import AutoTagKeyword, DatabaseRuntime, HarmKeyword
 
 
 class HarmKeywordLoader:
@@ -19,10 +19,16 @@ class HarmKeywordLoader:
         self._lock = threading.Lock()
 
     def load(self):
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            harm = [row.keyword for row in db.query(HarmKeyword).filter(HarmKeyword.kind == "harm").all()]
-            platform = [row.keyword for row in db.query(HarmKeyword).filter(HarmKeyword.kind == "platform").all()]
+            harm = [
+                row.keyword
+                for row in db.query(HarmKeyword).filter(HarmKeyword.kind == "harm").all()
+            ]
+            platform = [
+                row.keyword
+                for row in db.query(HarmKeyword).filter(HarmKeyword.kind == "platform").all()
+            ]
         finally:
             db.close()
         with self._lock:
@@ -46,7 +52,7 @@ class HarmKeywordLoader:
 
     def sync_platform_keywords(self, keywords: list[str]):
         normalized = [k.strip().lower() for k in keywords if k.strip()]
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
             db.query(HarmKeyword).filter(HarmKeyword.kind == "platform").delete()
             for kw in normalized:
@@ -79,7 +85,7 @@ class AutoTagKeywordLoader:
         self._lock = threading.Lock()
 
     def load(self):
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
             keywords = [row.keyword for row in db.query(AutoTagKeyword).all()]
         finally:
@@ -94,7 +100,7 @@ class AutoTagKeywordLoader:
 
     def sync(self, keywords: list[str]):
         normalized = [k.strip().lower() for k in keywords if k.strip()]
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
             db.query(AutoTagKeyword).delete()
             for kw in normalized:

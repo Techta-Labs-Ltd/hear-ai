@@ -8,12 +8,8 @@ def test_magic_clean_and_reconstruction_use_independent_single_job_lanes() -> No
         type_limits={"magic_clean": 1, "reconstruction": 1},
     )
     magic_clean = PendingJob("magic", "run-1", "user", "magic_clean")
-    reconstruct = PendingJob(
-        "reconstruct", "run-2", "user", "reconstruct", "reconstruction"
-    )
-    edit_transcript = PendingJob(
-        "edit", "run-3", "user", "edit_transcript", "reconstruction"
-    )
+    reconstruct = PendingJob("reconstruct", "run-2", "user", "reconstruct", "reconstruction")
+    edit_transcript = PendingJob("edit", "run-3", "user", "edit_transcript", "reconstruction")
 
     assert scheduler.enqueue(magic_clean)
     assert scheduler.enqueue(reconstruct)

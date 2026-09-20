@@ -12,8 +12,8 @@ from pydantic import BaseModel
 from ray.serve.handle import DeploymentHandle
 
 from hear.config import settings
-from hear.core.backend_registry import service_key_backend
-from hear.models.database import AiJob, SessionLocal
+from hear.core.backend_registry import BackendRegistry
+from hear.models.database import AiJob, DatabaseRuntime
 from hear.models.schemas import StorageContext
 from hear.proto import pipeline_pb2
 from hear.services.transport.operations import Operations
@@ -21,20 +21,22 @@ from hear.services.transport.operations import Operations
 logger = logging.getLogger(__name__)
 
 
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    return json.loads(json.dumps(value, default=str))
+class ProtobufValues:
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json")
+        return json.loads(json.dumps(value, default=str))
 
-
-def _struct(value: Any = None) -> Struct:
-    result = Struct()
-    safe = _json_safe(value or {})
-    if isinstance(safe, dict):
-        result.update(safe)
-    else:
-        result.update({"value": safe})
-    return result
+    @staticmethod
+    def _struct(value: Any = None) -> Struct:
+        result = Struct()
+        safe = ProtobufValues._json_safe(value or {})
+        if isinstance(safe, dict):
+            result.update(safe)
+        else:
+            result.update({"value": safe})
+        return result
 
 
 JOB_TYPE_PAYLOAD_MAP: dict[str, tuple[str, type]] = {
@@ -61,7 +63,7 @@ class PipelineGrpcService:
         if metadata.get("application", "") != settings.GRPC_APPLICATION_NAME:
             backend_id = None
         else:
-            backend_id = service_key_backend(metadata.get("x-api-key", ""))
+            backend_id = BackendRegistry.service_key_backend(metadata.get("x-api-key", ""))
         if not backend_id and context:
             context.set_code(grpc.StatusCode.UNAUTHENTICATED)
             context.set_details("invalid backend credentials")
@@ -91,12 +93,7 @@ class PipelineGrpcService:
             context.set_code(code)
             context.set_details(details)
 
-    async def _call(
-        self,
-        context,
-        fn: Callable[[], Awaitable[dict]],
-        msg_class: type,
-    ) -> Any:
+    async def _call(self, context, fn: Callable[[], Awaitable[dict]], msg_class: type) -> Any:
         if not self._authenticated(context):
             return msg_class()
         try:
@@ -120,11 +117,13 @@ class PipelineGrpcService:
         backend_id = self._backend_id(context)
         if not backend_id:
             return
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            owned = db.query(AiJob.id).filter(
-                AiJob.id == request.job_id, AiJob.backend_id == backend_id
-            ).first()
+            owned = (
+                db.query(AiJob.id)
+                .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
+                .first()
+            )
         finally:
             db.close()
         if not owned:
@@ -149,7 +148,7 @@ class PipelineGrpcService:
                 if raw.get(field) is not None:
                     setattr(event, field, raw[field])
             if raw.get("result"):
-                event.result.CopyFrom(_struct(raw["result"]))
+                event.result.CopyFrom(ProtobufValues._struct(raw["result"]))
             yield event
             if raw.get("event") in {"job_completed", "job_failed", "job_cancelled"}:
                 break
@@ -158,11 +157,13 @@ class PipelineGrpcService:
         backend_id = self._backend_id(context)
         if not backend_id:
             return pipeline_pb2.JobResult()
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            job = db.query(AiJob).filter(
-                AiJob.id == request.job_id, AiJob.backend_id == backend_id
-            ).first()
+            job = (
+                db.query(AiJob)
+                .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
+                .first()
+            )
             if not job:
                 self._set_error(context, grpc.StatusCode.NOT_FOUND, "job not found")
                 return pipeline_pb2.JobResult()
@@ -176,13 +177,9 @@ class PipelineGrpcService:
                 error=job.error or "",
                 backend_id=job.backend_id or "",
             )
-            oneof_field, msg_class = JOB_TYPE_PAYLOAD_MAP.get(
-                job.job_type, (None, None)
-            )
+            oneof_field, msg_class = JOB_TYPE_PAYLOAD_MAP.get(job.job_type, (None, None))
             if oneof_field and job.result_json:
-                payload = ParseDict(
-                    job.result_json, msg_class(), ignore_unknown_fields=True
-                )
+                payload = ParseDict(job.result_json, msg_class(), ignore_unknown_fields=True)
                 getattr(response, oneof_field).CopyFrom(payload)
             return response
         finally:
@@ -192,11 +189,13 @@ class PipelineGrpcService:
         backend_id = self._backend_id(context)
         if not backend_id:
             return pipeline_pb2.JobResult()
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            owned = db.query(AiJob.id).filter(
-                AiJob.id == request.job_id, AiJob.backend_id == backend_id
-            ).first()
+            owned = (
+                db.query(AiJob.id)
+                .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
+                .first()
+            )
         finally:
             db.close()
         if not owned:
@@ -210,25 +209,19 @@ class PipelineGrpcService:
 
     async def GetQueueStats(self, request, context=None):
         return await self._call(
-            context,
-            lambda: self._orchestrator.get_stats.remote(),
-            pipeline_pb2.QueueStatsReply,
+            context, lambda: self._orchestrator.get_stats.remote(), pipeline_pb2.QueueStatsReply
         )
 
     async def Moderate(self, request, context=None):
         return await self._call(
-            context,
-            lambda: self._operations.moderate(request.text),
-            pipeline_pb2.ModerationReply,
+            context, lambda: self._operations.moderate(request.text), pipeline_pb2.ModerationReply
         )
 
     async def Categorize(self, request, context=None):
         return await self._call(
             context,
             lambda: self._operations.categorize(
-                request.text,
-                list(request.custom_tags),
-                request.max_tags or 8,
+                request.text, list(request.custom_tags), request.max_tags or 8
             ),
             pipeline_pb2.CategorizationReply,
         )
@@ -252,14 +245,10 @@ class PipelineGrpcService:
                 audio_url=request.audio_url,
                 track_id=request.track_id,
                 changes=changes,
-                segment_start=(
-                    request.segment_start if request.HasField("segment_start") else None
-                ),
+                segment_start=request.segment_start if request.HasField("segment_start") else None,
                 segment_end=request.segment_end if request.HasField("segment_end") else None,
                 new_text=request.new_text if request.HasField("new_text") else None,
-                same_speaker=(
-                    request.same_speaker if request.HasField("same_speaker") else True
-                ),
+                same_speaker=request.same_speaker if request.HasField("same_speaker") else True,
                 backend_id=backend_id,
                 storage_context=self._storage_context(request.storage),
             ),
@@ -323,20 +312,16 @@ class PipelineGrpcService:
         return await self._call(
             context,
             lambda: self._operations.list_discovery(
-                request.sort or "latest",
-                request.limit or 50,
-                request.offset,
+                request.sort or "latest", request.limit or 50, request.offset
             ),
             pipeline_pb2.ListDiscoveryReply,
         )
-
 
     async def UpdatePlatformSettings(self, request, context=None):
         return await self._call(
             context,
             lambda: self._operations.update_platform_settings(
-                request.blocked_keywords,
-                request.auto_tag_keywords,
+                request.blocked_keywords, request.auto_tag_keywords
             ),
             pipeline_pb2.PlatformSettingsReply,
         )
@@ -347,7 +332,9 @@ class PipelineGrpcService:
                 queue = await self._orchestrator.get_stats.remote()
         except Exception:
             result = await self._operations.health({})
-            result.update(status="unavailable", control_ready=False, error="orchestrator_unavailable")
+            result.update(
+                status="unavailable", control_ready=False, error="orchestrator_unavailable"
+            )
             return result
         return await self._operations.health(queue)
 

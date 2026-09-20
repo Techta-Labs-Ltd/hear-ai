@@ -30,14 +30,10 @@ class MossFormer2Enhancer:
         # hundreds of MB into the workspace on every cold start.
         model_root = Path(
             model_path
-            or os.environ.get(
-                "MOSSFORMER_MODEL_PATH", "/workspace/models/mossformer2-se-48k"
-            )
+            or os.environ.get("MOSSFORMER_MODEL_PATH", "/workspace/models/mossformer2-se-48k")
         )
         if not (model_root / "last_best_checkpoint").is_file():
-            raise FileNotFoundError(
-                f"MossFormer2 checkpoint is incomplete: {model_root}"
-            )
+            raise FileNotFoundError(f"MossFormer2 checkpoint is incomplete: {model_root}")
         runtime_root = Path("/tmp/hear-clearvoice")
         checkpoint_link = runtime_root / "checkpoints" / "MossFormer2_SE_48K"
         checkpoint_link.parent.mkdir(parents=True, exist_ok=True)
@@ -144,9 +140,7 @@ class MossFormer2Enhancer:
 
         try:
             working = (
-                torchaudio.functional.resample(original, sr, self.SR)
-                if sr != self.SR
-                else original
+                torchaudio.functional.resample(original, sr, self.SR) if sr != self.SR else original
             )
             channels = working.detach().cpu().numpy().astype(np.float32, copy=True)
             enhanced_channels: list[np.ndarray] = []

@@ -15,85 +15,84 @@ class Stage:
 
 
 PIPELINE = [
-    Stage("transcribing",    "Transcribing audio",       "Converting speech to text",           0, 25),
-    Stage("correcting",      "Correcting transcript",    "Applying punctuation and word fixes",  25, 30),
-    Stage("moderating",      "Checking content safety",  "Running content moderation checks",    30, 45),
-    Stage("categorizing",    "Tagging content",          "Categorizing by topic and theme",     45, 55),
-    Stage("discovering",     "Building discovery",       "Creating content profile",            55, 60),
-    Stage("compressing",     "Creating audio variants",  "Generating MP3 and speed layers",     60, 100),
+    Stage("transcribing", "Transcribing audio", "Converting speech to text", 0, 25),
+    Stage("correcting", "Correcting transcript", "Applying punctuation and word fixes", 25, 30),
+    Stage("moderating", "Checking content safety", "Running content moderation checks", 30, 45),
+    Stage("categorizing", "Tagging content", "Categorizing by topic and theme", 45, 55),
+    Stage("discovering", "Building discovery", "Creating content profile", 55, 60),
+    Stage("compressing", "Creating audio variants", "Generating MP3 and speed layers", 60, 100),
 ]
-
 EDIT_TRANSCRIPT = [
-    Stage("downloading",       "Downloading audio",        "Fetching source audio",                0, 10),
-    Stage("transcribing",      "Transcribing audio",       "Getting word timestamps from speech",  10, 25),
-    Stage("diffing_transcript","Finding changes",          "Comparing original vs edited text",    25, 35),
-    Stage("reconstructing_edits","Regenerating speech",    "Creating new audio for edited parts",  35, 100),
+    Stage("downloading", "Downloading audio", "Fetching source audio", 0, 10),
+    Stage("transcribing", "Transcribing audio", "Getting word timestamps from speech", 10, 25),
+    Stage("diffing_transcript", "Finding changes", "Comparing original vs edited text", 25, 35),
+    Stage(
+        "reconstructing_edits",
+        "Regenerating speech",
+        "Creating new audio for edited parts",
+        35,
+        100,
+    ),
 ]
-
 REBUILD = [
-    Stage("rebuilding_audio",  "Rebuilding audio",         "Regenerating entire track from text",   0, 70),
-    Stage("moderating",        "Checking content safety",  "Running content moderation checks",     70, 80),
-    Stage("discovering",       "Building discovery",       "Creating content profile",             80, 100),
+    Stage("rebuilding_audio", "Rebuilding audio", "Regenerating entire track from text", 0, 70),
+    Stage("moderating", "Checking content safety", "Running content moderation checks", 70, 80),
+    Stage("discovering", "Building discovery", "Creating content profile", 80, 100),
 ]
-
 RECONSTRUCT = [
-    Stage("downloading",    "Downloading audio",        "Fetching source audio",              0, 15),
-    Stage("reconstructing", "Reconstructing segments",  "Replacing audio at edited positions", 15, 100),
+    Stage("downloading", "Downloading audio", "Fetching source audio", 0, 15),
+    Stage(
+        "reconstructing", "Reconstructing segments", "Replacing audio at edited positions", 15, 100
+    ),
 ]
-
-TRANSCRIPTION = [
-    Stage("transcribing", "Transcribing audio", "Converting speech to text", 0, 100),
-]
-
+TRANSCRIPTION = [Stage("transcribing", "Transcribing audio", "Converting speech to text", 0, 100)]
 CATEGORIZATION = [
-    Stage("transcribing",  "Transcribing audio",       "Converting speech to text",           0, 40),
-    Stage("moderating",    "Checking content safety",  "Running content moderation checks",   40, 50),
-    Stage("categorizing",  "Tagging content",          "Categorizing by topic and theme",     50, 100),
+    Stage("transcribing", "Transcribing audio", "Converting speech to text", 0, 40),
+    Stage("moderating", "Checking content safety", "Running content moderation checks", 40, 50),
+    Stage("categorizing", "Tagging content", "Categorizing by topic and theme", 50, 100),
 ]
-
 MAGIC_CLEAN = [
     Stage("downloading", "Preparing audio", "Downloading the source audio", 0, 10),
     Stage("separating", "Separating audio", "Separating speech, music, and background", 10, 35),
-    Stage("enhancing", "Cleaning speech", "Improving speech clarity while preserving timing", 35, 80),
+    Stage(
+        "enhancing", "Cleaning speech", "Improving speech clarity while preserving timing", 35, 80
+    ),
     Stage("mixing", "Mixing audio", "Applying your speech, music, and background levels", 80, 95),
     Stage("finalizing", "Finalizing audio", "Normalizing loudness and protecting peaks", 95, 100),
 ]
-
-AUDIO_TAG = [
-    Stage("audio_tagging", "Extracting audio tags", "Identifying spoken keywords", 0, 100),
-]
-
+AUDIO_TAG = [Stage("audio_tagging", "Extracting audio tags", "Identifying spoken keywords", 0, 100)]
 DISCOVERY = [
     Stage("transcribing", "Reading content", "Reusing or generating a transcript", 0, 45),
     Stage("discovering", "Building discovery", "Creating the standalone content profile", 45, 100),
 ]
-
 FLOWS: dict[str, list[Stage]] = {
-    "pipeline":       PIPELINE,
+    "pipeline": PIPELINE,
     "edit_transcript": EDIT_TRANSCRIPT,
-    "rebuild":        REBUILD,
-    "reconstruct":    RECONSTRUCT,
-    "transcription":  TRANSCRIPTION,
+    "rebuild": REBUILD,
+    "reconstruct": RECONSTRUCT,
+    "transcription": TRANSCRIPTION,
     "categorization": CATEGORIZATION,
-    "magic_clean":    MAGIC_CLEAN,
-    "audio_tag":      AUDIO_TAG,
-    "discovery":      DISCOVERY,
+    "magic_clean": MAGIC_CLEAN,
+    "audio_tag": AUDIO_TAG,
+    "discovery": DISCOVERY,
 }
 
 
-def get_stage(job_type: str, stage_id: str) -> Stage | None:
-    flow = FLOWS.get(job_type, [])
-    for s in flow:
-        if s.id == stage_id:
-            return s
-    return None
+class StageCatalog:
+    @staticmethod
+    def get_stage(job_type: str, stage_id: str) -> Stage | None:
+        flow = FLOWS.get(job_type, [])
+        for s in flow:
+            if s.id == stage_id:
+                return s
+        return None
 
+    @staticmethod
+    def get_label(job_type: str, stage_id: str) -> str:
+        s = StageCatalog.get_stage(job_type, stage_id)
+        return s.label if s else stage_id
 
-def get_label(job_type: str, stage_id: str) -> str:
-    s = get_stage(job_type, stage_id)
-    return s.label if s else stage_id
-
-
-def get_description(job_type: str, stage_id: str) -> str:
-    s = get_stage(job_type, stage_id)
-    return s.description if s else ""
+    @staticmethod
+    def get_description(job_type: str, stage_id: str) -> str:
+        s = StageCatalog.get_stage(job_type, stage_id)
+        return s.description if s else ""

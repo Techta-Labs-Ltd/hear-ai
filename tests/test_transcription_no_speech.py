@@ -6,12 +6,14 @@ def _result(text="Thank you.", *, logprob=-0.2, audio_duration=30.0):
     return {
         "audio_duration": audio_duration,
         "language": "en",
-        "segments": [{
-            "text": text,
-            "start": 12.0,
-            "end": 13.2,
-            "avg_logprob": logprob,
-        }],
+        "segments": [
+            {
+                "text": text,
+                "start": 12.0,
+                "end": 13.2,
+                "avg_logprob": logprob,
+            }
+        ],
     }
 
 

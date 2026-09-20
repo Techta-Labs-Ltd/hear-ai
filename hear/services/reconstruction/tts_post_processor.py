@@ -20,16 +20,13 @@ class TTSPostProcessor:
     the TTS output blends naturally with the surrounding original audio.
     """
 
-
     TTS_PRE_SPEECH_PAD_MS = 50
     TTS_POST_SPEECH_PAD_MS = 50
     TTS_MERGE_GAP_MS = 100
     TTS_MIN_SEGMENT_MS = 50
 
-
     LOW_CUTOFF = 300
     HIGH_CUTOFF = 3000
-
 
     MAX_LOUDNESS_GAIN_DB = 18.0
     MAX_BAND_GAIN_DB = 3.0
@@ -112,7 +109,10 @@ class TTSPostProcessor:
                 return tts_waveform
 
             diff_db = ref_loudness - tts_loudness
-            diff_db = max(-TTSPostProcessor.MAX_LOUDNESS_GAIN_DB, min(diff_db, TTSPostProcessor.MAX_LOUDNESS_GAIN_DB))
+            diff_db = max(
+                -TTSPostProcessor.MAX_LOUDNESS_GAIN_DB,
+                min(diff_db, TTSPostProcessor.MAX_LOUDNESS_GAIN_DB),
+            )
 
             gain = 10.0 ** (diff_db / 20.0)
             result = tts_waveform * gain
@@ -123,7 +123,9 @@ class TTSPostProcessor:
 
             logger.debug(
                 "Loudness match: TTS %.1f LUFS -> ref %.1f LUFS (gain %.1f dB)",
-                tts_loudness, ref_loudness, diff_db,
+                tts_loudness,
+                ref_loudness,
+                diff_db,
             )
             return result
         except Exception as e:
@@ -166,8 +168,12 @@ class TTSPostProcessor:
                 ratio_db = 20.0 * np.log10(ratio)
                 gain_db[i] = max(-max_gain, min(ratio_db, max_gain))
 
-            result = TTSPostProcessor._apply_band_gains(tts_np, sr, low_cutoff, high_cutoff, gain_db)
-            result_tensor = torch.from_numpy(result.astype(np.float32)).unsqueeze(0).to(tts_waveform.device)
+            result = TTSPostProcessor._apply_band_gains(
+                tts_np, sr, low_cutoff, high_cutoff, gain_db
+            )
+            result_tensor = (
+                torch.from_numpy(result.astype(np.float32)).unsqueeze(0).to(tts_waveform.device)
+            )
 
             peak = result_tensor.abs().max().item()
             if peak > 0.99:
@@ -243,11 +249,13 @@ class TTSPostProcessor:
             requested_steps = 12.0 * np.log2(ref_pitch / tts_pitch)
             if abs(requested_steps) < TTSPostProcessor.MIN_PITCH_SHIFT_SEMITONES:
                 return tts_waveform
-            applied_steps = float(np.clip(
-                requested_steps,
-                -TTSPostProcessor.MAX_PITCH_SHIFT_SEMITONES,
-                TTSPostProcessor.MAX_PITCH_SHIFT_SEMITONES,
-            ))
+            applied_steps = float(
+                np.clip(
+                    requested_steps,
+                    -TTSPostProcessor.MAX_PITCH_SHIFT_SEMITONES,
+                    TTSPostProcessor.MAX_PITCH_SHIFT_SEMITONES,
+                )
+            )
 
             source = tts_waveform.detach().float().cpu().numpy()
             shifted = librosa.effects.pitch_shift(
@@ -257,9 +265,9 @@ class TTSPostProcessor:
                 bins_per_octave=12,
                 res_type="soxr_hq",
             )
-            shifted_tensor = torch.from_numpy(
-                np.asarray(shifted, dtype=np.float32)
-            ).to(device=tts_waveform.device, dtype=tts_waveform.dtype)
+            shifted_tensor = torch.from_numpy(np.asarray(shifted, dtype=np.float32)).to(
+                device=tts_waveform.device, dtype=tts_waveform.dtype
+            )
 
             target_samples = tts_waveform.shape[1]
             if shifted_tensor.shape[1] > target_samples:
@@ -382,7 +390,9 @@ class TTSPostProcessor:
             return waveform
 
     @staticmethod
-    def _compress_internal_silence(waveform: torch.Tensor, sr: int, max_gap_ms: float = 80.0) -> torch.Tensor:
+    def _compress_internal_silence(
+        waveform: torch.Tensor, sr: int, max_gap_ms: float = 80.0
+    ) -> torch.Tensor:
         """Compress internal silence gaps to max_gap_ms so speech flows naturally."""
         try:
             sig = waveform.squeeze(0)
@@ -396,13 +406,11 @@ class TTSPostProcessor:
                 return waveform
             silence_thresh = peak * 0.01
 
-
             is_silent = []
             for i in range(n_frames):
                 s = i * frame_size
                 e = min(s + frame_size, sig.shape[0])
                 is_silent.append(sig[s:e].abs().mean().item() < silence_thresh)
-
 
             sil_regions = []
             i = 0
@@ -418,40 +426,35 @@ class TTSPostProcessor:
             if not sil_regions:
                 return waveform
 
-
             max_sil_samples = int(sr * max_gap_ms / 1000.0)
             result_parts = []
             prev_end = 0
             for sil_s, sil_e in sil_regions:
-
                 is_leading = sil_s == 0
                 is_trailing = sil_e >= sig.shape[0] - frame_size
                 if is_leading or is_trailing:
-
                     keep = min(int(sr * 0.05), sil_e - sil_s)
                     if is_leading:
-                        result_parts.append(sig[sil_e - keep:sil_e].unsqueeze(0))
+                        result_parts.append(sig[sil_e - keep : sil_e].unsqueeze(0))
                     else:
-                        result_parts.append(sig[sil_s:sil_s + keep].unsqueeze(0))
+                        result_parts.append(sig[sil_s : sil_s + keep].unsqueeze(0))
                     prev_end = sil_e
                     continue
-
 
                 if sil_s > prev_end:
                     result_parts.append(sig[prev_end:sil_s].unsqueeze(0))
 
-
                 sil_len = sil_e - sil_s
                 if sil_len > max_sil_samples:
-
                     keep = max_sil_samples
                     half = keep // 2
-                    compressed = torch.cat([sig[sil_s:sil_s+half], sig[sil_e-half:sil_e]]).unsqueeze(0)
+                    compressed = torch.cat(
+                        [sig[sil_s : sil_s + half], sig[sil_e - half : sil_e]]
+                    ).unsqueeze(0)
                     result_parts.append(compressed)
                 else:
                     result_parts.append(sig[sil_s:sil_e].unsqueeze(0))
                 prev_end = sil_e
-
 
             if prev_end < sig.shape[0]:
                 result_parts.append(sig[prev_end:].unsqueeze(0))
@@ -463,9 +466,13 @@ class TTSPostProcessor:
             orig_dur = waveform.shape[1] / sr
             new_dur = result.shape[1] / sr
             if new_dur < orig_dur * 0.5:
-
                 return waveform
-            logger.info("Silence compressed: %.2fs -> %.2fs (%.0f%%)", orig_dur, new_dur, new_dur/orig_dur*100)
+            logger.info(
+                "Silence compressed: %.2fs -> %.2fs (%.0f%%)",
+                orig_dur,
+                new_dur,
+                new_dur / orig_dur * 100,
+            )
             return result
         except Exception as e:
             logger.warning("Internal silence compression failed: %s", e)
@@ -490,7 +497,9 @@ class TTSPostProcessor:
             scorer = DNSMOSScorer()
             if not scorer.load():
                 return 0.0
-            audio_16k = torchaudio.functional.resample(waveform, sr, 16000) if sr != 16000 else waveform
+            audio_16k = (
+                torchaudio.functional.resample(waveform, sr, 16000) if sr != 16000 else waveform
+            )
             buf = AudioBuffer(data=audio_16k, sample_rate=16000)
             return scorer.score(buf)
         except Exception as e:
@@ -543,7 +552,11 @@ class TTSPostProcessor:
         if result_peak_after_loud < 0.01 and tts_peak > 0.01:
             logger.warning(
                 "Loudness match crushed TTS output (peak %.4f -> %.4f), reverting. ref_peak=%.4f ref_dur=%.2fs tts_dur=%.2fs",
-                tts_peak, result_peak_after_loud, ref_peak, ref_dur, tts_dur,
+                tts_peak,
+                result_peak_after_loud,
+                ref_peak,
+                ref_dur,
+                tts_dur,
             )
             result = tts_waveform
 
@@ -551,7 +564,8 @@ class TTSPostProcessor:
         if final_peak < 0.01 and tts_peak > 0.01:
             logger.warning(
                 "Post-processing made TTS near-silent (peak %.4f -> %.4f), using raw TTS output",
-                tts_peak, final_peak,
+                tts_peak,
+                final_peak,
             )
             result = tts_waveform
 
@@ -575,8 +589,13 @@ class TTSPostProcessor:
 
         logger.info(
             "TTSPostProcessor: tts_dur=%.2fs ref_dur=%.2fs tts_peak=%.4f final_peak=%.4f final_dur=%.2fs dnsmos_raw=%.2f dnsmos_final=%.2f",
-            tts_dur, ref_dur, tts_peak, result.abs().max().item(), result.shape[1]/sr,
-            raw_dnsmos, final_dnsmos,
+            tts_dur,
+            ref_dur,
+            tts_peak,
+            result.abs().max().item(),
+            result.shape[1] / sr,
+            raw_dnsmos,
+            final_dnsmos,
         )
 
         return result

@@ -6,32 +6,24 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from hear.config import PROJECT_ROOT, Settings
-from hear.core.downloader import download_audio
-from hear.core.hear_temp import (
-    cleanup_job_temp,
-    hear_temp_job_dir,
-    purge_all_temp,
-    sweep_tracked_temp_files,
-)
+from hear.core.downloader import AudioDownloader
+from hear.core.hear_temp import TempWorkspace
 
 
 def test_job_temp_is_scoped_and_removed(monkeypatch, tmp_path):
     monkeypatch.setattr("hear.core.hear_temp.settings.HEAR_TEMP_DIR", str(tmp_path / "hear-ai"))
-    path = hear_temp_job_dir("job/../../escape", "run/value")
+    path = TempWorkspace.hear_temp_job_dir("job/../../escape", "run/value")
     audio_path = os.path.join(path, "source.wav")
     with open(audio_path, "wb") as audio:
         audio.write(b"audio")
-
     assert os.path.commonpath([path, str(tmp_path / "hear-ai")]) == str(tmp_path / "hear-ai")
-
-    cleanup_job_temp(None, "job/../../escape", "run/value")
-
+    TempWorkspace.cleanup_job_temp(None, "job/../../escape", "run/value")
     assert not os.path.exists(path)
 
 
 def test_download_audio_streams_into_job_scope(monkeypatch, tmp_path):
     monkeypatch.setattr("hear.core.hear_temp.settings.HEAR_TEMP_DIR", str(tmp_path / "hear-ai"))
-    payload = b"audio-data" * 200_000
+    payload = b"audio-data" * 200000
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -48,7 +40,7 @@ def test_download_audio_streams_into_job_scope(monkeypatch, tmp_path):
     thread.start()
     try:
         path = asyncio.run(
-            download_audio(
+            AudioDownloader.download_audio(
                 f"http://127.0.0.1:{server.server_port}/audio",
                 job_id="job",
                 run_id="run",
@@ -96,24 +88,16 @@ async def _exercise_cancelled_download_removes_partial(monkeypatch, tmp_path):
         def stream(*_args, **_kwargs):
             return Response()
 
+    monkeypatch.setattr("hear.core.downloader.httpx.AsyncClient", lambda **_kwargs: Client())
     monkeypatch.setattr(
-        "hear.core.downloader.httpx.AsyncClient",
-        lambda **_kwargs: Client(),
-    )
-    monkeypatch.setattr(
-        "hear.core.downloader.hear_temp_job_dir",
-        lambda *_args: str(tmp_path),
+        "hear.core.downloader.TempWorkspace.hear_temp_job_dir", lambda *_args: str(tmp_path)
     )
     task = asyncio.create_task(
-        download_audio(
-            "https://example.test/source.wav",
-            job_id="job",
-            run_id="run",
-            purpose="source",
+        AudioDownloader.download_audio(
+            "https://example.test/source.wav", job_id="job", run_id="run", purpose="source"
         )
     )
     await started.wait()
-
     task.cancel()
     try:
         await task
@@ -121,7 +105,6 @@ async def _exercise_cancelled_download_removes_partial(monkeypatch, tmp_path):
         pass
     else:
         raise AssertionError("download cancellation must propagate")
-
     assert not (tmp_path / "source.wav.part").exists()
     assert not (tmp_path / "source.wav").exists()
 
@@ -170,17 +153,13 @@ async def _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_p
         with open(wav_path, "wb") as output:
             output.write(b"late decoded output")
 
+    monkeypatch.setattr("hear.core.downloader.httpx.AsyncClient", lambda **_kwargs: Client())
     monkeypatch.setattr(
-        "hear.core.downloader.httpx.AsyncClient",
-        lambda **_kwargs: Client(),
+        "hear.core.downloader.TempWorkspace.hear_temp_job_dir", lambda *_args: str(tmp_path)
     )
-    monkeypatch.setattr(
-        "hear.core.downloader.hear_temp_job_dir",
-        lambda *_args: str(tmp_path),
-    )
-    monkeypatch.setattr("hear.core.downloader._convert_to_wav", delayed_convert)
+    monkeypatch.setattr("hear.core.downloader.AudioDownloader._convert_to_wav", delayed_convert)
     task = asyncio.create_task(
-        download_audio(
+        AudioDownloader.download_audio(
             "https://example.test/source.mp3",
             job_id="job",
             run_id="run",
@@ -189,7 +168,6 @@ async def _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_p
         )
     )
     assert await asyncio.to_thread(conversion_started.wait, 5)
-
     task.cancel()
     await asyncio.sleep(0)
     assert not task.done()
@@ -200,16 +178,13 @@ async def _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_p
         pass
     else:
         raise AssertionError("conversion cancellation must propagate")
-
     assert not (tmp_path / "source.wav").exists()
     assert not (tmp_path / "source.wav.source").exists()
     assert not (tmp_path / "source.wav.source.part").exists()
 
 
 def test_cancelled_conversion_cannot_recreate_cleaned_audio(monkeypatch, tmp_path):
-    asyncio.run(
-        _exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_path)
-    )
+    asyncio.run(_exercise_cancelled_conversion_waits_before_cleanup(monkeypatch, tmp_path))
 
 
 def test_download_audio_can_decode_source_to_wav(monkeypatch, tmp_path):
@@ -245,17 +220,19 @@ def test_download_audio_can_decode_source_to_wav(monkeypatch, tmp_path):
             output.write(b"RIFF decoded wav")
 
     monkeypatch.setattr("hear.core.downloader.httpx.AsyncClient", lambda **kwargs: Client())
-    monkeypatch.setattr("hear.core.downloader._convert_to_wav", fake_convert)
-    monkeypatch.setattr("hear.core.downloader.hear_temp_job_dir", lambda *args: str(tmp_path))
-
-    path = asyncio.run(download_audio(
-        "https://example.test/source.mp3",
-        job_id="job",
-        run_id="run",
-        purpose="magic_clean",
-        convert_to_wav=True,
-    ))
-
+    monkeypatch.setattr("hear.core.downloader.AudioDownloader._convert_to_wav", fake_convert)
+    monkeypatch.setattr(
+        "hear.core.downloader.TempWorkspace.hear_temp_job_dir", lambda *args: str(tmp_path)
+    )
+    path = asyncio.run(
+        AudioDownloader.download_audio(
+            "https://example.test/source.mp3",
+            job_id="job",
+            run_id="run",
+            purpose="magic_clean",
+            convert_to_wav=True,
+        )
+    )
     assert path.endswith("magic_clean.wav")
     with open(path, "rb") as decoded:
         assert decoded.read() == b"RIFF decoded wav"
@@ -268,16 +245,12 @@ def test_sweep_removes_old_orphan_audio_from_temp_root(monkeypatch, tmp_path):
     temp_root.mkdir(parents=True)
     orphan = temp_root / "tmp-crashed.wav"
     orphan.write_bytes(b"orphan audio")
-    old = __import__("time").time() - (25 * 60 * 60)
+    old = __import__("time").time() - 25 * 60 * 60
     os.utime(orphan, (old, old))
-
-    result = sweep_tracked_temp_files()
-
+    result = TempWorkspace.sweep_tracked_temp_files()
     assert not orphan.exists()
     assert result["orphan_fs"] == 1
     assert result["bytes_freed"] == len(b"orphan audio")
-
-
 
 
 def test_purge_never_removes_unmanaged_legacy_files(monkeypatch, tmp_path):
@@ -285,20 +258,16 @@ def test_purge_never_removes_unmanaged_legacy_files(monkeypatch, tmp_path):
     legacy = tmp_path / "hear-ai" / "jobs" / "legacy" / "source.wav"
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"keep")
-    managed = hear_temp_job_dir("managed-job", "run")
+    managed = TempWorkspace.hear_temp_job_dir("managed-job", "run")
     with open(os.path.join(managed, "source.wav"), "wb") as audio:
         audio.write(b"remove")
-
-    purge_all_temp()
-
+    TempWorkspace.purge_all_temp()
     assert legacy.read_bytes() == b"keep"
     assert not os.path.exists(managed)
 
 
 def test_default_audio_directory_is_inside_project_workspace():
-
     runtime = Settings(_env_file=None)
-
     assert runtime.HEAR_TEMP_DIR == str(PROJECT_ROOT / "audio")
     assert not runtime.HEAR_TEMP_DIR.startswith("/tmp")
 
@@ -310,7 +279,6 @@ def test_runtime_audio_tempfiles_always_set_workspace_directory():
         *project_root.joinpath("scripts").glob("*.py"),
     ]
     audio_suffixes = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
-
     for source_path in runtime_files:
         tree = ast.parse(source_path.read_text(), filename=str(source_path))
         for node in ast.walk(tree):
@@ -338,13 +306,10 @@ def test_runtime_audio_tempfiles_always_set_workspace_directory():
 
 def test_live_regeneration_harness_has_no_system_tmp_audio_paths():
     script_path = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "live_regeneration_local_test.py"
+        Path(__file__).resolve().parents[1] / "scripts" / "live_regeneration_local_test.py"
     )
     source = script_path.read_text()
-
-    assert 'AUDIO_ROOT = Path(settings.HEAR_TEMP_DIR)' in source
+    assert "AUDIO_ROOT = Path(settings.HEAR_TEMP_DIR)" in source
     assert 'Path("/tmp/' not in source
 
 
@@ -360,8 +325,6 @@ def test_sweep_uses_configured_max_age(monkeypatch, tmp_path):
     now = __import__("time").time()
     os.utime(stale, (now - 11, now - 11))
     os.utime(fresh, (now - 9, now - 9))
-
-    sweep_tracked_temp_files()
-
+    TempWorkspace.sweep_tracked_temp_files()
     assert not stale.exists()
     assert fresh.exists()

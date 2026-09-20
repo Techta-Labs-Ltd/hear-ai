@@ -25,6 +25,7 @@ else:
 
 logger = logging.getLogger(__name__)
 
+
 @serve.deployment(
     name="fish_speech",
     ray_actor_options={

@@ -47,6 +47,6 @@ class ApplicationBuilder:
             llm,
         )
 
-
-def build_application(runtime: Settings | None = None):
-    return ApplicationBuilder(runtime if runtime is not None else settings).build()
+    @staticmethod
+    def build_application(runtime: Settings | None = None):
+        return ApplicationBuilder(runtime if runtime is not None else settings).build()

@@ -20,8 +20,7 @@ class NoiseReducer:
     ) -> torch.Tensor:
         try:
             threshold_lin = 10 ** (
-                (threshold_db if threshold_db is not None else self.GATE_THRESHOLD_DB)
-                / 20
+                (threshold_db if threshold_db is not None else self.GATE_THRESHOLD_DB) / 20
             )
             hold_samples = int(sr * self.GATE_HOLD_MS / 1000)
 
@@ -67,9 +66,7 @@ class NoiseReducer:
         except Exception:
             return w
 
-    def spectral_suppress(
-        self, w: torch.Tensor, sr: int, strength: float = 0.98
-    ) -> torch.Tensor:
+    def spectral_suppress(self, w: torch.Tensor, sr: int, strength: float = 0.98) -> torch.Tensor:
         """Suppress stationary residual noise with safe weighted overlap/add.
 
         Estimates a noise floor from the minimum spectral energy across frames
@@ -204,7 +201,7 @@ class NoiseReducer:
         quiet_idx = np.argsort(frame_energy)[:n_noise]
         avg_quiet = mag[:, quiet_idx].mean(axis=1, keepdims=True)
         noise_floor = np.minimum(min_mag, avg_quiet)
-        noise_floor = uniform_filter1d(
-            noise_floor.squeeze(), size=max(1, freq_bins // 64)
-        ).reshape(-1, 1)
+        noise_floor = uniform_filter1d(noise_floor.squeeze(), size=max(1, freq_bins // 64)).reshape(
+            -1, 1
+        )
         return noise_floor

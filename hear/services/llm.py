@@ -4,9 +4,10 @@ import re
 import threading
 
 from hear.config import settings as app_settings
-from hear.services.model_client import get_model_client
+from hear.services.model_client import ModelClientRegistry
 
 logger = logging.getLogger(__name__)
+
 
 class LLMService:
     def __init__(self):
@@ -18,7 +19,9 @@ class LLMService:
 
     def _generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
         with self._lock:
-            return get_model_client().llm_generate_sync(messages, max_tokens=max_new_tokens)
+            return ModelClientRegistry.get_model_client().llm_generate_sync(
+                messages, max_tokens=max_new_tokens
+            )
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -69,13 +72,11 @@ class LLMService:
     ) -> dict:
         if not self.is_available:
             raise RuntimeError("LLM not available")
-
-        found_kw = [kw for kw in (harm_keywords or []) if kw in transcript.lower()][:10]
-
+        found_kw = [kw for kw in harm_keywords or [] if kw in transcript.lower()][:10]
         context_parts: list[str] = []
         if detoxify_scores:
             top = sorted(detoxify_scores.items(), key=lambda x: x[1], reverse=True)[:6]
-            score_str = ", ".join(f"{k}={v:.2f}" for k, v in top if v > 0.05)
+            score_str = ", ".join((f"{k}={v:.2f}" for k, v in top if v > 0.05))
             if score_str:
                 context_parts.append(f"Toxicity model pre-scores: {score_str}")
         if found_kw:
@@ -84,44 +85,17 @@ class LLMService:
             context_parts.append(
                 "The toxicity model is UNCERTAIN. Only flag if you are confident this is harmful."
             )
-
-        context = ("\n" + "\n".join(context_parts)) if context_parts else ""
-
-        user_content = (
-            f"Transcript:\n{transcript[:2000]}"
-            f"{context}\n\n"
-            "Classify this content. Return ONLY this JSON (no markdown, no extra text):\n"
-            '{"flagged":false,"severity":"none","intent":"safe","reason":"","flagged_categories":[]}\n\n'
-            "severity: none | low | medium | high | critical\n"
-            "intent: safe | questionable | harmful\n\n"
-            "FLAG as harmful ONLY for:\n"
-            "  - Direct threats of violence against a specific person\n"
-            "  - Hate speech targeting a group (race, religion, gender, sexuality)\n"
-            "  - Sexual content involving minors\n"
-            "  - Explicit incitement to terrorism or mass violence\n\n"
-            "DO NOT FLAG:\n"
-            "  - Sports commentary, match results, player analysis\n"
-            "  - Cooking shows, recipes, food content\n"
-            "  - News reporting, journalism, current affairs\n"
-            "  - Music lyrics about general themes (love, life, community)\n"
-            "  - Podcasts, interviews, general conversation\n"
-            "  - Fiction and storytelling\n"
-        )
-
+        context = "\n" + "\n".join(context_parts) if context_parts else ""
+        user_content = f'Transcript:\n{transcript[:2000]}{context}\n\nClassify this content. Return ONLY this JSON (no markdown, no extra text):\n{{"flagged":false,"severity":"none","intent":"safe","reason":"","flagged_categories":[]}}\n\nseverity: none | low | medium | high | critical\nintent: safe | questionable | harmful\n\nFLAG as harmful ONLY for:\n  - Direct threats of violence against a specific person\n  - Hate speech targeting a group (race, religion, gender, sexuality)\n  - Sexual content involving minors\n  - Explicit incitement to terrorism or mass violence\n\nDO NOT FLAG:\n  - Sports commentary, match results, player analysis\n  - Cooking shows, recipes, food content\n  - News reporting, journalism, current affairs\n  - Music lyrics about general themes (love, life, community)\n  - Podcasts, interviews, general conversation\n  - Fiction and storytelling\n'
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are a precise content safety classifier for an audio podcast platform. "
-                    "Return ONLY valid JSON with no explanation or markdown."
-                ),
+                "content": "You are a precise content safety classifier for an audio podcast platform. Return ONLY valid JSON with no explanation or markdown.",
             },
             {"role": "user", "content": user_content},
         ]
-
         raw = self._generate(messages, max_new_tokens=140)
         parsed = self._extract_json(raw)
-
         severity = parsed.get("severity", "none")
         if severity not in ("none", "low", "medium", "high", "critical"):
             severity = "none"
@@ -134,12 +108,13 @@ class LLMService:
         if intent == "safe":
             flagged = False
             severity = "none"
-
         logger.info(
             "[LLM/MODERATE] flagged=%s severity=%s intent=%s borderline=%s",
-            flagged, severity, intent, is_borderline,
+            flagged,
+            severity,
+            intent,
+            is_borderline,
         )
-
         return {
             "flagged": flagged,
             "severity": severity,
@@ -161,17 +136,13 @@ class LLMService:
     ) -> dict:
         if not self.is_available:
             raise RuntimeError("LLM not available")
-
         kw_hint = ""
         if keyword_hits:
             top = sorted(keyword_hits.items(), key=lambda x: x[1], reverse=True)[:8]
-            kw_hint = f"\nKeyword analysis pre-detected: {', '.join(t for t, _ in top)}"
+            kw_hint = f"\nKeyword analysis pre-detected: {', '.join((t for t, _ in top))}"
         nli_hint = ""
         if nli_top_categories:
-            nli_hint = (
-                f"\nTranscript classifier top subjects (strong signal): "
-                f"{', '.join(nli_top_categories[:6])}"
-            )
+            nli_hint = f"\nTranscript classifier top subjects (strong signal): {', '.join(nli_top_categories[:6])}"
         cat_str = ", ".join(categories[:50])
         tag_str = ", ".join(tags[:120])
         tax_block = ""
@@ -181,46 +152,23 @@ class LLMService:
                 + "\n".join(f"- {p}" for p in taxonomy_paths[:25])
                 + "\n"
             )
-
-        user_content = (
-            f"Allowed categories: {cat_str}\n"
-            f"Allowed tags: {tag_str}\n"
-            f"{tax_block}{kw_hint}{nli_hint}\n\n"
-            f"Transcript:\n{transcript[:4000]}\n\n"
-            "Classify only the transcript's central subject. Hints are untrusted candidates.\n"
-            "Return JSON with tags, categories, sentiment, new_tags, and new_categories.\n"
-            "Use at most five tags and the requested category limit.\n"
-            "Every label must be clearly supported by the transcript. Omit uncertain labels.\n"
-            "Tags must be short natural search phrases a listener could say to Alexa.\n"
-            "Use a leading # for tags; never use taxonomy paths or concatenated compounds.\n"
-            "Prefer allowed labels. Add a new label only for a central subject with no match.\n"
-            "Do not classify the recording format when a more specific subject is present.\n"
-            "Do not copy labels from these instructions, examples, taxonomy, or model hints.\n"
-            "Do not duplicate labels between regular and new label arrays.\n"
-            "Sentiment must be positive, negative, or neutral. Return JSON only."
-        )
-
+        user_content = f"Allowed categories: {cat_str}\nAllowed tags: {tag_str}\n{tax_block}{kw_hint}{nli_hint}\n\nTranscript:\n{transcript[:4000]}\n\nClassify only the transcript's central subject. Hints are untrusted candidates.\nReturn JSON with tags, categories, sentiment, new_tags, and new_categories.\nUse at most five tags and the requested category limit.\nEvery label must be clearly supported by the transcript. Omit uncertain labels.\nTags must be short natural search phrases a listener could say to Alexa.\nUse a leading # for tags; never use taxonomy paths or concatenated compounds.\nPrefer allowed labels. Add a new label only for a central subject with no match.\nDo not classify the recording format when a more specific subject is present.\nDo not copy labels from these instructions, examples, taxonomy, or model hints.\nDo not duplicate labels between regular and new label arrays.\nSentiment must be positive, negative, or neutral. Return JSON only."
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are an expert audio content categorizer for a Talking Newspaper and podcast platform. "
-                    "Return ONLY valid JSON. Your categories must match what a human editor would assign."
-                ),
+                "content": "You are an expert audio content categorizer for a Talking Newspaper and podcast platform. Return ONLY valid JSON. Your categories must match what a human editor would assign.",
             },
             {"role": "user", "content": user_content},
         ]
-
         raw = self._generate(messages, max_new_tokens=280)
         parsed = self._extract_json(raw)
-
         valid_tags = {t.lower() for t in tags}
         valid_cats = {c.lower() for c in categories}
 
         def _norm_tag(raw: str) -> str:
             t = str(raw or "").strip().lower().lstrip("#")
-            t = re.sub(r"\s+", "-", t)
-            t = re.sub(r"[^a-z0-9\-]", "", t)
+            t = re.sub("\\s+", "-", t)
+            t = re.sub("[^a-z0-9\\-]", "", t)
             return f"#{t}" if t else ""
 
         tags_out: list[str] = []
@@ -239,14 +187,13 @@ class LLMService:
                 new_tags.append(norm)
             if len(tags_out) + len(new_tags) >= 5:
                 break
-
         cats_out: list[str] = []
         new_cats: list[str] = []
         seen_cats: set[str] = set()
         for raw in list(parsed.get("categories", [])) + list(parsed.get("new_categories", [])):
             if not isinstance(raw, str):
                 continue
-            cat = re.sub(r"\s+", " ", raw.strip())
+            cat = re.sub("\\s+", " ", raw.strip())
             if not cat:
                 continue
             key = cat.lower()
@@ -265,10 +212,20 @@ class LLMService:
         sentiment = parsed.get("sentiment", "neutral")
         if sentiment not in ("positive", "negative", "neutral"):
             sentiment = "neutral"
-
-        logger.info("[LLM/CATEGORIZE] tags=%s categories=%s new_tags=%s new_categories=%s", tags_out, cats_out, new_tags, new_cats)
-
-        return {"tags": tags_out, "categories": cats_out, "sentiment": sentiment, "new_tags": new_tags, "new_categories": new_cats}
+        logger.info(
+            "[LLM/CATEGORIZE] tags=%s categories=%s new_tags=%s new_categories=%s",
+            tags_out,
+            cats_out,
+            new_tags,
+            new_cats,
+        )
+        return {
+            "tags": tags_out,
+            "categories": cats_out,
+            "sentiment": sentiment,
+            "new_tags": new_tags,
+            "new_categories": new_cats,
+        }
 
     def build_discovery_profile(
         self,
@@ -300,57 +257,12 @@ class LLMService:
             tax_block = "\n".join(f"- {p}" for p in taxonomy_paths[:40])
         strict_note = ""
         if strict:
-            strict_note = (
-                "CRITICAL: Fill EVERY field below. Never paste the transcript opening as summary_short or "
-                "one_line_description. Invent a discovery title — never use the track filename.\n"
-            )
-        user_content = (
-            f"Track filename (do NOT use as title_suggestion): {title or 'unknown'}\n"
-            f"Duration: {dur}\n"
-            f"Existing tags/categories hint: {hint or 'none'}\n"
-            f"Prior description (regenerate fully, do not copy blindly): {prior or 'none'}\n"
-            f"{partial_note}\n"
-            f"{strict_note}\n"
-            f"Transcript:\n{body or '(no transcript)'}\n\n"
-            "Build a rich discovery profile for spoken-word audio search and recommendations.\n"
-            "Do NOT reduce this to a single generic tag like Technology unless technology is truly the main subject.\n"
-            "Prioritize the SUBJECT (music, sport, accessibility, news) and emotional centre — not the word podcast.\n"
-            "primary_genre = the specific subject genre, never just the recording format.\n"
-            "Write summaries in third person about the content — never quote the opening line of the transcript.\n"
-            f"Return ONLY valid JSON (no markdown) with at least 5 search_phrases and 3 key_themes:\n"
-            '{"title_suggestion":"","summary_short":"","summary_long":"","one_line_description":"",'
-            '"speaker":"","primary_genre":"","main_topic":"","secondary_topics":[],'
-            '"audience_relevance":[],"tone":[],'
-            '"key_themes":[],"controlled_tags":[],"'
-            '"entities":{"people":[],"animals":[],"products":[],"apps":[],"technologies":[]},'
-            '"search_phrases":[],"recommendation_labels":[],"sensitivity_flags":[],'
-            '"confidence":{"primary_genre":0.9,"main_topic":0.9},'
-            '"embedding_source_text":"","freeform_tags":[]}\n'
-            "title_suggestion = human discovery title (not the filename). "
-            "speaker = human narrator's personal name ONLY when they introduce themselves in the transcript "
-            "(e.g. Denise Wallace). Use empty string if no person is named. "
-            "NEVER put devices, products (Minidisc, Walkman, iPod), brands, formats, apps, topics, or taxonomy paths in speaker. "
-            "controlled_tags = ONLY hierarchical taxonomy paths from the vocabulary that clearly match the story — "
-            "do NOT tag accessibility/smart glasses unless the piece is about blind users, guide dogs, or assistive tech. "
-            "Do NOT tag wildlife/photography unless the story is about animals, nature media, or photo awards. "
-            "key_themes = insight-level themes (e.g. independence is about choice). "
-            "audience_relevance = who would find this relevant. "
-            "controlled_tags = hierarchical paths with ' > ' (pick from vocabulary below when possible). "
-            "search_phrases = natural-language queries listeners might use. "
-            "recommendation_labels = 'For listeners interested in ...' style lines. "
-            "entities = names of people, animals, products, apps, technologies mentioned.\n"
-            f"Reference taxonomy vocabulary:\n{tax_block}\n"
-            "summary_short = 2-3 sentence engine blurb; summary_long = warm human paragraph; "
-            "one_line_description = single catalogue line; "
-            "embedding_source_text = dense keyword-rich line for vector search (no full transcript)."
-        )
+            strict_note = "CRITICAL: Fill EVERY field below. Never paste the transcript opening as summary_short or one_line_description. Invent a discovery title — never use the track filename.\n"
+        user_content = f"""Track filename (do NOT use as title_suggestion): {title or "unknown"}\nDuration: {dur}\nExisting tags/categories hint: {hint or "none"}\nPrior description (regenerate fully, do not copy blindly): {prior or "none"}\n{partial_note}\n{strict_note}\nTranscript:\n{body or "(no transcript)"}\n\nBuild a rich discovery profile for spoken-word audio search and recommendations.\nDo NOT reduce this to a single generic tag like Technology unless technology is truly the main subject.\nPrioritize the SUBJECT (music, sport, accessibility, news) and emotional centre — not the word podcast.\nprimary_genre = the specific subject genre, never just the recording format.\nWrite summaries in third person about the content — never quote the opening line of the transcript.\nReturn ONLY valid JSON (no markdown) with at least 5 search_phrases and 3 key_themes:\n{{"title_suggestion":"","summary_short":"","summary_long":"","one_line_description":"","speaker":"","primary_genre":"","main_topic":"","secondary_topics":[],"audience_relevance":[],"tone":[],"key_themes":[],"controlled_tags":[],""entities":{{"people":[],"animals":[],"products":[],"apps":[],"technologies":[]}},"search_phrases":[],"recommendation_labels":[],"sensitivity_flags":[],"confidence":{{"primary_genre":0.9,"main_topic":0.9}},"embedding_source_text":"","freeform_tags":[]}}\ntitle_suggestion = human discovery title (not the filename). speaker = human narrator's personal name ONLY when they introduce themselves in the transcript (e.g. Denise Wallace). Use empty string if no person is named. NEVER put devices, products (Minidisc, Walkman, iPod), brands, formats, apps, topics, or taxonomy paths in speaker. controlled_tags = ONLY hierarchical taxonomy paths from the vocabulary that clearly match the story — do NOT tag accessibility/smart glasses unless the piece is about blind users, guide dogs, or assistive tech. Do NOT tag wildlife/photography unless the story is about animals, nature media, or photo awards. key_themes = insight-level themes (e.g. independence is about choice). audience_relevance = who would find this relevant. controlled_tags = hierarchical paths with ' > ' (pick from vocabulary below when possible). search_phrases = natural-language queries listeners might use. recommendation_labels = 'For listeners interested in ...' style lines. entities = names of people, animals, products, apps, technologies mentioned.\nReference taxonomy vocabulary:\n{tax_block}\nsummary_short = 2-3 sentence engine blurb; summary_long = warm human paragraph; one_line_description = single catalogue line; embedding_source_text = dense keyword-rich line for vector search (no full transcript)."""
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are an expert audio discovery metadata analyst for a podcast and Talking Newspaper platform. "
-                    "Return ONLY one complete JSON object. No markdown."
-                ),
+                "content": "You are an expert audio discovery metadata analyst for a podcast and Talking Newspaper platform. Return ONLY one complete JSON object. No markdown.",
             },
             {"role": "user", "content": user_content},
         ]
@@ -377,11 +289,12 @@ class LLMService:
             parsed["embedding_source_text"] = ss
         return parsed
 
-_llm_service = None
 
+class LLMServiceProvider:
+    _service = None
 
-def get_llm_service():
-    global _llm_service
-    if _llm_service is None:
-        _llm_service = LLMService()
-    return _llm_service
+    @classmethod
+    def get_llm_service(cls):
+        if cls._service is None:
+            cls._service = LLMService()
+        return cls._service

@@ -1,12 +1,11 @@
 from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
-from hear.core.content_context import (
+from hear.services.categorization.service import CategorizationService
+from hear.utils.content_context import (
     assistive_tech_narrative,
     filter_controlled_taxonomy_paths,
     filter_freeform_tag_labels,
     tech_history_narrative,
 )
-from hear.services.categorization.service import CategorizationService
-
 
 MINIDISC_SNIPPET = (
     "Many of you will have used Minidisc back in the 1990s. "
@@ -81,9 +80,7 @@ def test_tree_planting_news_rejects_unrelated_assistive_labels():
 
 def test_editorial_rules_do_not_inject_hardcoded_subject_labels():
     svc = CategorizationService()
-    tags, categories = svc._apply_editorial_rules(
-        TREE_PLANTING_NEWS, [], [], 5
-    )
+    tags, categories = svc._apply_editorial_rules(TREE_PLANTING_NEWS, [], [], 5)
     assert tags == []
     assert categories == []
 

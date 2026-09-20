@@ -6,13 +6,13 @@ import soundfile as sf
 import torch
 import torchaudio
 
+from hear.core.noise import NoiseReducer
 from hear.services.magic_clean.models import ContentMode
 from hear.services.magic_clean.processing.dynamics import DynamicsProcessor
 from hear.services.magic_clean.processing.mossformer import (
     MossFormer2Enhancer,
     MossFormerOutputError,
 )
-from hear.core.noise import NoiseReducer
 from hear.services.magic_clean.processing.silence import SilenceProcessor
 from hear.services.magic_clean.processing.stems import StemSeparator
 
@@ -336,9 +336,7 @@ def test_demucs_load_allowlists_supported_checkpoint_types(monkeypatch, tmp_path
 
     safe_names = {getattr(value, "__name__", "") for value in observed_safe_globals}
     serialized_names = {
-        value[1]
-        for value in observed_safe_globals
-        if isinstance(value, tuple) and len(value) == 2
+        value[1] for value in observed_safe_globals if isinstance(value, tuple) and len(value) == 2
     }
     assert {"HTDemucs", "Fraction", "dtype"} <= safe_names
     assert "numpy.core.multiarray.scalar" in serialized_names

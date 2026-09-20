@@ -1,0 +1,11 @@
+[
+  {
+    "package": "whisperx",
+    "target": "whisperx/asr_qwen.py",
+    "patch": "whisperx-asr-qwen.patch",
+    "revision": "68a6634d1b9dfbc3ec4ca3ba800d998fc682b56b",
+    "before_sha256": "50b826f76b3c80d1965d103d8d344ef5d3f4275d022a03c0af1e55ffe7c81fe1",
+    "after_sha256": "09cc3530cf52d6131ec9783ae4eb5c5ee2e044a06abce7e236a518c813088d3b",
+    "patch_sha256": "4489c9391cb5096e336aa1b9525d4567054bb8fddd2ebfdcce6ebd5acb463f47"
+  }
+]

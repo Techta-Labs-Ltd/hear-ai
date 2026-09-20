@@ -3,9 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from hear.services.magic_clean.cleanup import (
-    reconcile_magic_clean_cleanup_tombstones,
-)
+from hear.services.magic_clean.cleanup import MagicCleanCleanup
 
 
 class FakeQuery:
@@ -63,26 +61,19 @@ def test_cleanup_reconciler_removes_verified_tombstone(monkeypatch):
     job = _job()
     session = FakeSession([job])
     deleted = []
-    storage = SimpleNamespace(
-        bucket_name="bucket",
-        delete_object=lambda key: deleted.append(key),
+    storage = SimpleNamespace(bucket_name="bucket", delete_object=lambda key: deleted.append(key))
+    monkeypatch.setattr(
+        "hear.services.magic_clean.cleanup.DatabaseRuntime.SessionLocal", lambda: session
     )
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.SessionLocal",
-        lambda: session,
+        "hear.services.magic_clean.cleanup.StorageContexts.storage_for_job", lambda _job: storage
     )
-    monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.storage_for_job",
-        lambda _job: storage,
-    )
-
-    result = reconcile_magic_clean_cleanup_tombstones()
-
+    result = MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones()
     assert result == {"scanned": 1, "deleted": 1, "failed": 0}
     assert deleted == ["prefix/enhanced/job-1.mp3"]
     assert "magic_clean_cleanup_tombstone" not in job.job_options
     assert "magic_clean_cleanup_reconciled_at" in job.job_options
-    assert session.committed and session.closed and not session.rolled_back
+    assert session.committed and session.closed and (not session.rolled_back)
 
 
 def test_cleanup_reconciler_keeps_and_updates_failed_tombstone(monkeypatch):
@@ -93,24 +84,18 @@ def test_cleanup_reconciler_keeps_and_updates_failed_tombstone(monkeypatch):
         raise RuntimeError("storage unavailable")
 
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.SessionLocal",
-        lambda: session,
+        "hear.services.magic_clean.cleanup.DatabaseRuntime.SessionLocal", lambda: session
     )
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.storage_for_job",
-        lambda _job: SimpleNamespace(
-            bucket_name="bucket",
-            delete_object=fail_delete,
-        ),
+        "hear.services.magic_clean.cleanup.StorageContexts.storage_for_job",
+        lambda _job: SimpleNamespace(bucket_name="bucket", delete_object=fail_delete),
     )
-
-    result = reconcile_magic_clean_cleanup_tombstones()
-
+    result = MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones()
     assert result == {"scanned": 1, "deleted": 0, "failed": 1}
     tombstone = job.job_options["magic_clean_cleanup_tombstone"]
     assert tombstone["attempts"] == 1
     assert tombstone["last_error_type"] == "RuntimeError"
-    assert session.committed and session.closed and not session.rolled_back
+    assert session.committed and session.closed and (not session.rolled_back)
 
 
 def test_cleanup_reconciler_never_deletes_active_retry_key(monkeypatch):
@@ -118,19 +103,15 @@ def test_cleanup_reconciler_never_deletes_active_retry_key(monkeypatch):
     session = FakeSession([job])
     deleted = []
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.SessionLocal",
-        lambda: session,
+        "hear.services.magic_clean.cleanup.DatabaseRuntime.SessionLocal", lambda: session
     )
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.storage_for_job",
+        "hear.services.magic_clean.cleanup.StorageContexts.storage_for_job",
         lambda _job: SimpleNamespace(
-            bucket_name="bucket",
-            delete_object=lambda key: deleted.append(key),
+            bucket_name="bucket", delete_object=lambda key: deleted.append(key)
         ),
     )
-
-    result = reconcile_magic_clean_cleanup_tombstones()
-
+    result = MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones()
     assert result == {"scanned": 1, "deleted": 0, "failed": 0}
     assert not deleted
     assert "magic_clean_cleanup_tombstone" in job.job_options
@@ -144,19 +125,15 @@ def test_cleanup_reconciler_waits_for_writer_grace_period(monkeypatch):
     session = FakeSession([job])
     deleted = []
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.SessionLocal",
-        lambda: session,
+        "hear.services.magic_clean.cleanup.DatabaseRuntime.SessionLocal", lambda: session
     )
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.storage_for_job",
+        "hear.services.magic_clean.cleanup.StorageContexts.storage_for_job",
         lambda _job: SimpleNamespace(
-            bucket_name="bucket",
-            delete_object=lambda key: deleted.append(key),
+            bucket_name="bucket", delete_object=lambda key: deleted.append(key)
         ),
     )
-
-    result = reconcile_magic_clean_cleanup_tombstones()
-
+    result = MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones()
     assert result == {"scanned": 1, "deleted": 0, "failed": 0}
     assert not deleted
     assert "magic_clean_cleanup_tombstone" in job.job_options
@@ -164,26 +141,19 @@ def test_cleanup_reconciler_waits_for_writer_grace_period(monkeypatch):
 
 def test_cleanup_reconciler_preserves_completed_authoritative_key(monkeypatch):
     key = "prefix/enhanced/job-1.mp3"
-    job = _job(
-        status="completed",
-        result_json={"enhanced_audio": {"b2_key": key}},
-    )
+    job = _job(status="completed", result_json={"enhanced_audio": {"b2_key": key}})
     session = FakeSession([job])
     deleted = []
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.SessionLocal",
-        lambda: session,
+        "hear.services.magic_clean.cleanup.DatabaseRuntime.SessionLocal", lambda: session
     )
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.storage_for_job",
+        "hear.services.magic_clean.cleanup.StorageContexts.storage_for_job",
         lambda _job: SimpleNamespace(
-            bucket_name="bucket",
-            delete_object=lambda candidate: deleted.append(candidate),
+            bucket_name="bucket", delete_object=lambda candidate: deleted.append(candidate)
         ),
     )
-
-    result = reconcile_magic_clean_cleanup_tombstones()
-
+    result = MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones()
     assert result == {"scanned": 1, "deleted": 0, "failed": 0}
     assert not deleted
     assert "magic_clean_cleanup_tombstone" not in job.job_options
@@ -195,19 +165,15 @@ def test_cleanup_reconciler_rejects_different_run_owner(monkeypatch):
     session = FakeSession([job])
     deleted = []
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.SessionLocal",
-        lambda: session,
+        "hear.services.magic_clean.cleanup.DatabaseRuntime.SessionLocal", lambda: session
     )
     monkeypatch.setattr(
-        "hear.services.magic_clean.cleanup.storage_for_job",
+        "hear.services.magic_clean.cleanup.StorageContexts.storage_for_job",
         lambda _job: SimpleNamespace(
-            bucket_name="bucket",
-            delete_object=lambda key: deleted.append(key),
+            bucket_name="bucket", delete_object=lambda key: deleted.append(key)
         ),
     )
-
-    result = reconcile_magic_clean_cleanup_tombstones()
-
+    result = MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones()
     assert result == {"scanned": 1, "deleted": 0, "failed": 1}
     assert not deleted
     tombstone = job.job_options["magic_clean_cleanup_tombstone"]

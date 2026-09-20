@@ -88,3 +88,7 @@ The earlier explicit instruction to remove training remains in effect pending cl
 ## Release restriction
 
 Do not enable backend-owned v2 attempts against this code yet: ExecuteAttempt, its execution owner and manifest/control APIs are not shipped. The live path remains v1 with the correctness and resource-bound changes above. The residual SQL/global-client/whole-file references are known unfinished migration work, not justified deletions.
+
+## Follow-up: class ownership and dependency patches
+
+The subsequent ownership refactor moves application-level standalone functions into named classes and reusable helpers into `hear/utils`, with callers and tests migrated together. Database and client-provider state now belongs to its class. Generated protobuf APIs and pytest functions retain their framework-required organization. An AST architecture check and CI job enforce ownership and import placement. Dependency setup automatically applies the pinned WhisperX patch and verifies revision/source/patch hashes; runtime validation only checks and never installs or patches dependencies. See [CLASS_OWNERSHIP_AND_PATCHES.md](docs/CLASS_OWNERSHIP_AND_PATCHES.md) for setup commands and verification. This does not complete the cross-service migration described above.

@@ -35,68 +35,70 @@ class StorageCredentialsExpiringError(StorageContextError):
     code = "storage_credentials_expiring"
 
 
-@lru_cache(maxsize=1)
-def _fernet() -> Fernet:
-    value = settings.STORAGE_CONTEXT_ENCRYPTION_KEY.strip().encode("ascii")
-    try:
-        return Fernet(value)
-    except (ValueError, UnicodeError) as exc:
-        raise RuntimeError("STORAGE_CONTEXT_ENCRYPTION_KEY must be a valid Fernet key") from exc
+class StorageContexts:
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _fernet() -> Fernet:
+        value = settings.STORAGE_CONTEXT_ENCRYPTION_KEY.strip().encode("ascii")
+        try:
+            return Fernet(value)
+        except (ValueError, UnicodeError) as exc:
+            raise RuntimeError("STORAGE_CONTEXT_ENCRYPTION_KEY must be a valid Fernet key") from exc
 
+    @staticmethod
+    def validate_storage_encryption_key(value: str | None = None) -> None:
+        if value is None:
+            StorageContexts._fernet()
+            return
+        try:
+            Fernet(value.strip().encode("ascii"))
+        except (ValueError, UnicodeError) as exc:
+            raise RuntimeError("STORAGE_CONTEXT_ENCRYPTION_KEY must be a valid Fernet key") from exc
 
-def validate_storage_encryption_key(value: str | None = None) -> None:
-    if value is None:
-        _fernet()
-        return
-    try:
-        Fernet(value.strip().encode("ascii"))
-    except (ValueError, UnicodeError) as exc:
-        raise RuntimeError("STORAGE_CONTEXT_ENCRYPTION_KEY must be a valid Fernet key") from exc
+    @staticmethod
+    def encrypt_storage_context(storage: StorageContext) -> str:
+        payload = storage.model_dump_json().encode("utf-8")
+        return StorageContexts._fernet().encrypt(payload).decode("ascii")
 
+    @staticmethod
+    def decrypt_storage_context(
+        token: str | None, *, require_active: bool = True
+    ) -> StorageContext:
+        if not token:
+            raise MissingStorageContextError("missing_storage_context")
+        try:
+            payload = StorageContexts._fernet().decrypt(token.encode("ascii"))
+            storage = StorageContext.model_validate(json.loads(payload))
+        except MissingStorageContextError:
+            raise
+        except (InvalidToken, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise StorageContextError("invalid_storage_context") from exc
+        expires = storage.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if require_active and expires <= datetime.now(UTC):
+            raise StorageCredentialsExpiredError("storage_credentials_expired")
+        return storage
 
-def encrypt_storage_context(storage: StorageContext) -> str:
-    payload = storage.model_dump_json().encode("utf-8")
-    return _fernet().encrypt(payload).decode("ascii")
+    @staticmethod
+    def storage_for_job(job) -> B2Storage:
+        return B2Storage(
+            StorageContexts.decrypt_storage_context(getattr(job, "storage_context_encrypted", None))
+        )
 
-
-def decrypt_storage_context(
-    token: str | None,
-    *,
-    require_active: bool = True,
-) -> StorageContext:
-    if not token:
-        raise MissingStorageContextError("missing_storage_context")
-    try:
-        payload = _fernet().decrypt(token.encode("ascii"))
-        storage = StorageContext.model_validate(json.loads(payload))
-    except MissingStorageContextError:
-        raise
-    except (InvalidToken, UnicodeError, ValueError, json.JSONDecodeError) as exc:
-        raise StorageContextError("invalid_storage_context") from exc
-    expires = storage.expires_at
-    if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=UTC)
-    if require_active and expires <= datetime.now(UTC):
-        raise StorageCredentialsExpiredError("storage_credentials_expired")
-    return storage
-
-
-def storage_for_job(job) -> B2Storage:
-    return B2Storage(decrypt_storage_context(getattr(job, "storage_context_encrypted", None)))
-
-
-def object_key(storage: StorageContext, *parts: str) -> str:
-    clean_parts: list[str] = []
-    for raw in parts:
-        value = str(raw).strip().strip("/")
-        parsed = PurePosixPath(value)
-        unsafe_part = any(part in {"", ".", ".."} for part in parsed.parts)
-        if not value or parsed.is_absolute() or unsafe_part:
-            raise ValueError("unsafe storage object key component")
-        if "\\" in value or "\x00" in value:
-            raise ValueError("unsafe storage object key component")
-        clean_parts.extend(parsed.parts)
-    return storage.folder_prefix + "/".join(clean_parts)
+    @staticmethod
+    def object_key(storage: StorageContext, *parts: str) -> str:
+        clean_parts: list[str] = []
+        for raw in parts:
+            value = str(raw).strip().strip("/")
+            parsed = PurePosixPath(value)
+            unsafe_part = any(part in {"", ".", ".."} for part in parsed.parts)
+            if not value or parsed.is_absolute() or unsafe_part:
+                raise ValueError("unsafe storage object key component")
+            if "\\" in value or "\x00" in value:
+                raise ValueError("unsafe storage object key component")
+            clean_parts.extend(parsed.parts)
+        return storage.folder_prefix + "/".join(clean_parts)
 
 
 class B2Storage:
@@ -121,18 +123,14 @@ class B2Storage:
             raise StorageCredentialsExpiredError("storage_credentials_expired")
 
     def key(self, *parts: str) -> str:
-        return object_key(self.context, *parts)
+        return StorageContexts.object_key(self.context, *parts)
 
     def _public_url(self, remote_key: str) -> str:
         encoded = "/".join(quote(part, safe="") for part in remote_key.split("/"))
         return f"{self.context.public_base_url.rstrip('/')}/{encoded}"
 
     def artifact(self, remote_key: str, audio_url: str) -> dict[str, str]:
-        return {
-            "bucket_name": self.bucket_name,
-            "b2_key": remote_key,
-            "audio_url": audio_url,
-        }
+        return {"bucket_name": self.bucket_name, "b2_key": remote_key, "audio_url": audio_url}
 
     def upload_file(
         self,
@@ -155,36 +153,24 @@ class B2Storage:
         if checksum_sha256 is not None:
             normalized_checksum = checksum_sha256.strip().lower()
             if len(normalized_checksum) != 64 or any(
-                character not in "0123456789abcdef"
-                for character in normalized_checksum
+                character not in "0123456789abcdef" for character in normalized_checksum
             ):
                 raise ValueError("checksum_sha256 must be a lowercase SHA-256 hex digest")
             extra_args["Metadata"] = {"sha256": normalized_checksum}
         try:
-            self._client.upload_file(
-                local_path,
-                self.bucket_name,
-                remote_key,
-                ExtraArgs=extra_args,
-            )
+            self._client.upload_file(local_path, self.bucket_name, remote_key, ExtraArgs=extra_args)
             uploaded = self._client.head_object(Bucket=self.bucket_name, Key=remote_key)
             local_size = os.path.getsize(local_path)
             remote_size = int(uploaded.get("ContentLength") or -1)
             if remote_size != local_size:
                 raise RuntimeError(
-                    "uploaded object size mismatch: "
-                    f"local={local_size}, remote={remote_size}"
+                    f"uploaded object size mismatch: local={local_size}, remote={remote_size}"
                 )
             if checksum_sha256 is not None:
-                remote_checksum = str(
-                    (uploaded.get("Metadata") or {}).get("sha256") or ""
-                ).lower()
+                remote_checksum = str((uploaded.get("Metadata") or {}).get("sha256") or "").lower()
                 if remote_checksum != normalized_checksum:
                     raise RuntimeError("uploaded object checksum metadata mismatch")
-                remote_object = self._client.get_object(
-                    Bucket=self.bucket_name,
-                    Key=remote_key,
-                )
+                remote_object = self._client.get_object(Bucket=self.bucket_name, Key=remote_key)
                 body = remote_object["Body"]
                 digest = hashlib.sha256()
                 try:
@@ -206,7 +192,7 @@ class B2Storage:
 
     def delete_object(self, key: str | None) -> None:
         self._ensure_active()
-        if not key or not isinstance(key, str) or not key.strip():
+        if not key or not isinstance(key, str) or (not key.strip()):
             return
         clean = key.strip()
         if not clean.startswith(self.context.folder_prefix):

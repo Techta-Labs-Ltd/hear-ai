@@ -1,19 +1,16 @@
 import hashlib
 import json
-import grpc
 from unittest.mock import MagicMock
 
+import grpc
 import pytest
-from pytest import approx
 from google.protobuf.json_format import ParseDict
+from pytest import approx
 
 from hear.config import settings
-from hear.core.backend_registry import backend_registry
+from hear.core.backend_registry import BackendRegistry
 from hear.proto import pipeline_pb2
-from hear.services.transport.grpc import (
-    JOB_TYPE_PAYLOAD_MAP,
-    PipelineGrpcService,
-)
+from hear.services.transport.grpc import JOB_TYPE_PAYLOAD_MAP, PipelineGrpcService
 from hear.services.transport.operations import ServiceError
 
 
@@ -22,16 +19,18 @@ def configure_backend_auth(monkeypatch, service_key: str = "secret") -> None:
     monkeypatch.setattr(
         settings,
         "BACKEND_REGISTRY_JSON",
-        json.dumps({
-            "backend-a": {
-                "service_key_sha256": digest,
-                "allowed_endpoint_urls": ["https://s3.example.test"],
-                "allowed_buckets": ["bucket-a"],
-                "allowed_public_base_urls": ["https://cdn.example.test"],
+        json.dumps(
+            {
+                "backend-a": {
+                    "service_key_sha256": digest,
+                    "allowed_endpoint_urls": ["https://s3.example.test"],
+                    "allowed_buckets": ["bucket-a"],
+                    "allowed_public_base_urls": ["https://cdn.example.test"],
+                }
             }
-        }),
+        ),
     )
-    backend_registry.cache_clear()
+    BackendRegistry.backend_registry.cache_clear()
 
 
 class FakeContext:
@@ -76,21 +75,22 @@ class TestTypedResponseContract:
         assert set(methods) == set(EVERY_RPC), "RPC set mismatch"
         for name, (req, res) in EVERY_RPC.items():
             m = methods[name]
-            assert m.input_type.name == req, f"{name}: expected request {req}, got {m.input_type.name}"
-            assert m.output_type.name == res, f"{name}: expected response {res}, got {m.output_type.name}"
+            assert m.input_type.name == req, (
+                f"{name}: expected request {req}, got {m.input_type.name}"
+            )
+            assert m.output_type.name == res, (
+                f"{name}: expected response {res}, got {m.output_type.name}"
+            )
 
     def test_no_rpc_returns_google_protobuf_struct(self):
         svc = pipeline_pb2.DESCRIPTOR.services_by_name["Pipeline"]
         struct_name = "google.protobuf.Struct"
         for m in svc.methods:
             full_out = m.output_type.full_name if m.output_type else ""
-            assert struct_name not in full_out, (
-                f"{m.name} still returns {struct_name}"
-            )
+            assert struct_name not in full_out, f"{m.name} still returns {struct_name}"
 
 
 class TestParseDictMessageConstruction:
-
     def test_moderation_reply(self):
         d = dict(
             flagged=True,
@@ -249,7 +249,6 @@ class TestParseDictMessageConstruction:
         assert msg.changes[0].segment_start == 1.0
         assert msg.quality_metrics.passed is True
 
-
     def test_platform_settings_reply(self):
         d = dict(status="accepted", blocked_keywords_count=3, auto_tag_keywords_count=5)
         msg = ParseDict(d, pipeline_pb2.PlatformSettingsReply(), ignore_unknown_fields=True)
@@ -275,13 +274,7 @@ class TestParseDictMessageConstruction:
         assert msg.active_jobs == 0
 
     def test_health_reply_no_gpu(self):
-        d = dict(
-            status="healthy",
-            gpu_available=False,
-            gpu_name="",
-            active_jobs=1,
-            queued_jobs=2,
-        )
+        d = dict(status="healthy", gpu_available=False, gpu_name="", active_jobs=1, queued_jobs=2)
         msg = ParseDict(d, pipeline_pb2.HealthReply(), ignore_unknown_fields=True)
         assert msg.gpu_available is False
         assert msg.gpu_name == ""
@@ -357,10 +350,7 @@ class TestParseDictMessageConstruction:
         d = dict(
             source_audio_url="https://storage.example/audio.mp3",
             transcription=dict(
-                transcript="Hello world",
-                segments=[],
-                language="en",
-                confidence=0.95,
+                transcript="Hello world", segments=[], language="en", confidence=0.95
             ),
         )
         msg = ParseDict(d, pipeline_pb2.TranscriptionPayload(), ignore_unknown_fields=True)
@@ -437,7 +427,17 @@ class TestParseDictMessageConstruction:
 
 class TestJobTypePayloadMap:
     def test_covers_all_supported_job_types(self):
-        expected = {"pipeline", "categorization", "rebuild", "transcription", "audio_tag", "magic_clean", "reconstruct", "edit_transcript", "discovery"}
+        expected = {
+            "pipeline",
+            "categorization",
+            "rebuild",
+            "transcription",
+            "audio_tag",
+            "magic_clean",
+            "reconstruct",
+            "edit_transcript",
+            "discovery",
+        }
         assert set(JOB_TYPE_PAYLOAD_MAP) == expected
 
     def test_pipeline_group_maps_to_pipeline_field(self):
@@ -485,11 +485,7 @@ class TestCallHelper:
         async def fn():
             return {"preview_id": "p-1", "status": "rolled_back"}
 
-        result = await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        result = await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert isinstance(result, pipeline_pb2.RollbackPreviewReply)
         assert result.preview_id == "p-1"
         assert result.status == "rolled_back"
@@ -503,11 +499,7 @@ class TestCallHelper:
         async def fn():
             return {"preview_id": "p-1", "status": "rolled_back"}
 
-        result = await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        result = await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert isinstance(result, pipeline_pb2.RollbackPreviewReply)
         assert result.preview_id == ""
         assert ctx.code == grpc.StatusCode.UNAUTHENTICATED
@@ -521,11 +513,7 @@ class TestCallHelper:
         async def fn():
             raise ServiceError(404, "not found")
 
-        result = await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        result = await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert isinstance(result, pipeline_pb2.RollbackPreviewReply)
         assert ctx.code == grpc.StatusCode.NOT_FOUND
         assert ctx.details == "not found"
@@ -539,11 +527,7 @@ class TestCallHelper:
         async def fn():
             raise ServiceError(422, "bad request")
 
-        await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert ctx.code == grpc.StatusCode.INVALID_ARGUMENT
         assert ctx.details == "bad request"
 
@@ -556,11 +540,7 @@ class TestCallHelper:
         async def fn():
             raise ServiceError(503, "not ready")
 
-        await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert ctx.code == grpc.StatusCode.UNAVAILABLE
         assert ctx.details == "not ready"
 
@@ -573,11 +553,7 @@ class TestCallHelper:
         async def fn():
             raise RuntimeError("boom")
 
-        await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert ctx.code == grpc.StatusCode.INTERNAL
 
     @pytest.mark.anyio
@@ -589,10 +565,6 @@ class TestCallHelper:
         async def fn():
             raise ServiceError(409, "conflict")
 
-        await svc._call(
-            ctx,
-            fn,
-            pipeline_pb2.RollbackPreviewReply,
-        )
+        await svc._call(ctx, fn, pipeline_pb2.RollbackPreviewReply)
         assert ctx.code == grpc.StatusCode.ALREADY_EXISTS
         assert ctx.details == "conflict"

@@ -29,10 +29,7 @@ async def test_edit_transcript_forwards_stored_speaker_control(monkeypatch, tmp_
     )
     runner._transcriber = SimpleNamespace(
         transcribe_file=AsyncMock(
-            return_value={
-                "transcript": "old",
-                "segments": [{"text": "old", "start": 0, "end": 1}],
-            }
+            return_value={"transcript": "old", "segments": [{"text": "old", "start": 0, "end": 1}]}
         )
     )
     runner._download_reconstruction_root = AsyncMock(return_value=None)
@@ -48,13 +45,13 @@ async def test_edit_transcript_forwards_stored_speaker_control(monkeypatch, tmp_
         )
     )
     runner._synthesizer = SimpleNamespace(reconstruct_segments=synthesize)
-    monkeypatch.setattr("hear.orchestrator.download_audio", AsyncMock(return_value=str(source)))
+    monkeypatch.setattr(
+        "hear.orchestrator.AudioDownloader.download_audio", AsyncMock(return_value=str(source))
+    )
     monkeypatch.setattr("hear.orchestrator.compute_edit_segments", lambda *_args: ["edit"])
     monkeypatch.setattr("hear.orchestrator.edit_segments_to_changes", lambda *_args: changes)
-    monkeypatch.setattr("hear.orchestrator.storage_for_job", lambda _job: object())
-
+    monkeypatch.setattr("hear.orchestrator.StorageContexts.storage_for_job", lambda _job: object())
     await runner._process_edit_transcript(job, object(), object())
-
     assert synthesize.await_args.kwargs["same_speaker"] is same_speaker
     assert synthesize.await_args.kwargs["voice_reference_audio_path"] == (
         str(source) if same_speaker else None
@@ -64,10 +61,7 @@ async def test_edit_transcript_forwards_stored_speaker_control(monkeypatch, tmp_
 @pytest.mark.anyio
 async def test_preview_quality_exception_is_not_passed(monkeypatch):
     preview = SimpleNamespace(
-        audio_url="https://audio.test/preview",
-        b2_key="key",
-        duration=1,
-        segments=[],
+        audio_url="https://audio.test/preview", b2_key="key", duration=1, segments=[]
     )
     synthesizer = SimpleNamespace(
         TARGET_SR=100,
@@ -80,20 +74,24 @@ async def test_preview_quality_exception_is_not_passed(monkeypatch):
     service._download_to_temp = Mock(return_value="preview.wav")
     service._commit = AsyncMock()
     monkeypatch.setattr(
-        "hear.services.reconstruction.service.download_audio", AsyncMock(return_value="source.wav")
+        "hear.services.reconstruction.service.AudioDownloader.download_audio",
+        AsyncMock(return_value="source.wav"),
     )
-    monkeypatch.setattr("hear.services.reconstruction.service.drop_temp_standalone", Mock())
+    monkeypatch.setattr(
+        "hear.services.reconstruction.service.TempWorkspace.drop_temp_standalone", Mock()
+    )
     monkeypatch.setattr(
         "hear.services.reconstruction.service.torchaudio.load",
         lambda _path: (torch.ones(1, 100), 100),
     )
     monkeypatch.setattr(
-        "hear.services.reconstruction.service.SessionLocal", Mock(return_value=Mock())
+        "hear.services.reconstruction.service.DatabaseRuntime.SessionLocal",
+        Mock(return_value=Mock()),
     )
     monkeypatch.setattr(
-        "hear.services.reconstruction.service.encrypt_storage_context", lambda _context: "encrypted"
+        "hear.services.reconstruction.service.StorageContexts.encrypt_storage_context",
+        lambda _context: "encrypted",
     )
-
     result = await service.create_preview(
         "track",
         "https://audio.test/source",
@@ -101,7 +99,6 @@ async def test_preview_quality_exception_is_not_passed(monkeypatch):
         backend_id="backend",
         storage=SimpleNamespace(context=object()),
     )
-
     assert result.quality_metrics == {
         "passed": False,
         "status": "unavailable",

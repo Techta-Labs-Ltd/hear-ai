@@ -1,20 +1,12 @@
 import asyncio
-from unittest.mock import AsyncMock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from hear.orchestrator import (
-    Orchestrator,
-    resolve_reconstruction_reference_url,
-)
+from hear.orchestrator import OrchestrationResults, Orchestrator
 
-RETRY_CHANGES = [
-    {
-        "segment_start": 0.25,
-        "segment_end": 1.25,
-    }
-]
+RETRY_CHANGES = [{"segment_start": 0.25, "segment_end": 1.25}]
 
 
 def _job(
@@ -37,13 +29,8 @@ def _job(
         status="completed",
         job_type="reconstruct",
         input_url=input_url,
-        custom_tags={
-            "changes": RETRY_CHANGES if changes is None else changes,
-        },
-        result_json={
-            "rebuilt_audio": {"audio_url": output_url},
-            "segments": segments,
-        },
+        custom_tags={"changes": RETRY_CHANGES if changes is None else changes},
+        result_json={"rebuilt_audio": {"audio_url": output_url}, "segments": segments},
         job_options=options,
     )
 
@@ -51,15 +38,13 @@ def _job(
 def test_resolves_multi_generation_chain_to_original_input():
     first = _job("job-1", "https://audio/root.wav", "https://audio/one.mp3")
     second = _job("job-2", "https://audio/one.mp3", "https://audio/two.mp3")
-
-    resolved, hops = resolve_reconstruction_reference_url(
+    resolved, hops = OrchestrationResults.resolve_reconstruction_reference_url(
         "https://audio/two.mp3",
         backend_id="backend-a",
         track_id="track-a",
         changes=RETRY_CHANGES,
         jobs=[second, first],
     )
-
     assert resolved == "https://audio/root.wav"
     assert hops == 2
 
@@ -71,28 +56,21 @@ def test_persisted_root_hint_collapses_a_retry_chain():
         "https://audio/two.mp3",
         root_hint="https://audio/root.wav",
     )
-
-    resolved, hops = resolve_reconstruction_reference_url(
+    resolved, hops = OrchestrationResults.resolve_reconstruction_reference_url(
         "https://audio/two.mp3",
         backend_id="backend-a",
         track_id="track-a",
         changes=RETRY_CHANGES,
         jobs=[parent],
     )
-
     assert resolved == "https://audio/root.wav"
     assert hops == 1
 
 
 def test_changed_retry_intervals_fail_closed():
-    parent = _job(
-        "job-1",
-        "https://audio/root.wav",
-        "https://audio/rebuilt.mp3",
-    )
-
+    parent = _job("job-1", "https://audio/root.wav", "https://audio/rebuilt.mp3")
     with pytest.raises(ValueError, match="same original intervals"):
-        resolve_reconstruction_reference_url(
+        OrchestrationResults.resolve_reconstruction_reference_url(
             "https://audio/rebuilt.mp3",
             backend_id="backend-a",
             track_id="track-a",
@@ -108,9 +86,8 @@ def test_isolated_segment_timeline_fails_closed():
         "https://audio/rebuilt.mp3",
         segment_url="https://audio/segment.mp3",
     )
-
     with pytest.raises(ValueError, match="isolated reconstruction segments"):
-        resolve_reconstruction_reference_url(
+        OrchestrationResults.resolve_reconstruction_reference_url(
             "https://audio/segment.mp3",
             backend_id="backend-a",
             track_id="track-a",
@@ -121,26 +98,18 @@ def test_isolated_segment_timeline_fails_closed():
 
 def test_lineage_never_crosses_backend_or_track_boundaries():
     wrong_backend = _job(
-        "job-1",
-        "https://audio/root-a.wav",
-        "https://audio/rebuilt.mp3",
-        backend_id="backend-b",
+        "job-1", "https://audio/root-a.wav", "https://audio/rebuilt.mp3", backend_id="backend-b"
     )
     wrong_track = _job(
-        "job-2",
-        "https://audio/root-b.wav",
-        "https://audio/rebuilt.mp3",
-        track_id="track-b",
+        "job-2", "https://audio/root-b.wav", "https://audio/rebuilt.mp3", track_id="track-b"
     )
-
-    resolved, hops = resolve_reconstruction_reference_url(
+    resolved, hops = OrchestrationResults.resolve_reconstruction_reference_url(
         "https://audio/rebuilt.mp3",
         backend_id="backend-a",
         track_id="track-a",
         changes=RETRY_CHANGES,
         jobs=[wrong_backend, wrong_track],
     )
-
     assert resolved == "https://audio/rebuilt.mp3"
     assert hops == 0
 
@@ -148,9 +117,8 @@ def test_lineage_never_crosses_backend_or_track_boundaries():
 def test_ambiguous_lineage_fails_closed():
     first = _job("job-1", "https://audio/root-a.wav", "https://audio/same.mp3")
     second = _job("job-2", "https://audio/root-b.wav", "https://audio/same.mp3")
-
     with pytest.raises(ValueError, match="ambiguous"):
-        resolve_reconstruction_reference_url(
+        OrchestrationResults.resolve_reconstruction_reference_url(
             "https://audio/same.mp3",
             backend_id="backend-a",
             track_id="track-a",
@@ -162,9 +130,8 @@ def test_ambiguous_lineage_fails_closed():
 def test_cyclic_lineage_fails_closed():
     first = _job("job-1", "https://audio/two.mp3", "https://audio/one.mp3")
     second = _job("job-2", "https://audio/one.mp3", "https://audio/two.mp3")
-
     with pytest.raises(ValueError, match="cycle"):
-        resolve_reconstruction_reference_url(
+        OrchestrationResults.resolve_reconstruction_reference_url(
             "https://audio/one.mp3",
             backend_id="backend-a",
             track_id="track-a",
@@ -184,30 +151,22 @@ def test_malformed_results_are_ignored():
         result_json={"rebuilt_audio": None, "segments": "invalid"},
         job_options={},
     )
-
-    resolved, hops = resolve_reconstruction_reference_url(
+    resolved, hops = OrchestrationResults.resolve_reconstruction_reference_url(
         "https://audio/current.mp3",
         backend_id="backend-a",
         track_id="track-a",
         changes=RETRY_CHANGES,
         jobs=[malformed],
     )
-
     assert resolved == "https://audio/current.mp3"
     assert hops == 0
 
 
 @pytest.mark.parametrize(
-    ("same_speaker", "expected_voice_reference"),
-    [
-        (True, "/tmp/immutable-root.wav"),
-        (False, None),
-    ],
+    ("same_speaker", "expected_voice_reference"), [(True, "/tmp/immutable-root.wav"), (False, None)]
 )
 def test_reconstruct_retry_splices_from_immutable_root(
-    monkeypatch,
-    same_speaker,
-    expected_voice_reference,
+    monkeypatch, same_speaker, expected_voice_reference
 ):
     changes = [
         {
@@ -224,10 +183,7 @@ def test_reconstruct_retry_splices_from_immutable_root(
         job_type="reconstruct",
         track_id="track-a",
         input_url="https://audio/rebuilt.mp3",
-        custom_tags={
-            "changes": changes,
-            "same_speaker": same_speaker,
-        },
+        custom_tags={"changes": changes, "same_speaker": same_speaker},
         job_options={},
     )
     rebuilt = SimpleNamespace(
@@ -246,13 +202,11 @@ def test_reconstruct_retry_splices_from_immutable_root(
     )
     orchestrator._complete = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        "hear.orchestrator.download_audio",
+        "hear.orchestrator.AudioDownloader.download_audio",
         AsyncMock(return_value="/tmp/submitted-rebuilt.wav"),
     )
-    monkeypatch.setattr("hear.orchestrator.storage_for_job", lambda _: object())
-
+    monkeypatch.setattr("hear.orchestrator.StorageContexts.storage_for_job", lambda _: object())
     asyncio.run(orchestrator._process_reconstruct(job, SimpleNamespace(), object()))
-
     call = orchestrator._synthesizer.reconstruct_segments.await_args
     assert call.kwargs["original_audio_path"] == "/tmp/immutable-root.wav"
     assert call.kwargs["voice_reference_audio_path"] == expected_voice_reference

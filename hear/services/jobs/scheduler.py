@@ -35,9 +35,7 @@ class FairJobScheduler:
     ) -> None:
         self.max_active = max(1, max_active)
         self.max_active_per_user = max(1, max_active_per_user)
-        self.type_limits = {
-            key: max(1, value) for key, value in (type_limits or {}).items()
-        }
+        self.type_limits = {key: max(1, value) for key, value in (type_limits or {}).items()}
         self._queues: dict[str, deque[PendingJob]] = defaultdict(deque)
         self._users: deque[str] = deque()
         self._queued: set[tuple[str, str]] = set()
@@ -121,9 +119,7 @@ class FairJobScheduler:
             "active": self.active_count,
             "active_users": sum(1 for value in self._active_by_user.values() if value),
             "queued_users": len(self._users),
-            "active_by_type": {
-                key: value for key, value in self._active_by_type.items() if value
-            },
+            "active_by_type": {key: value for key, value in self._active_by_type.items() if value},
         }
 
     def _drop_user(self, user_id: str) -> None:

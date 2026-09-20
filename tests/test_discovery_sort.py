@@ -1,5 +1,5 @@
-from hear.core.discovery_sort import sort_discovery_items
-from hear.models.discovery import discovery_to_callback_dict, ContentDiscoveryProfile
+from hear.models.discovery import ContentDiscoveryProfile, DiscoverySerialization
+from hear.utils.discovery_sort import sort_discovery_items
 
 
 def test_discovery_callback_includes_latest_and_trending_fields():
@@ -9,10 +9,8 @@ def test_discovery_callback_includes_latest_and_trending_fields():
         summary_short="Summary",
         one_line_description="One line",
     )
-    data = discovery_to_callback_dict(
-        profile,
-        published_at="2026-05-01T10:00:00Z",
-        trending_score=42.5,
+    data = DiscoverySerialization.discovery_to_callback_dict(
+        profile, published_at="2026-05-01T10:00:00Z", trending_score=42.5
     )
     assert data["published_at"] == "2026-05-01T10:00:00Z"
     assert data["latest_at"] == "2026-05-01T10:00:00Z"

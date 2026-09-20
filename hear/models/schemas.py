@@ -223,8 +223,8 @@ class DiscoveryCatalogResponse(BaseModel):
 
 
 class PlatformSettingsWebhookEvent(BaseModel):
-    blocked_keywords: str = ""    # comma-separated, e.g. "spam,scam,fraud"
-    auto_tag_keywords: str = ""   # comma-separated, e.g. "news,breaking,exclusive,interview,report"
+    blocked_keywords: str = ""  # comma-separated, e.g. "spam,scam,fraud"
+    auto_tag_keywords: str = ""  # comma-separated, e.g. "news,breaking,exclusive,interview,report"
 
 
 class PlatformSettingsWebhookResponse(BaseModel):

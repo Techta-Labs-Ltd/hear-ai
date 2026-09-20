@@ -26,6 +26,7 @@ def test_reconstruction_seed_is_stable_across_retries_and_python_processes():
     assert first_seed == synthesizer._compute_seed("job-2", "track-1")
     assert first_seed != synthesizer._compute_seed("job-1", "track-2")
 
+
 def test_reconstruct_segments_uses_immutable_waveform_for_voice_reference(
     monkeypatch,
 ):
@@ -61,12 +62,14 @@ def test_reconstruct_segments_uses_immutable_waveform_for_voice_reference(
                 original_audio_path="current.wav",
                 voice_reference_audio_path="immutable.wav",
                 track_id="track-1",
-                changes=[{
-                    "segment_start": 0.25,
-                    "segment_end": 1.25,
-                    "new_text": "replacement",
-                    "original_text": "original",
-                }],
+                changes=[
+                    {
+                        "segment_start": 0.25,
+                        "segment_end": 1.25,
+                        "new_text": "replacement",
+                        "original_text": "original",
+                    }
+                ],
                 storage=SimpleNamespace(),
                 same_speaker=True,
                 job_id="job-1",
@@ -177,9 +180,7 @@ def test_voice_reference_uses_clean_audio_before_an_edit_at_track_end():
     assert end - start == int(10.0 * synthesizer.TARGET_SR)
 
 
-def test_voice_reference_uses_transcript_aligned_to_expanded_clip(
-    monkeypatch, tmp_path
-):
+def test_voice_reference_uses_transcript_aligned_to_expanded_clip(monkeypatch, tmp_path):
     synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     reference_path = tmp_path / "reference.wav"
@@ -195,7 +196,8 @@ def test_voice_reference_uses_transcript_aligned_to_expanded_clip(
 
     monkeypatch.setattr(synthesizer, "_export_reference_clip", fake_export)
     monkeypatch.setattr(
-        synthesizer, "_transcriber",
+        synthesizer,
+        "_transcriber",
         SimpleNamespace(transcribe=fake_transcribe),
     )
 
@@ -211,9 +213,7 @@ def test_voice_reference_uses_transcript_aligned_to_expanded_clip(
     assert path == str(reference_path)
     assert text == "The words spoken across the full reference clip."
     assert speaking_rate is None
-    assert (exported_bounds["end"] - exported_bounds["start"]) == int(
-        10.0 * synthesizer.TARGET_SR
-    )
+    assert (exported_bounds["end"] - exported_bounds["start"]) == int(10.0 * synthesizer.TARGET_SR)
     assert exported_bounds["end"] < int(14.8 * synthesizer.TARGET_SR)
 
 
@@ -240,9 +240,7 @@ def test_voice_reference_is_skipped_when_edit_leaves_no_clean_context(monkeypatc
     assert speaking_rate is None
 
 
-def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(
-    monkeypatch, tmp_path
-):
+def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(monkeypatch, tmp_path):
     synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(30.0)
     reference_path = tmp_path / "reference.wav"
@@ -256,22 +254,25 @@ def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(
     async def fake_transcribe(_audio_bytes, **_kwargs):
         return {
             "transcript": "one two three four",
-            "segments": [{
-                "start": 0.0,
-                "end": 3.0,
-                "text": "one two three four",
-                "words": [
-                    {"word": "one", "start": 0.0, "end": 0.5},
-                    {"word": "two", "start": 0.8, "end": 1.3},
-                    {"word": "three", "start": 1.8, "end": 2.3},
-                    {"word": "four", "start": 2.5, "end": 3.0},
-                ],
-            }],
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 3.0,
+                    "text": "one two three four",
+                    "words": [
+                        {"word": "one", "start": 0.0, "end": 0.5},
+                        {"word": "two", "start": 0.8, "end": 1.3},
+                        {"word": "three", "start": 1.8, "end": 2.3},
+                        {"word": "four", "start": 2.5, "end": 3.0},
+                    ],
+                }
+            ],
         }
 
     monkeypatch.setattr(synthesizer, "_export_reference_clip", fake_export)
     monkeypatch.setattr(
-        synthesizer, "_transcriber",
+        synthesizer,
+        "_transcriber",
         SimpleNamespace(transcribe=fake_transcribe),
     )
 
@@ -294,9 +295,7 @@ def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(
     assert exported_bounds["end"] == edit_start + 3 * synthesizer.TARGET_SR
 
 
-def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(
-    monkeypatch, tmp_path
-):
+def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(monkeypatch, tmp_path):
     synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())
     waveform = _tone(40.0)
     reference_path = tmp_path / "reference.wav"
@@ -318,23 +317,26 @@ def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(
         observed["short_utterance"] = _kwargs["short_utterance"]
         return {
             "transcript": "one two three four",
-            "segments": [{
-                "start": 1.0,
-                "end": 29.0,
-                "text": "one two three four",
-                "words": [
-                    {"word": "one", "start": 1.0, "end": 2.0},
-                    {"word": "two", "start": 8.0, "end": 9.0},
-                    {"word": "three", "start": 13.0, "end": 14.0},
-                    {"word": "four", "start": 28.0, "end": 29.0},
-                ],
-            }],
+            "segments": [
+                {
+                    "start": 1.0,
+                    "end": 29.0,
+                    "text": "one two three four",
+                    "words": [
+                        {"word": "one", "start": 1.0, "end": 2.0},
+                        {"word": "two", "start": 8.0, "end": 9.0},
+                        {"word": "three", "start": 13.0, "end": 14.0},
+                        {"word": "four", "start": 28.0, "end": 29.0},
+                    ],
+                }
+            ],
         }
 
     monkeypatch.setattr(synthesizer, "_export_reference_clip", fake_export)
     monkeypatch.setattr(synthesizer, "_wav_bytes_from_audio", fake_wav_bytes)
     monkeypatch.setattr(
-        synthesizer, "_transcriber",
+        synthesizer,
+        "_transcriber",
         SimpleNamespace(transcribe=fake_transcribe),
     )
 
@@ -364,14 +366,16 @@ def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(
 
 def test_reference_window_excludes_words_cut_by_audio_boundaries():
     transcription = {
-        "segments": [{
-            "words": [
-                {"word": "partial-left", "start": 0.8, "end": 1.2},
-                {"word": "one", "start": 1.3, "end": 2.0},
-                {"word": "two", "start": 2.2, "end": 3.5},
-                {"word": "partial-right", "start": 3.8, "end": 4.2},
-            ]
-        }]
+        "segments": [
+            {
+                "words": [
+                    {"word": "partial-left", "start": 0.8, "end": 1.2},
+                    {"word": "one", "start": 1.3, "end": 2.0},
+                    {"word": "two", "start": 2.2, "end": 3.5},
+                    {"word": "partial-right", "start": 3.8, "end": 4.2},
+                ]
+            }
+        ]
     }
 
     aligned = SpeechSynthesizer._complete_word_reference_window(
@@ -439,6 +443,7 @@ def test_latest_live_job_uses_aligned_span_without_hitting_slowdown_floor():
 
     duration = stretched.shape[1] / synthesizer.TARGET_SR
     assert abs(duration - 20.480) < 0.01
+
 
 def test_splice_never_searches_for_or_deletes_untouched_following_audio(monkeypatch):
     synthesizer = SpeechSynthesizer(RayModelClient({}), SimpleNamespace())

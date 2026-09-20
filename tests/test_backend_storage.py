@@ -9,21 +9,10 @@ import pytest
 from cryptography.fernet import Fernet
 
 from hear.config import settings
-from hear.core.backend_registry import (
-    authenticate_backend,
-    backend_registry,
-    validate_storage_for_backend,
-)
-from hear.core.storage import (
-    B2Storage,
-    StorageCredentialsExpiredError,
-    _fernet,
-    decrypt_storage_context,
-    encrypt_storage_context,
-    object_key,
-)
+from hear.core.backend_registry import BackendRegistry
+from hear.core.storage import B2Storage, StorageContexts, StorageCredentialsExpiredError
 from hear.models.schemas import StorageContext
-from hear.services.jobs.submission import request_fingerprint
+from hear.services.jobs.submission import SubmissionPolicy
 
 
 def context(**overrides) -> StorageContext:
@@ -58,33 +47,30 @@ def configured(monkeypatch):
     }
     monkeypatch.setattr(settings, "BACKEND_REGISTRY_JSON", json.dumps(registry))
     monkeypatch.setattr(settings, "STORAGE_CONTEXT_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    backend_registry.cache_clear()
-    _fernet.cache_clear()
+    BackendRegistry.backend_registry.cache_clear()
+    StorageContexts._fernet.cache_clear()
     yield
-    backend_registry.cache_clear()
-    _fernet.cache_clear()
+    BackendRegistry.backend_registry.cache_clear()
+    StorageContexts._fernet.cache_clear()
 
 
 def test_service_keys_are_bound_to_exact_backend(configured):
-    assert authenticate_backend("backend-a", "backend-a-secret")
-    assert not authenticate_backend("backend-b", "backend-a-secret")
-    assert not authenticate_backend("backend-a", "wrong")
+    assert BackendRegistry.authenticate_backend("backend-a", "backend-a-secret")
+    assert not BackendRegistry.authenticate_backend("backend-b", "backend-a-secret")
+    assert not BackendRegistry.authenticate_backend("backend-a", "wrong")
 
 
 def test_storage_destination_must_match_backend_allow_list(configured):
-    validate_storage_for_backend("backend-a", context())
+    BackendRegistry.validate_storage_for_backend("backend-a", context())
     with pytest.raises(ValueError, match="endpoint"):
-        validate_storage_for_backend(
+        BackendRegistry.validate_storage_for_backend(
             "backend-a", context(endpoint_url="https://s3.backend-b.test")
         )
     with pytest.raises(ValueError, match="bucket"):
-        validate_storage_for_backend("backend-a", context(bucket_name="bucket-b"))
+        BackendRegistry.validate_storage_for_backend("backend-a", context(bucket_name="bucket-b"))
 
 
-@pytest.mark.parametrize(
-    "prefix",
-    ["../escape", "users/./job", "users//job", "/", "users\\escape"],
-)
+@pytest.mark.parametrize("prefix", ["../escape", "users/./job", "users//job", "/", "users\\escape"])
 def test_storage_prefix_rejects_traversal(prefix):
     with pytest.raises(ValueError, match="folder_prefix"):
         context(folder_prefix=prefix)
@@ -92,36 +78,35 @@ def test_storage_prefix_rejects_traversal(prefix):
 
 def test_encrypted_context_round_trips_without_plaintext_secrets(configured):
     original = context()
-    encrypted = encrypt_storage_context(original)
+    encrypted = StorageContexts.encrypt_storage_context(original)
     assert original.key_id not in encrypted
     assert original.application_key not in encrypted
-    assert decrypt_storage_context(encrypted) == original
+    assert StorageContexts.decrypt_storage_context(encrypted) == original
 
 
 def test_expired_encrypted_context_has_stable_error(configured):
     expired = context(expires_at=datetime.now(UTC) - timedelta(seconds=1))
-    encrypted = encrypt_storage_context(expired)
+    encrypted = StorageContexts.encrypt_storage_context(expired)
     with pytest.raises(StorageCredentialsExpiredError) as error:
-        decrypt_storage_context(encrypted)
+        StorageContexts.decrypt_storage_context(encrypted)
     assert error.value.code == "storage_credentials_expired"
     assert str(error.value) == "storage_credentials_expired"
 
 
 def test_expired_context_can_be_authenticated_for_credential_refresh(configured):
     expired = context(expires_at=datetime.now(UTC) - timedelta(seconds=1))
-    encrypted = encrypt_storage_context(expired)
-
-    assert decrypt_storage_context(encrypted, require_active=False) == expired
+    encrypted = StorageContexts.encrypt_storage_context(expired)
+    assert StorageContexts.decrypt_storage_context(encrypted, require_active=False) == expired
 
 
 def test_object_keys_and_public_urls_stay_under_authorized_prefix(configured):
     storage = object.__new__(B2Storage)
     storage.context = context()
-    key = object_key(storage.context, "enhanced", "job-1.mp3")
+    key = StorageContexts.object_key(storage.context, "enhanced", "job-1.mp3")
     assert key == "users/user-1/jobs/job-1/enhanced/job-1.mp3"
     assert storage._public_url(key).startswith("https://cdn.backend-a.test/media/")
     with pytest.raises(ValueError, match="unsafe"):
-        object_key(storage.context, "../other-backend", "file.mp3")
+        StorageContexts.object_key(storage.context, "../other-backend", "file.mp3")
 
 
 def test_upload_verifies_sha256_metadata_and_size(configured, tmp_path):
@@ -139,10 +124,7 @@ def test_upload_verifies_sha256_metadata_and_size(configured, tmp_path):
             self.extra_args = ExtraArgs
 
         def head_object(self, **_kwargs):
-            return {
-                "ContentLength": len(payload),
-                "Metadata": {"sha256": checksum},
-            }
+            return {"ContentLength": len(payload), "Metadata": {"sha256": checksum}}
 
         def get_object(self, **_kwargs):
             return {"Body": io.BytesIO(payload)}
@@ -154,22 +136,13 @@ def test_upload_verifies_sha256_metadata_and_size(configured, tmp_path):
     storage.context = context()
     storage._client = FakeClient()
     key = storage.key("enhanced", "job-1.mp3")
-
-    url = storage.upload_file(
-        str(local_path),
-        key,
-        "audio/mpeg",
-        checksum_sha256=checksum,
-    )
-
+    url = storage.upload_file(str(local_path), key, "audio/mpeg", checksum_sha256=checksum)
     assert storage._client.extra_args["Metadata"] == {"sha256": checksum}
     assert storage._client.deleted is False
     assert url.endswith("/users/user-1/jobs/job-1/enhanced/job-1.mp3")
 
 
-def test_upload_removes_object_when_checksum_metadata_is_not_verified(
-    configured, tmp_path
-):
+def test_upload_removes_object_when_checksum_metadata_is_not_verified(configured, tmp_path):
     local_path = tmp_path / "artifact.mp3"
     local_path.write_bytes(b"payload")
     checksum = hashlib.sha256(b"payload").hexdigest()
@@ -192,21 +165,14 @@ def test_upload_removes_object_when_checksum_metadata_is_not_verified(
     storage = object.__new__(B2Storage)
     storage.context = context()
     storage._client = FakeClient()
-
     with pytest.raises(RuntimeError, match="checksum metadata"):
         storage.upload_file(
-            str(local_path),
-            storage.key("enhanced", "job-1.mp3"),
-            checksum_sha256=checksum,
+            str(local_path), storage.key("enhanced", "job-1.mp3"), checksum_sha256=checksum
         )
-
     assert storage._client.deleted is True
 
 
-def test_upload_removes_object_when_remote_content_checksum_differs(
-    configured,
-    tmp_path,
-):
+def test_upload_removes_object_when_remote_content_checksum_differs(configured, tmp_path):
     payload = b"verified payload"
     local_path = tmp_path / "artifact.mp3"
     local_path.write_bytes(payload)
@@ -219,10 +185,7 @@ def test_upload_removes_object_when_remote_content_checksum_differs(
             return None
 
         def head_object(self, **_kwargs):
-            return {
-                "ContentLength": len(payload),
-                "Metadata": {"sha256": checksum},
-            }
+            return {"ContentLength": len(payload), "Metadata": {"sha256": checksum}}
 
         def get_object(self, **_kwargs):
             return {"Body": io.BytesIO(b"corrupted payload")}
@@ -233,14 +196,10 @@ def test_upload_removes_object_when_remote_content_checksum_differs(
     storage = object.__new__(B2Storage)
     storage.context = context()
     storage._client = FakeClient()
-
     with pytest.raises(RuntimeError, match="content checksum"):
         storage.upload_file(
-            str(local_path),
-            storage.key("enhanced", "job-1.mp3"),
-            checksum_sha256=checksum,
+            str(local_path), storage.key("enhanced", "job-1.mp3"), checksum_sha256=checksum
         )
-
     assert storage._client.deleted is True
 
 
@@ -257,7 +216,12 @@ def test_fingerprint_excludes_credentials_but_includes_destination():
     other_prefix["storage"]["folder_prefix"] = "users/user-1/jobs/job-2/"
     other_backend = json.loads(json.dumps(base, default=str))
     other_backend["backend_id"] = "backend-b"
-
-    assert request_fingerprint(base) == request_fingerprint(rotated)
-    assert request_fingerprint(base) != request_fingerprint(other_prefix)
-    assert request_fingerprint(base) != request_fingerprint(other_backend)
+    assert SubmissionPolicy.request_fingerprint(base) == SubmissionPolicy.request_fingerprint(
+        rotated
+    )
+    assert SubmissionPolicy.request_fingerprint(base) != SubmissionPolicy.request_fingerprint(
+        other_prefix
+    )
+    assert SubmissionPolicy.request_fingerprint(base) != SubmissionPolicy.request_fingerprint(
+        other_backend
+    )

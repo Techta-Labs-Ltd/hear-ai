@@ -1,0 +1,15 @@
+name: Architecture and patch checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==8.4.2
+      - run: python -m hear.tools.check_architecture
+      - run: python -m pytest tests/test_architecture.py tests/test_dependency_patches.py tests/test_runtime_setup.py -q

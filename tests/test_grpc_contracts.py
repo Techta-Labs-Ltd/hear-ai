@@ -7,7 +7,7 @@ import grpc
 import pytest
 
 from hear.config import settings
-from hear.core.backend_registry import backend_registry
+from hear.core.backend_registry import BackendRegistry
 from hear.deployments.gateway import GrpcGateway
 from hear.models.schemas import PipelineRequest
 from hear.proto import pipeline_pb2
@@ -22,16 +22,18 @@ def configure_backend_auth(monkeypatch, service_key: str = "secret") -> None:
     monkeypatch.setattr(
         settings,
         "BACKEND_REGISTRY_JSON",
-        json.dumps({
-            "backend-a": {
-                "service_key_sha256": digest,
-                "allowed_endpoint_urls": ["https://s3.example.test"],
-                "allowed_buckets": ["bucket-a"],
-                "allowed_public_base_urls": ["https://cdn.example.test"],
+        json.dumps(
+            {
+                "backend-a": {
+                    "service_key_sha256": digest,
+                    "allowed_endpoint_urls": ["https://s3.example.test"],
+                    "allowed_buckets": ["bucket-a"],
+                    "allowed_public_base_urls": ["https://cdn.example.test"],
+                }
             }
-        }),
+        ),
     )
-    backend_registry.cache_clear()
+    BackendRegistry.backend_registry.cache_clear()
 
 
 class FakeContext:
@@ -52,8 +54,7 @@ class FakeContext:
 
 def test_pipeline_contract_has_full_grpc_surface():
     methods = {
-        method.name
-        for method in pipeline_pb2.DESCRIPTOR.services_by_name["Pipeline"].methods
+        method.name for method in pipeline_pb2.DESCRIPTOR.services_by_name["Pipeline"].methods
     }
     assert methods == {
         "SubmitJob",
@@ -118,9 +119,7 @@ async def test_submit_job_accepts_track_without_existence_gate(
     )
     if explicit_value is not None:
         request.same_speaker = explicit_value
-
     response = await OriginalGatewayClass.SubmitJob(gateway, request, context)
-
     assert response.backend_id == "backend-a"
     assert response.job_id == "job-1"
     assert response.run_id == "run-1"
@@ -137,7 +136,6 @@ def test_same_speaker_grpc_fields_preserve_presence():
     explicit_job = pipeline_pb2.SubmitJobRequest(same_speaker=False)
     omitted_preview = pipeline_pb2.ReconstructRequest()
     explicit_preview = pipeline_pb2.ReconstructRequest(same_speaker=False)
-
     assert not omitted_job.HasField("same_speaker")
     assert explicit_job.HasField("same_speaker")
     assert explicit_job.same_speaker is False
@@ -182,9 +180,7 @@ async def test_create_preview_defaults_same_speaker_only_when_omitted(
     )
     if explicit_value is not None:
         request.same_speaker = explicit_value
-
     response = await service.CreatePreview(request, context)
-
     assert response.preview_id == "preview-1"
     assert context.code is None
     assert service._operations.create_preview.await_args.kwargs["same_speaker"] is expected
@@ -198,7 +194,6 @@ def test_track_exists_is_not_part_of_submission_contract():
 def test_grpc_authentication_rejects_invalid_key(monkeypatch):
     configure_backend_auth(monkeypatch, "expected")
     context = FakeContext((("x-api-key", "wrong"), ("application", "hear")))
-
     assert not PipelineGrpcService._authenticated(context)
     assert context.code == grpc.StatusCode.UNAUTHENTICATED
     assert context.details == "invalid backend credentials"
@@ -207,7 +202,6 @@ def test_grpc_authentication_rejects_invalid_key(monkeypatch):
 def test_grpc_authentication_rejects_missing_application(monkeypatch):
     configure_backend_auth(monkeypatch, "expected")
     context = FakeContext((("x-api-key", "expected"),))
-
     assert not PipelineGrpcService._authenticated(context)
     assert context.code == grpc.StatusCode.UNAUTHENTICATED
 
@@ -215,6 +209,5 @@ def test_grpc_authentication_rejects_missing_application(monkeypatch):
 def test_grpc_authentication_accepts_valid_key(monkeypatch):
     configure_backend_auth(monkeypatch, "expected")
     context = FakeContext((("x-api-key", "expected"), ("application", "hear")))
-
     assert PipelineGrpcService._authenticated(context)
     assert context.code is None

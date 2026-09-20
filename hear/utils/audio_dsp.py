@@ -28,6 +28,6 @@ def iir_envelope_simple(sig: np.ndarray, attack_coef: float, release_coef: float
 
 def iir_coefs(time_ms: float, sr: int) -> tuple[np.ndarray, np.ndarray]:
     coef = np.exp(-1.0 / (sr * time_ms / 1000.0))
-    b    = np.array([1.0 - coef])
-    a    = np.array([1.0, -coef])
+    b = np.array([1.0 - coef])
+    a = np.array([1.0, -coef])
     return b, a

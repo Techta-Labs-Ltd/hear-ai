@@ -9,15 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hear.config import settings
-from hear.core.storage import (
-    StorageCredentialsExpiredError,
-    StorageCredentialsExpiringError,
-)
+from hear.core.storage import StorageCredentialsExpiredError, StorageCredentialsExpiringError
 from hear.models.database import AiTrackJob
-from hear.orchestrator import (
-    RECOVERY_INTERRUPTED_ERROR,
-    Orchestrator,
-)
+from hear.orchestrator import RECOVERY_INTERRUPTED_ERROR, Orchestrator
 from hear.services.jobs.scheduler import FairJobScheduler, PendingJob
 from hear.services.magic_clean.lineage import (
     MAGIC_CLEAN_DELIVERED_FILE_SHA256_KEY,
@@ -36,36 +30,21 @@ DELIVERED_PCM_HASH = "d" * 64
 LEVELS = {"speech": 100, "music": 10, "background": 10, "cut_silence": False}
 
 
-def test_magic_clean_runtime_requires_full_storage_credential_reserve(
-    monkeypatch,
-) -> None:
+def test_magic_clean_runtime_requires_full_storage_credential_reserve(monkeypatch) -> None:
     cls = Orchestrator.func_or_class
-    monkeypatch.setattr(
-        settings,
-        "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS",
-        3600,
-    )
-
+    monkeypatch.setattr(settings, "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS", 3600)
     cls._require_magic_clean_storage_lifetime(
-        SimpleNamespace(
-            context=SimpleNamespace(
-                expires_at=datetime.now(UTC) + timedelta(hours=2)
-            )
-        )
+        SimpleNamespace(context=SimpleNamespace(expires_at=datetime.now(UTC) + timedelta(hours=2)))
     )
     with pytest.raises(StorageCredentialsExpiringError):
         cls._require_magic_clean_storage_lifetime(
             SimpleNamespace(
-                context=SimpleNamespace(
-                    expires_at=datetime.now(UTC) + timedelta(minutes=30)
-                )
+                context=SimpleNamespace(expires_at=datetime.now(UTC) + timedelta(minutes=30))
             )
         )
 
 
-def test_scheduler_parks_magic_clean_with_insufficient_credential_reserve(
-    monkeypatch,
-) -> None:
+def test_scheduler_parks_magic_clean_with_insufficient_credential_reserve(monkeypatch) -> None:
     cls = Orchestrator.func_or_class
     orchestrator = cls.__new__(cls)
     events = []
@@ -83,11 +62,7 @@ def test_scheduler_parks_magic_clean_with_insufficient_credential_reserve(
         job_options={"user_id": "user"},
     )
     track_job = SimpleNamespace(
-        status="running",
-        attempts=1,
-        current_stage="downloading",
-        error=None,
-        updated_at=None,
+        status="running", attempts=1, current_stage="downloading", error=None, updated_at=None
     )
 
     class Query:
@@ -119,19 +94,14 @@ def test_scheduler_parks_magic_clean_with_insufficient_credential_reserve(
             self.closed = True
 
     session = Session()
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
     monkeypatch.setattr(
-        "hear.orchestrator.decrypt_storage_context",
+        "hear.orchestrator.StorageContexts.decrypt_storage_context",
         lambda _token, **_kwargs: SimpleNamespace(
             expires_at=datetime.now(UTC) + timedelta(minutes=30)
         ),
     )
-    monkeypatch.setattr(
-        settings,
-        "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS",
-        3600,
-    )
-
+    monkeypatch.setattr(settings, "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS", 3600)
     assert orchestrator._pending_job("job", "run") is None
     assert job.status == "queued"
     assert job.current_stage is None
@@ -167,11 +137,7 @@ async def _exercise_claim_rechecks_stale_magic_clean_storage(monkeypatch):
         storage_context_encrypted="encrypted-context",
     )
     track_job = SimpleNamespace(
-        status="queued",
-        attempts=0,
-        current_stage=None,
-        error=None,
-        updated_at=None,
+        status="queued", attempts=0, current_stage=None, error=None, updated_at=None
     )
 
     class Query:
@@ -203,22 +169,16 @@ async def _exercise_claim_rechecks_stale_magic_clean_storage(monkeypatch):
             self.closed = True
 
     session = Session()
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
     monkeypatch.setattr(
-        "hear.orchestrator.decrypt_storage_context",
+        "hear.orchestrator.StorageContexts.decrypt_storage_context",
         lambda _token, **_kwargs: SimpleNamespace(
             expires_at=datetime.now(UTC) + timedelta(minutes=30)
         ),
     )
-    monkeypatch.setattr(
-        settings,
-        "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS",
-        3600,
-    )
-    monkeypatch.setattr("hear.orchestrator.cleanup_job_temp", lambda *_args: None)
-
+    monkeypatch.setattr(settings, "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS", 3600)
+    monkeypatch.setattr("hear.orchestrator.TempWorkspace.cleanup_job_temp", lambda *_args: None)
     await orchestrator._process("job", "run")
-
     assert job.status == "queued"
     assert job.attempts == 0
     assert job.error == "storage_credentials_expiring"
@@ -231,9 +191,7 @@ async def _exercise_claim_rechecks_stale_magic_clean_storage(monkeypatch):
     assert events[0]["error"] == "storage_credentials_expiring"
 
 
-def test_claim_rechecks_magic_clean_ttl_before_running_or_incrementing(
-    monkeypatch,
-) -> None:
+def test_claim_rechecks_magic_clean_ttl_before_running_or_incrementing(monkeypatch) -> None:
     asyncio.run(_exercise_claim_rechecks_stale_magic_clean_storage(monkeypatch))
 
 
@@ -244,9 +202,7 @@ async def _exercise_stale_fair_queue_entry_skips_processing_slot():
     orchestrator._pending_job = lambda *_args: None
     orchestrator.process = AsyncMock()
     orchestrator._finish_scheduled_run = lambda *_args: None
-
     await orchestrator._run_scheduled(pending)
-
     orchestrator.process.assert_not_awaited()
 
 
@@ -290,12 +246,10 @@ async def _exercise_subscribe_replays_credential_park(monkeypatch):
             self.closed = True
 
     session = Session()
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
-
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
     stream = orchestrator.subscribe("job")
     event = await anext(stream)
     await stream.aclose()
-
     assert event["event"] == "job_queued"
     assert event["status"] == "queued"
     assert event["error"] == "storage_credentials_expiring"
@@ -320,11 +274,7 @@ async def _exercise_storage_refresh_parking(monkeypatch):
         error=None,
     )
     track_job = SimpleNamespace(
-        id="track-job",
-        status="running",
-        current_stage="separating",
-        error=None,
-        updated_at=None,
+        id="track-job", status="running", current_stage="separating", error=None, updated_at=None
     )
 
     class Query:
@@ -363,14 +313,9 @@ async def _exercise_storage_refresh_parking(monkeypatch):
     async def commit(candidate):
         candidate.committed = True
 
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
-    monkeypatch.setattr("hear.orchestrator.commit_with_retry", commit)
-
-    event = await orchestrator._park_magic_clean_for_storage_refresh(
-        "job",
-        "run",
-    )
-
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", commit)
+    event = await orchestrator._park_magic_clean_for_storage_refresh("job", "run")
     assert event["error"] == "storage_credentials_expiring"
     assert event["result"]["report"]["stage"] == "separating"
     assert job.status == "queued"
@@ -396,20 +341,10 @@ async def _exercise_process_parks_expired_storage(monkeypatch):
     orchestrator._job_start_times = {}
     events = []
     orchestrator._push_event = lambda _job_id, event: events.append(event)
-    parked_event = {
-        "event": "job_queued",
-        "job_id": "job",
-        "status": "queued",
-    }
-    orchestrator._park_magic_clean_for_storage_refresh = AsyncMock(
-        return_value=parked_event
-    )
+    parked_event = {"event": "job_queued", "job_id": "job", "status": "queued"}
+    orchestrator._park_magic_clean_for_storage_refresh = AsyncMock(return_value=parked_event)
     job = SimpleNamespace(
-        id="job",
-        run_id="run",
-        status="queued",
-        job_type="magic_clean",
-        attempts=0,
+        id="job", run_id="run", status="queued", job_type="magic_clean", attempts=0
     )
 
     class Query:
@@ -448,27 +383,18 @@ async def _exercise_process_parks_expired_storage(monkeypatch):
     async def commit(_session):
         return None
 
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
-    monkeypatch.setattr("hear.orchestrator.commit_with_retry", commit)
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", commit)
+    monkeypatch.setattr(orchestrator, "_queued_magic_clean_storage_is_ready", lambda *_args: True)
     monkeypatch.setattr(
-        orchestrator,
-        "_queued_magic_clean_storage_is_ready",
-        lambda *_args: True,
-    )
-    monkeypatch.setattr(
-        "hear.orchestrator.storage_for_job",
+        "hear.orchestrator.StorageContexts.storage_for_job",
         lambda _job: (_ for _ in ()).throw(
             StorageCredentialsExpiringError("storage_credentials_expiring")
         ),
     )
-    monkeypatch.setattr("hear.orchestrator.cleanup_job_temp", lambda *_args: None)
-
+    monkeypatch.setattr("hear.orchestrator.TempWorkspace.cleanup_job_temp", lambda *_args: None)
     await orchestrator._process("job", "run")
-
-    orchestrator._park_magic_clean_for_storage_refresh.assert_awaited_once_with(
-        "job",
-        "run",
-    )
+    orchestrator._park_magic_clean_for_storage_refresh.assert_awaited_once_with("job", "run")
     assert session.rolled_back is True
     assert session.closed is True
     assert orchestrator._active_count == 0
@@ -553,19 +479,17 @@ async def _exercise_non_magic_expired_storage_uses_normal_failure(monkeypatch):
     async def commit(candidate):
         candidate.commits += 1
 
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: next(sessions))
-    monkeypatch.setattr("hear.orchestrator.commit_with_retry", commit)
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: next(sessions))
+    monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", commit)
     monkeypatch.setattr(
-        "hear.orchestrator.storage_for_job",
+        "hear.orchestrator.StorageContexts.storage_for_job",
         lambda _job: (_ for _ in ()).throw(
             StorageCredentialsExpiredError("storage_credentials_expired")
         ),
     )
-    monkeypatch.setattr("hear.orchestrator.cleanup_job_temp", lambda *_args: None)
+    monkeypatch.setattr("hear.orchestrator.TempWorkspace.cleanup_job_temp", lambda *_args: None)
     monkeypatch.setattr("hear.orchestrator.sentry_sdk.capture_exception", lambda *_args: None)
-
     await orchestrator._process("job", "run")
-
     orchestrator._park_magic_clean_for_storage_refresh.assert_not_awaited()
     assert job.status == "failed"
     assert job.attempts == 1
@@ -583,9 +507,7 @@ async def _exercise_non_magic_expired_storage_uses_normal_failure(monkeypatch):
     assert events[0]["error"] == "storage_credentials_expired"
 
 
-def test_non_magic_expired_storage_is_terminalized_by_normal_failure(
-    monkeypatch,
-) -> None:
+def test_non_magic_expired_storage_is_terminalized_by_normal_failure(monkeypatch) -> None:
     asyncio.run(_exercise_non_magic_expired_storage_uses_normal_failure(monkeypatch))
 
 
@@ -594,9 +516,7 @@ async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
     orchestrator = cls.__new__(cls)
     orchestrator._recovery_started = False
     scheduled = []
-    orchestrator._schedule_job = lambda job_id, run_id: scheduled.append(
-        (job_id, run_id)
-    )
+    orchestrator._schedule_job = lambda job_id, run_id: scheduled.append((job_id, run_id))
     old_not_before = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     tombstone = {
         "b2_key": "prefix/enhanced/job.mp3",
@@ -642,15 +562,7 @@ async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
 
         def all(self):
             if len(self.entities) == 5:
-                return [
-                    (
-                        job.id,
-                        job.run_id,
-                        job.status,
-                        job.job_type,
-                        job.job_options,
-                    )
-                ]
+                return [(job.id, job.run_id, job.status, job.job_type, job.job_options)]
             if len(self.entities) == 3:
                 return []
             raise AssertionError("unexpected recovery query")
@@ -680,11 +592,9 @@ async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
         candidate.commits += 1
 
     monkeypatch.setattr(settings, "MAGIC_CLEAN_CLEANUP_GRACE_SECONDS", 120)
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
-    monkeypatch.setattr("hear.orchestrator.commit_with_retry", commit)
-
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", commit)
     await orchestrator.recover_jobs()
-
     assert job.status == "failed"
     assert job.current_stage is None
     assert job.error == RECOVERY_INTERRUPTED_ERROR
@@ -708,9 +618,7 @@ async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
     assert session.closed is True
 
 
-def test_recovery_terminalizes_interrupted_jobs_for_cleanup_reconciliation(
-    monkeypatch,
-) -> None:
+def test_recovery_terminalizes_interrupted_jobs_for_cleanup_reconciliation(monkeypatch) -> None:
     asyncio.run(_exercise_recovery_terminalizes_interrupted_job(monkeypatch))
 
 
@@ -718,9 +626,7 @@ async def _exercise_active_scheduled_run_cancellation():
     cls = Orchestrator.func_or_class
     orchestrator = cls.__new__(cls)
     removed: list[str] = []
-    orchestrator._fair_scheduler = SimpleNamespace(
-        remove=lambda job_id: removed.append(job_id)
-    )
+    orchestrator._fair_scheduler = SimpleNamespace(remove=lambda job_id: removed.append(job_id))
     orchestrator._scheduled_runs = {("job", "run")}
     orchestrator._run_tasks = {}
     orchestrator._dispatch_event = asyncio.Event()
@@ -731,11 +637,9 @@ async def _exercise_active_scheduled_run_cancellation():
         await asyncio.Event().wait()
 
     task = asyncio.create_task(active_run())
-    orchestrator._run_tasks[("job", "run")] = task
+    orchestrator._run_tasks["job", "run"] = task
     await started.wait()
-
     orchestrator._cancel_scheduled_run("job", "run")
-
     with pytest.raises(asyncio.CancelledError):
         await task
     assert removed == ["job"]
@@ -751,9 +655,7 @@ async def _exercise_cancel_before_run_coroutine_starts():
     cls = Orchestrator.func_or_class
     orchestrator = cls.__new__(cls)
     scheduler = FairJobScheduler(
-        max_active=1,
-        max_active_per_user=1,
-        type_limits={"magic_clean": 1},
+        max_active=1, max_active_per_user=1, type_limits={"magic_clean": 1}
     )
     pending = PendingJob("job", "run", "user", "magic_clean")
     assert scheduler.enqueue(pending)
@@ -762,13 +664,9 @@ async def _exercise_cancel_before_run_coroutine_starts():
     orchestrator._scheduled_runs = {pending.key}
     orchestrator._run_tasks = {}
     orchestrator._dispatch_event = asyncio.Event()
-    orchestrator.process = AsyncMock(
-        side_effect=AssertionError("cancelled run must not start")
-    )
-
+    orchestrator.process = AsyncMock(side_effect=AssertionError("cancelled run must not start"))
     task = orchestrator._start_scheduled_run(pending)
     orchestrator._cancel_scheduled_run(pending.job_id, pending.run_id)
-
     with pytest.raises(asyncio.CancelledError):
         await task
     await asyncio.sleep(0)
@@ -803,10 +701,7 @@ async def _exercise_cancel_refreshes_cleanup_grace(monkeypatch):
         },
     )
     track_job = SimpleNamespace(
-        status="running",
-        current_stage="enhancing",
-        completed_at=None,
-        updated_at=None,
+        status="running", current_stage="enhancing", completed_at=None, updated_at=None
     )
 
     class Query:
@@ -849,16 +744,14 @@ async def _exercise_cancel_refreshes_cleanup_grace(monkeypatch):
 
     cancelled_runs = []
     events = []
-    orchestrator._cancel_scheduled_run = (
-        lambda job_id, run_id: cancelled_runs.append((job_id, run_id))
+    orchestrator._cancel_scheduled_run = lambda job_id, run_id: cancelled_runs.append(
+        (job_id, run_id)
     )
     orchestrator._push_event = lambda _job_id, event: events.append(event)
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: session)
-    monkeypatch.setattr("hear.orchestrator.commit_with_retry", commit)
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", commit)
     monkeypatch.setattr(settings, "MAGIC_CLEAN_CLEANUP_GRACE_SECONDS", 600)
-
     assert await orchestrator.cancel("job") is True
-
     tombstone = job.job_options["magic_clean_cleanup_tombstone"]
     requested_at = datetime.fromisoformat(tombstone["cancellation_requested_at"])
     not_before = datetime.fromisoformat(tombstone["not_before"])
@@ -914,45 +807,39 @@ def _completed_candidate(**option_overrides):
 def test_reuse_requires_same_root_hashes_controls_engine_and_validation():
     cls = Orchestrator.func_or_class
     candidate = _completed_candidate()
-
-    assert cls._magic_clean_reuse_candidate(
-        [candidate],
-        _source_metadata(),
-        LEVELS,
-    ) is candidate
-    assert cls._magic_clean_reuse_candidate(
-        [_completed_candidate(magic_clean_controls={**LEVELS, "music": 20})],
-        _source_metadata(),
-        LEVELS,
-    ) is None
-    assert cls._magic_clean_reuse_candidate(
-        [_completed_candidate(magic_clean_validated=False)],
-        _source_metadata(),
-        LEVELS,
-    ) is None
+    assert cls._magic_clean_reuse_candidate([candidate], _source_metadata(), LEVELS) is candidate
+    assert (
+        cls._magic_clean_reuse_candidate(
+            [_completed_candidate(magic_clean_controls={**LEVELS, "music": 20})],
+            _source_metadata(),
+            LEVELS,
+        )
+        is None
+    )
+    assert (
+        cls._magic_clean_reuse_candidate(
+            [_completed_candidate(magic_clean_validated=False)], _source_metadata(), LEVELS
+        )
+        is None
+    )
 
 
 def test_cross_scope_exact_url_and_hash_matches_fail_closed():
     cls = Orchestrator.func_or_class
     candidate = SimpleNamespace(
-        result_json={
-            "enhanced_audio": {"audio_url": "https://audio.test/foreign.mp3"}
-        },
+        result_json={"enhanced_audio": {"audio_url": "https://audio.test/foreign.mp3"}},
         job_options={
             MAGIC_CLEAN_DELIVERED_FILE_SHA256_KEY: DELIVERED_FILE_HASH,
             MAGIC_CLEAN_DELIVERED_PCM_SHA256_KEY: DELIVERED_PCM_HASH,
         },
     )
-
     with pytest.raises(MagicCleanLineageError, match="different track scope"):
         cls._reject_cross_scope_magic_clean_match(
-            [candidate],
-            submitted_url="https://audio.test/foreign.mp3",
+            [candidate], submitted_url="https://audio.test/foreign.mp3"
         )
     with pytest.raises(MagicCleanLineageError, match="different track scope"):
         cls._reject_cross_scope_magic_clean_match(
-            [candidate],
-            submitted_pcm_sha256=DELIVERED_PCM_HASH,
+            [candidate], submitted_pcm_sha256=DELIVERED_PCM_HASH
         )
 
 
@@ -974,14 +861,16 @@ def test_remote_result_must_be_bound_to_expected_artifact_and_valid_hashes():
         "delivered_pcm_sha256": DELIVERED_PCM_HASH,
         "engine_revision": settings.MAGIC_CLEAN_ENGINE_REVISION,
     }
-
-    assert cls._validate_magic_clean_enhancement(
-        enhancement,
-        _source_metadata(),
-        expected_key="prefix/enhanced/current.mp3",
-        expected_bucket="bucket",
-        expected_url="https://cdn.test/current.mp3",
-    ) is enhancement
+    assert (
+        cls._validate_magic_clean_enhancement(
+            enhancement,
+            _source_metadata(),
+            expected_key="prefix/enhanced/current.mp3",
+            expected_bucket="bucket",
+            expected_url="https://cdn.test/current.mp3",
+        )
+        is enhancement
+    )
     with pytest.raises(RuntimeError, match="unexpected storage key"):
         cls._validate_magic_clean_enhancement(
             {**enhancement, "b2_key": "prefix/enhanced/other.mp3"},
@@ -992,12 +881,7 @@ def test_remote_result_must_be_bound_to_expected_artifact_and_valid_hashes():
         )
 
 
-async def _exercise_post_upload_stage_failure(
-    monkeypatch,
-    failed_stage,
-    failure,
-    expected_reason,
-):
+async def _exercise_post_upload_stage_failure(monkeypatch, failed_stage, failure, expected_reason):
     cls = Orchestrator.func_or_class
     orchestrator = cls.__new__(cls)
     orchestrator._require_magic_clean_storage_lifetime = lambda _storage: None
@@ -1017,7 +901,6 @@ async def _exercise_post_upload_stage_failure(
     orchestrator._complete = AsyncMock(
         side_effect=AssertionError("cancelled job must not complete")
     )
-
     enhancement = {
         "enhanced_url": "https://cdn.test/prefix/enhanced/current.mp3",
         "b2_key": "prefix/enhanced/current.mp3",
@@ -1055,8 +938,10 @@ async def _exercise_post_upload_stage_failure(
         def _public_url(_key):
             return "https://cdn.test/prefix/enhanced/current.mp3"
 
-    monkeypatch.setattr("hear.orchestrator.storage_for_job", lambda _job: FakeStorage())
-    monkeypatch.setattr("hear.orchestrator.drop_temp_standalone", lambda _path: None)
+    monkeypatch.setattr(
+        "hear.orchestrator.StorageContexts.storage_for_job", lambda _job: FakeStorage()
+    )
+    monkeypatch.setattr("hear.orchestrator.TempWorkspace.drop_temp_standalone", lambda _path: None)
     job = SimpleNamespace(
         id="current",
         run_id="run",
@@ -1067,10 +952,8 @@ async def _exercise_post_upload_stage_failure(
         input_url="https://audio.test/source.wav",
         job_options={},
     )
-
     with pytest.raises(type(failure)):
         await orchestrator._process_magic_clean(job, SimpleNamespace(), object())
-
     orchestrator._cleanup_magic_clean_artifact.assert_awaited_once()
     cleanup_call = orchestrator._cleanup_magic_clean_artifact.await_args
     assert cleanup_call.args[3] is enhancement
@@ -1079,10 +962,7 @@ async def _exercise_post_upload_stage_failure(
 
 
 @pytest.mark.parametrize("cancelled_stage", ["mixing", "finalizing"])
-def test_post_upload_stage_cancellation_cleans_artifact(
-    monkeypatch,
-    cancelled_stage,
-):
+def test_post_upload_stage_cancellation_cleans_artifact(monkeypatch, cancelled_stage):
     asyncio.run(
         _exercise_post_upload_stage_failure(
             monkeypatch,
@@ -1136,9 +1016,7 @@ async def _exercise_identical_validated_candidate_skip(monkeypatch):
     )
     orchestrator._complete = AsyncMock(return_value=True)
     remote = AsyncMock(side_effect=AssertionError("model inference must be skipped"))
-    orchestrator._magic_clean_handle = SimpleNamespace(
-        enhance=SimpleNamespace(remote=remote)
-    )
+    orchestrator._magic_clean_handle = SimpleNamespace(enhance=SimpleNamespace(remote=remote))
 
     class FakeStorage:
         bucket_name = "bucket"
@@ -1151,7 +1029,9 @@ async def _exercise_identical_validated_candidate_skip(monkeypatch):
         def _public_url(_key):
             return "https://cdn.test/prefix/enhanced/current.mp3"
 
-    monkeypatch.setattr("hear.orchestrator.storage_for_job", lambda _job: FakeStorage())
+    monkeypatch.setattr(
+        "hear.orchestrator.StorageContexts.storage_for_job", lambda _job: FakeStorage()
+    )
     job = SimpleNamespace(
         id="current",
         run_id="run",
@@ -1164,15 +1044,11 @@ async def _exercise_identical_validated_candidate_skip(monkeypatch):
             "music": 10,
             "background": 10,
             "cut_silence": False,
-            "magic_clean_cleanup_tombstone": {
-                "b2_key": "prefix/enhanced/current.mp3"
-            },
+            "magic_clean_cleanup_tombstone": {"b2_key": "prefix/enhanced/current.mp3"},
         },
     )
     track_job = SimpleNamespace()
-
     await orchestrator._process_magic_clean(job, track_job, object())
-
     remote.assert_not_awaited()
     assert job.job_options["magic_clean_reused_from_job_id"] == "prior-job"
     assert "magic_clean_cleanup_tombstone" not in job.job_options
@@ -1216,27 +1092,16 @@ async def _exercise_reuse_upload_cancellation(monkeypatch, tmp_path):
             assert upload_finished.is_set()
             deleted.append(key)
 
-    monkeypatch.setattr("hear.orchestrator.download_audio", fake_download)
+    monkeypatch.setattr("hear.orchestrator.AudioDownloader.download_audio", fake_download)
     monkeypatch.setattr(
-        "hear.orchestrator.magic_clean_artifact_hashes",
+        "hear.orchestrator.MagicCleanLineageResolver.magic_clean_artifact_hashes",
         lambda _path: (DELIVERED_FILE_HASH, DELIVERED_PCM_HASH),
     )
-    monkeypatch.setattr("hear.orchestrator.drop_temp_standalone", lambda _path: None)
-    job = SimpleNamespace(
-        id="current",
-        run_id="run",
-        attempts=1,
-        track_id="track",
-        job_options={},
-    )
-
+    monkeypatch.setattr("hear.orchestrator.TempWorkspace.drop_temp_standalone", lambda _path: None)
+    job = SimpleNamespace(id="current", run_id="run", attempts=1, track_id="track", job_options={})
     task = asyncio.create_task(
         orchestrator._try_reuse_magic_clean_artifact(
-            object(),
-            job,
-            FakeStorage(),
-            candidate,
-            _source_metadata(),
+            object(), job, FakeStorage(), candidate, _source_metadata()
         )
     )
     assert await asyncio.to_thread(writer_started.wait, 2)
@@ -1246,14 +1111,10 @@ async def _exercise_reuse_upload_cancellation(monkeypatch, tmp_path):
     release_writer.set()
     with pytest.raises(asyncio.CancelledError):
         await task
-
     assert deleted == ["prefix/enhanced/current.mp3"]
 
 
-def test_reuse_upload_finishes_and_is_cleaned_before_cancellation_propagates(
-    monkeypatch,
-    tmp_path,
-):
+def test_reuse_upload_finishes_and_is_cleaned_before_cancellation_propagates(monkeypatch, tmp_path):
     asyncio.run(_exercise_reuse_upload_cancellation(monkeypatch, tmp_path))
 
 
@@ -1275,7 +1136,7 @@ async def _exercise_reuse_hash_cancellation(monkeypatch, tmp_path):
         hash_started.set()
         assert release_hash.wait(timeout=2)
         hash_finished.set()
-        return DELIVERED_FILE_HASH, DELIVERED_PCM_HASH
+        return (DELIVERED_FILE_HASH, DELIVERED_PCM_HASH)
 
     class FakeStorage:
         bucket_name = "bucket"
@@ -1288,32 +1149,20 @@ async def _exercise_reuse_hash_cancellation(monkeypatch, tmp_path):
         def upload_file(*_args, **_kwargs):
             raise AssertionError("cancelled hash must not proceed to upload")
 
-    monkeypatch.setattr("hear.orchestrator.download_audio", fake_download)
+    monkeypatch.setattr("hear.orchestrator.AudioDownloader.download_audio", fake_download)
     monkeypatch.setattr(
-        "hear.orchestrator.magic_clean_artifact_hashes",
-        blocking_hash,
+        "hear.orchestrator.MagicCleanLineageResolver.magic_clean_artifact_hashes", blocking_hash
     )
 
     def record_cleanup(path):
         assert hash_finished.is_set()
         cleaned.append(path)
 
-    monkeypatch.setattr("hear.orchestrator.drop_temp_standalone", record_cleanup)
-    job = SimpleNamespace(
-        id="current",
-        run_id="run",
-        attempts=1,
-        track_id="track",
-        job_options={},
-    )
-
+    monkeypatch.setattr("hear.orchestrator.TempWorkspace.drop_temp_standalone", record_cleanup)
+    job = SimpleNamespace(id="current", run_id="run", attempts=1, track_id="track", job_options={})
     task = asyncio.create_task(
         orchestrator._try_reuse_magic_clean_artifact(
-            object(),
-            job,
-            FakeStorage(),
-            candidate,
-            _source_metadata(),
+            object(), job, FakeStorage(), candidate, _source_metadata()
         )
     )
     assert await asyncio.to_thread(hash_started.wait, 2)
@@ -1323,14 +1172,10 @@ async def _exercise_reuse_hash_cancellation(monkeypatch, tmp_path):
     release_hash.set()
     with pytest.raises(asyncio.CancelledError):
         await task
-
     assert cleaned == [str(reused_path)]
 
 
-def test_reuse_hash_finishes_before_cancellation_cleans_temp_file(
-    monkeypatch,
-    tmp_path,
-):
+def test_reuse_hash_finishes_before_cancellation_cleans_temp_file(monkeypatch, tmp_path):
     asyncio.run(_exercise_reuse_hash_cancellation(monkeypatch, tmp_path))
 
 
@@ -1372,20 +1217,14 @@ async def _exercise_deferred_cleanup_tombstone(monkeypatch):
     async def fake_commit(session):
         session.committed = True
 
-    monkeypatch.setattr("hear.orchestrator.SessionLocal", lambda: cleanup_session)
-    monkeypatch.setattr("hear.orchestrator.commit_with_retry", fake_commit)
-    job = SimpleNamespace(
-        id="current",
-        run_id="run",
-        attempts=2,
-        job_options={},
-    )
+    monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: cleanup_session)
+    monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", fake_commit)
+    job = SimpleNamespace(id="current", run_id="run", attempts=2, job_options={})
 
     def unexpected_delete(_key):
         raise AssertionError("ownership-deferred cleanup must not delete eagerly")
 
     storage = SimpleNamespace(delete_object=unexpected_delete)
-
     await orchestrator._cleanup_magic_clean_artifact(
         object(),
         job,
@@ -1398,7 +1237,6 @@ async def _exercise_deferred_cleanup_tombstone(monkeypatch):
         reason="completion_transition_failed",
         defer_deletion=True,
     )
-
     tombstone = persisted_job.job_options["magic_clean_cleanup_tombstone"]
     assert tombstone["run_id"] == "run"
     assert tombstone["job_attempt"] == 2
@@ -1408,7 +1246,5 @@ async def _exercise_deferred_cleanup_tombstone(monkeypatch):
     assert cleanup_session.committed and cleanup_session.closed
 
 
-def test_completion_uncertainty_records_owned_tombstone_without_eager_delete(
-    monkeypatch,
-):
+def test_completion_uncertainty_records_owned_tombstone_without_eager_delete(monkeypatch):
     asyncio.run(_exercise_deferred_cleanup_tombstone(monkeypatch))

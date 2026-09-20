@@ -1,8 +1,8 @@
 from ray import serve
 
 from hear.config import settings
-from hear.core.downloader import download_audio
-from hear.core.hear_temp import cleanup_job_temp, drop_temp_standalone
+from hear.core.downloader import AudioDownloader
+from hear.core.hear_temp import TempWorkspace
 from hear.core.storage import B2Storage
 from hear.models.schemas import StorageContext
 from hear.services.magic_clean.service import MagicCleanAudioEnhancer
@@ -10,8 +10,6 @@ from hear.services.magic_clean.service import MagicCleanAudioEnhancer
 
 @serve.deployment(
     name="magic_clean",
-    # The resident actors leave room for one 0.35-GPU on-demand actor. Using
-    # the same reservation for Fish Speech prevents both loading together.
     ray_actor_options={"num_gpus": 0.35, "num_cpus": 0.5},
     autoscaling_config={
         "min_replicas": 0,
@@ -47,7 +45,7 @@ class MagicCleanDeployment:
     ) -> dict:
         input_path: str | None = None
         try:
-            input_path = await download_audio(
+            input_path = await AudioDownloader.download_audio(
                 audio_url,
                 suffix=".audio",
                 job_id=ai_job_id,
@@ -73,6 +71,6 @@ class MagicCleanDeployment:
             return result.__dict__
         finally:
             if input_path is not None:
-                drop_temp_standalone(input_path)
+                TempWorkspace.drop_temp_standalone(input_path)
             if ai_job_id and ai_run_id:
-                cleanup_job_temp(None, ai_job_id, ai_run_id)
+                TempWorkspace.cleanup_job_temp(None, ai_job_id, ai_run_id)

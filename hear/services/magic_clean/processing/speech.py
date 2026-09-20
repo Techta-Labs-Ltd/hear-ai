@@ -4,11 +4,11 @@ import torchaudio.functional as F
 
 
 class SpeechProcessor:
-    DEESSER_FREQ_HZ      = 6000.0
-    DEESSER_Q            = 2.0
+    DEESSER_FREQ_HZ = 6000.0
+    DEESSER_Q = 2.0
     DEESSER_THRESHOLD_DB = -20.0
-    DEESSER_ATTACK_MS    = 1
-    DEESSER_RELEASE_MS   = 50
+    DEESSER_ATTACK_MS = 1
+    DEESSER_RELEASE_MS = 50
     DEESSER_REDUCTION_DB = -6.0
 
     def apply_eq_speech(self, w: torch.Tensor, sr: int) -> torch.Tensor:
@@ -23,9 +23,9 @@ class SpeechProcessor:
     def apply_eq_music(self, w: torch.Tensor, sr: int) -> torch.Tensor:
         try:
             w = F.highpass_biquad(w, sr, cutoff_freq=30.0)
-            w = F.equalizer_biquad(w, sr, center_freq=100.0,  gain=1.0,  Q=1.2)
+            w = F.equalizer_biquad(w, sr, center_freq=100.0, gain=1.0, Q=1.2)
             w = F.equalizer_biquad(w, sr, center_freq=3000.0, gain=-1.0, Q=2.0)
-            w = F.equalizer_biquad(w, sr, center_freq=8000.0, gain=2.0,  Q=1.5)
+            w = F.equalizer_biquad(w, sr, center_freq=8000.0, gain=2.0, Q=1.5)
             return w
         except Exception:
             return w
@@ -49,8 +49,11 @@ class SpeechProcessor:
             sos = np.zeros(len(sig))
             for i in range(2, len(sig)):
                 sos[i] = (
-                    b0 * sig[i] + b1 * sig[i - 1] + b2 * sig[i - 2]
-                    - a1 * sos[i - 1] - a2 * sos[i - 2]
+                    b0 * sig[i]
+                    + b1 * sig[i - 1]
+                    + b2 * sig[i - 2]
+                    - a1 * sos[i - 1]
+                    - a2 * sos[i - 2]
                 )
 
             sibilance = np.abs(sig - sos)
@@ -75,8 +78,6 @@ class SpeechProcessor:
 
             sos_filtered = sos + (sig - sos) * gain
 
-            return torch.from_numpy(
-                sos_filtered.astype(np.float32)
-            ).unsqueeze(0).to(w.device)
+            return torch.from_numpy(sos_filtered.astype(np.float32)).unsqueeze(0).to(w.device)
         except Exception:
             return w

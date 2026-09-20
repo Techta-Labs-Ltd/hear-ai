@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import uuid
 
-from hear.core.backend_registry import validate_storage_for_backend
+from hear.core.backend_registry import BackendRegistry
 from hear.core.category_loader import category_loader
-from hear.core.discovery_sort import VALID_DISCOVERY_SORTS, sort_discovery_items
 from hear.core.health import ServiceHealth
 from hear.core.keyword_loader import auto_tag_keyword_loader, harm_keyword_loader
 from hear.core.storage import B2Storage
-from hear.models.database import AiTrackJob, SessionLocal
+from hear.models.database import AiTrackJob, DatabaseRuntime
 from hear.models.schemas import StorageContext
 from hear.services.categorization.service import CategorizationService
 from hear.services.moderation.service import ModerationService
 from hear.services.reconstruction.service import RegenerationService
+from hear.utils.discovery_sort import VALID_DISCOVERY_SORTS, sort_discovery_items
 
 
 class ServiceError(Exception):
@@ -40,9 +40,7 @@ class Operations:
 
     async def categorize(self, text: str, custom_tags: list[str], max_tags: int) -> dict:
         return await self._categorizer.categorize(
-            transcript=text,
-            custom_tags=custom_tags,
-            max_tags=max_tags,
+            transcript=text, custom_tags=custom_tags, max_tags=max_tags
         )
 
     async def create_preview(
@@ -58,13 +56,12 @@ class Operations:
         backend_id: str,
         storage_context: StorageContext,
     ) -> dict:
-        validate_storage_for_backend(backend_id, storage_context)
+        BackendRegistry.validate_storage_for_backend(backend_id, storage_context)
         storage = B2Storage(storage_context)
         if not changes:
-            if segment_start is None or segment_end is None or not (new_text or "").strip():
+            if segment_start is None or segment_end is None or (not (new_text or "").strip()):
                 raise ServiceError(
-                    422,
-                    "provide changes or segment_start, segment_end, and new_text",
+                    422, "provide changes or segment_start, segment_end, and new_text"
                 )
             changes = [
                 {
@@ -107,11 +104,7 @@ class Operations:
         }
 
     async def confirm_preview(
-        self,
-        preview_id: str,
-        track_id: str | None,
-        user_id: str | None,
-        backend_id: str,
+        self, preview_id: str, track_id: str | None, user_id: str | None, backend_id: str
     ) -> dict:
         try:
             result = await self._regeneration.confirm_preview(preview_id, backend_id)
@@ -141,7 +134,7 @@ class Operations:
         backend_id: str,
         storage_context: StorageContext,
     ) -> dict:
-        validate_storage_for_backend(backend_id, storage_context)
+        BackendRegistry.validate_storage_for_backend(backend_id, storage_context)
         storage = B2Storage(storage_context)
         if segment_end <= segment_start:
             raise ServiceError(422, "segment_end must be greater than segment_start")
@@ -186,11 +179,10 @@ class Operations:
             raise ServiceError(422, "sort must be latest or trending")
         limit = max(1, min(limit or 20, 100))
         offset = max(0, offset)
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
             query = db.query(AiTrackJob).filter(
-                AiTrackJob.status == "completed",
-                AiTrackJob.discovery_json.isnot(None),
+                AiTrackJob.status == "completed", AiTrackJob.discovery_json.isnot(None)
             )
             if mode == "latest":
                 query = query.order_by(AiTrackJob.completed_at.desc())
@@ -226,15 +218,9 @@ class Operations:
         finally:
             db.close()
 
-    async def update_platform_settings(
-        self,
-        blocked_keywords: str,
-        auto_tag_keywords: str,
-    ) -> dict:
+    async def update_platform_settings(self, blocked_keywords: str, auto_tag_keywords: str) -> dict:
         blocked = [item.strip().lower() for item in blocked_keywords.split(",") if item.strip()]
-        auto_tags = [
-            item.strip().lower() for item in auto_tag_keywords.split(",") if item.strip()
-        ]
+        auto_tags = [item.strip().lower() for item in auto_tag_keywords.split(",") if item.strip()]
         harm_keyword_loader.sync_platform_keywords(blocked)
         auto_tag_keyword_loader.sync(auto_tags)
         for keyword in auto_tags:

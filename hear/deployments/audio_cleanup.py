@@ -4,12 +4,11 @@ import logging
 from ray import serve
 
 from hear.config import settings
-from hear.core.hear_temp import sweep_tracked_temp_files
-from hear.services.magic_clean.cleanup import (
-    reconcile_magic_clean_cleanup_tombstones,
-)
+from hear.core.hear_temp import TempWorkspace
+from hear.services.magic_clean.cleanup import MagicCleanCleanup
 
 logger = logging.getLogger(__name__)
+
 
 @serve.deployment(
     name="audio_cleanup",
@@ -26,9 +25,9 @@ class AudioCleanupDeployment:
     async def _cleanup_loop(self) -> None:
         while True:
             try:
-                result = await asyncio.to_thread(sweep_tracked_temp_files)
+                result = await asyncio.to_thread(TempWorkspace.sweep_tracked_temp_files)
                 reconciliation = await asyncio.to_thread(
-                    reconcile_magic_clean_cleanup_tombstones
+                    MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones
                 )
                 if result["by_age"]:
                     logger.info(
@@ -48,12 +47,10 @@ class AudioCleanupDeployment:
             await asyncio.sleep(settings.AUDIO_CLEANUP_INTERVAL_SECONDS)
 
     async def run_now(self) -> dict:
-        temp = await asyncio.to_thread(sweep_tracked_temp_files)
+        temp = await asyncio.to_thread(TempWorkspace.sweep_tracked_temp_files)
         artifacts = await asyncio.to_thread(
-            reconcile_magic_clean_cleanup_tombstones
+            MagicCleanCleanup.reconcile_magic_clean_cleanup_tombstones
         )
-        # Preserve the existing manual-cleanup response keys for callers while
-        # exposing reconciliation diagnostics as an additive field.
         return {**temp, "magic_clean_artifacts": artifacts}
 
     def __del__(self) -> None:

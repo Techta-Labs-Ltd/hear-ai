@@ -9,7 +9,7 @@ No LLM is used -- pure difflib-based, deterministic and fast.
 
 import difflib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from hear.config import settings
@@ -40,11 +40,13 @@ def _flatten_words(segments: list[dict]) -> list[_WordToken]:
             word_text = w.get("word", "").strip()
             if not word_text:
                 continue
-            tokens.append(_WordToken(
-                word=word_text,
-                start=float(w.get("start", 0.0)),
-                end=float(w.get("end", 0.0)),
-            ))
+            tokens.append(
+                _WordToken(
+                    word=word_text,
+                    start=float(w.get("start", 0.0)),
+                    end=float(w.get("end", 0.0)),
+                )
+            )
     return tokens
 
 
@@ -55,7 +57,7 @@ def _normalize_text(text: str) -> list[str]:
 
 def _strip_word(w: str) -> str:
     """Normalize a word for comparison by removing surrounding punctuation."""
-    return re.sub(r'^[^\w]+|[^\w]+$', '', w).lower()
+    return re.sub(r"^[^\w]+|[^\w]+$", "", w).lower()
 
 
 def _sentence_boundaries(words: list[_WordToken]) -> list[int]:
@@ -68,9 +70,16 @@ def _sentence_boundaries(words: list[_WordToken]) -> list[int]:
     for i, w in enumerate(words):
         stripped = w.word.strip()
         if stripped.endswith((".", "!", "?")) and not stripped.lower() in (
-            "mr.", "mrs.", "dr.", "ms.", "prof.", "rev.", "st.", "ave.",
+            "mr.",
+            "mrs.",
+            "dr.",
+            "ms.",
+            "prof.",
+            "rev.",
+            "st.",
+            "ave.",
         ):
-            if re.match(r'^\d+\.$|^[A-Z]{2,5}\.$|^[A-Z][a-z]\.$', stripped):
+            if re.match(r"^\d+\.$|^[A-Z]{2,5}\.$|^[A-Z][a-z]\.$", stripped):
                 continue
             boundaries.append(i)
     return boundaries
@@ -143,8 +152,12 @@ def compute_edit_segments(
     list[EditSegment]
         Ordered list of segments that need regeneration.
     """
-    expand = expansion_words if expansion_words is not None else settings.EDIT_PHRASE_EXPANSION_WORDS
-    merge_gap = merge_gap_seconds if merge_gap_seconds is not None else settings.EDIT_MERGE_GAP_SECONDS
+    expand = (
+        expansion_words if expansion_words is not None else settings.EDIT_PHRASE_EXPANSION_WORDS
+    )
+    merge_gap = (
+        merge_gap_seconds if merge_gap_seconds is not None else settings.EDIT_MERGE_GAP_SECONDS
+    )
 
     orig_words = _flatten_words(word_segments)
     if not orig_words:
@@ -162,7 +175,12 @@ def compute_edit_segments(
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
             continue
-        if tag in ("delete", "replace") and len(edit_tokens_lower) >= 5 and j1 >= len(edit_tokens_lower) - 2 and (i2 - i1) > (j2 - j1) * 3:
+        if (
+            tag in ("delete", "replace")
+            and len(edit_tokens_lower) >= 5
+            and j1 >= len(edit_tokens_lower) - 2
+            and (i2 - i1) > (j2 - j1) * 3
+        ):
             # Trailing: original has much more content than edit at the end.
             # Only include the edit-side portion for TTS; the rest is a deletion.
             if tag == "replace":
@@ -206,10 +224,12 @@ def compute_edit_segments(
         end_time = orig_words[end_idx - 1].end
         original_text = " ".join(w.word for w in orig_words[start_idx:end_idx])
 
-        edited_text = _compute_edited_text(orig_tokens, edit_tokens_case, opcodes, start_idx, end_idx)
+        edited_text = _compute_edited_text(
+            orig_tokens, edit_tokens_case, opcodes, start_idx, end_idx
+        )
 
         if end_idx < len(orig_words) and edited_text.strip():
-            trailing_orig = [_strip_word(w.word) for w in orig_words[end_idx:end_idx + 10]]
+            trailing_orig = [_strip_word(w.word) for w in orig_words[end_idx : end_idx + 10]]
             edit_words_list = edited_text.strip().split()
             strip_count = 0
             for i in range(1, min(len(edit_words_list), len(trailing_orig)) + 1):
@@ -233,23 +253,28 @@ def compute_edit_segments(
         right_ctx_end = min(len(orig_words), end_idx + expand)
         right_context = " ".join(w.word for w in orig_words[end_idx:right_ctx_end])
 
-        segments.append(EditSegment(
-            start_time=round(start_time, 3),
-            end_time=round(end_time, 3),
-            original_text=original_text,
-            edited_text=edited_text,
-            left_context=left_context,
-            right_context=right_context,
-        ))
+        segments.append(
+            EditSegment(
+                start_time=round(start_time, 3),
+                end_time=round(end_time, 3),
+                original_text=original_text,
+                edited_text=edited_text,
+                left_context=left_context,
+                right_context=right_context,
+            )
+        )
 
     # Deduplicate: remove superset segments (larger time range containing a smaller one)
     # when the larger segment's edited text is empty or identical to the smaller's.
     deduped: list[EditSegment] = []
-    for seg in sorted(segments, key=lambda s: (s.end_time - s.start_time)):
+    for seg in sorted(segments, key=lambda s: s.end_time - s.start_time):
         is_redundant = False
         for existing in deduped:
-            if (seg.start_time <= existing.start_time and seg.end_time >= existing.end_time
-                    and (not seg.edited_text.strip() or seg.edited_text == existing.edited_text)):
+            if (
+                seg.start_time <= existing.start_time
+                and seg.end_time >= existing.end_time
+                and (not seg.edited_text.strip() or seg.edited_text == existing.edited_text)
+            ):
                 is_redundant = True
                 break
         if not is_redundant:
@@ -261,16 +286,17 @@ def compute_edit_segments(
         td_end = len(orig_words)
         td_start_time = round(orig_words[td_start].start, 3)
         td_end_time = round(orig_words[td_end - 1].end, 3)
-        if not any(d.start_time <= td_start_time and d.end_time >= td_end_time
-                   for d in deduped):
-            deduped.append(EditSegment(
-                start_time=td_start_time,
-                end_time=td_end_time,
-                original_text=" ".join(w.word for w in orig_words[td_start:td_end]),
-                edited_text="",
-                left_context="",
-                right_context="",
-            ))
+        if not any(d.start_time <= td_start_time and d.end_time >= td_end_time for d in deduped):
+            deduped.append(
+                EditSegment(
+                    start_time=td_start_time,
+                    end_time=td_end_time,
+                    original_text=" ".join(w.word for w in orig_words[td_start:td_end]),
+                    edited_text="",
+                    left_context="",
+                    right_context="",
+                )
+            )
 
     return deduped
 
@@ -283,10 +309,12 @@ def _expand_ranges(
     """Expand each range by *expansion* words on each side."""
     expanded: list[tuple[int, int]] = []
     for start, end in ranges:
-        expanded.append((
-            max(0, start - expansion),
-            min(total, end + expansion),
-        ))
+        expanded.append(
+            (
+                max(0, start - expansion),
+                min(total, end + expansion),
+            )
+        )
     return expanded
 
 
@@ -371,14 +399,16 @@ def _fallback_full_diff(
     if orig == edited:
         return []
 
-    return [EditSegment(
-        start_time=0.0,
-        end_time=0.0,
-        original_text=orig,
-        edited_text=edited,
-        left_context="",
-        right_context="",
-    )]
+    return [
+        EditSegment(
+            start_time=0.0,
+            end_time=0.0,
+            original_text=orig,
+            edited_text=edited,
+            left_context="",
+            right_context="",
+        )
+    ]
 
 
 def edit_segments_to_changes(segments: list[EditSegment]) -> list[dict]:
@@ -396,13 +426,15 @@ def edit_segments_to_changes(segments: list[EditSegment]) -> list[dict]:
             continue
         text = seg.edited_text.strip()
         is_deletion = not text
-        changes.append({
-            "segment_start": seg.start_time,
-            "segment_end": seg.end_time,
-            "new_text": seg.edited_text,
-            "original_text": seg.original_text,
-            "is_deletion": is_deletion,
-        })
+        changes.append(
+            {
+                "segment_start": seg.start_time,
+                "segment_end": seg.end_time,
+                "new_text": seg.edited_text,
+                "original_text": seg.original_text,
+                "is_deletion": is_deletion,
+            }
+        )
     return changes
 
 
@@ -440,7 +472,7 @@ def restore_punctuation_from_edit(
         return whisper_transcript.strip()
 
     def _strip_punct(w: str) -> str:
-        return re.sub(r'^[^\w]+|[^\w]+$', '', w).lower()
+        return re.sub(r"^[^\w]+|[^\w]+$", "", w).lower()
 
     whisper_stripped = [_strip_punct(w) for w in whisper_words]
     edit_stripped = [_strip_punct(w) for w in edit_words]
@@ -487,11 +519,13 @@ def _edit_distance(a: str, b: str) -> int:
     for i, ca in enumerate(a):
         curr = [i + 1]
         for j, cb in enumerate(b):
-            curr.append(min(
-                prev[j + 1] + 1,
-                curr[j] + 1,
-                prev[j] + (0 if ca == cb else 1),
-            ))
+            curr.append(
+                min(
+                    prev[j + 1] + 1,
+                    curr[j] + 1,
+                    prev[j] + (0 if ca == cb else 1),
+                )
+            )
         prev = curr
     return prev[-1]
 
@@ -530,7 +564,7 @@ def correct_whisper_mishearings(
         return whisper_text.strip()
 
     def _strip_punct(w: str) -> str:
-        return re.sub(r'^[^\w]+|[^\w]+$', '', w).lower()
+        return re.sub(r"^[^\w]+|[^\w]+$", "", w).lower()
 
     whisper_stripped = [_strip_punct(w) for w in whisper_words]
     edit_stripped = [_strip_punct(w) for w in edit_words]

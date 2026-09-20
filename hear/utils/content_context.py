@@ -77,9 +77,7 @@ _TECH_HISTORY_TERMS = (
     "demucs",
 )
 
-_ASSISTIVE_TAXONOMY_PREFIXES = (
-    "accessibility >",
-)
+_ASSISTIVE_TAXONOMY_PREFIXES = ("accessibility >",)
 
 _MISLEADING_FREEFORM_WHEN_NOT_WILDLIFE = frozenset(
     {"wildlife", "photography", "photographer", "nature", "animals", "grebe", "rewilding"}

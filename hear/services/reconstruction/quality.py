@@ -48,7 +48,8 @@ class RegenerationQualityAssessor:
             if self._ensure_scorer():
                 audio_16k = (
                     torchaudio.functional.resample(tts_waveform, sr, 16000)
-                    if sr != 16000 else tts_waveform
+                    if sr != 16000
+                    else tts_waveform
                 )
                 buf = AudioBuffer(data=audio_16k, sample_rate=16000)
                 report.dnsmos_ovr = self._scorer.score(buf)
@@ -91,8 +92,11 @@ class RegenerationQualityAssessor:
 
         logger.info(
             "QualityReport: dnsmos=%.2f loudness=%.1fdB dur_delta=%.0fms clip=%s passed=%s",
-            report.dnsmos_ovr, report.loudness_match_db,
-            report.duration_delta_ms, report.clipping_detected, report.passed,
+            report.dnsmos_ovr,
+            report.loudness_match_db,
+            report.duration_delta_ms,
+            report.clipping_detected,
+            report.passed,
         )
 
         return report

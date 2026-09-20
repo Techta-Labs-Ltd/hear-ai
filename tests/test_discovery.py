@@ -2,14 +2,7 @@ import pytest
 
 from hear.config import settings
 from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
-from hear.models.discovery import (
-    ContentDiscoveryProfile,
-    DiscoveryEntities,
-    content_description_from_discovery,
-    coerce_discovery_source,
-    discovery_to_callback_dict,
-    flatten_entities,
-)
+from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
 from hear.services.categorization.discovery import DiscoveryService
 from hear.services.categorization.service import CategorizationService
 from hear.services.llm import LLMService
@@ -19,10 +12,7 @@ from hear.services.llm import LLMService
 def taxonomy_loader(tmp_path):
     path = tmp_path / "taxonomy.txt"
     path.write_text(
-        "[TAXONOMY]\n"
-        "Accessibility > Visual impairment\n"
-        "Accessibility > Guide dogs\n"
-        "AI and smart glasses\n",
+        "[TAXONOMY]\nAccessibility > Visual impairment\nAccessibility > Guide dogs\nAI and smart glasses\n",
         encoding="utf-8",
     )
     loader = DiscoveryTaxonomyLoader()
@@ -43,7 +33,10 @@ def test_content_description_prefers_one_line():
         one_line_description="A walkthrough of assistive tech.",
         summary_short="Longer summary here.",
     )
-    assert content_description_from_discovery(profile) == "A walkthrough of assistive tech."
+    assert (
+        DiscoverySerialization.content_description_from_discovery(profile)
+        == "A walkthrough of assistive tech."
+    )
 
 
 def test_discovery_callback_matches_backend_schema():
@@ -64,7 +57,9 @@ def test_discovery_callback_matches_backend_schema():
         confidence={"main_topic": 0.92},
         speaker="Alex",
     )
-    data = discovery_to_callback_dict(profile, duration_seconds=312, source="upload")
+    data = DiscoverySerialization.discovery_to_callback_dict(
+        profile, duration_seconds=312, source="upload"
+    )
     assert data["id"] == "audio_000123"
     assert data["title"] == "Smart glasses walk"
     assert data["duration_seconds"] == 312
@@ -73,7 +68,7 @@ def test_discovery_callback_matches_backend_schema():
 
 def test_coerce_discovery_source_ignores_categorization_dict():
     cat = {"categories": ["Music"], "tags": ["#rock"]}
-    assert coerce_discovery_source(cat) == ""
+    assert DiscoverySerialization.coerce_discovery_source(cat) == ""
     profile = ContentDiscoveryProfile(
         content_id="x",
         main_topic="Assistive technology",
@@ -84,7 +79,7 @@ def test_coerce_discovery_source_ignores_categorization_dict():
         confidence={"main_topic": 0.92},
         speaker="Alex",
     )
-    data = discovery_to_callback_dict(profile, source=cat)
+    data = DiscoverySerialization.discovery_to_callback_dict(profile, source=cat)
     assert data["source"] == ""
     assert data["speaker"] == "Alex"
     assert data["key_themes"] == ["Independence"]
@@ -102,19 +97,15 @@ def test_coerce_discovery_source_ignores_categorization_dict():
 
 def test_flatten_entities():
     ents = DiscoveryEntities(people=["A"], products=["Meta Ray-Ban"])
-    assert flatten_entities(ents) == ["A", "Meta Ray-Ban"]
+    assert DiscoverySerialization.flatten_entities(ents) == ["A", "Meta Ray-Ban"]
 
 
 def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader, monkeypatch):
     svc = DiscoveryService()
     monkeypatch.setattr(
-        "hear.services.categorization.discovery.discovery_taxonomy_loader",
-        taxonomy_loader,
+        "hear.services.categorization.discovery.discovery_taxonomy_loader", taxonomy_loader
     )
-    profile = ContentDiscoveryProfile(
-        main_topic="guide dogs",
-        secondary_topics=["independence"],
-    )
+    profile = ContentDiscoveryProfile(main_topic="guide dogs", secondary_topics=["independence"])
     cat = {"categories": ["Personal lived experience"], "tags": ["#Blindness"]}
     qwen_tags = ["Accessibility > Guide dogs", "Human connection"]
     tags = svc.merge_controlled_tags(
@@ -125,14 +116,14 @@ def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader, monkeypatc
 
 
 def test_canonicalize_path(taxonomy_loader):
-    assert taxonomy_loader.canonicalize_path("accessibility > guide dogs") == "Accessibility > Guide dogs"
+    assert (
+        taxonomy_loader.canonicalize_path("accessibility > guide dogs")
+        == "Accessibility > Guide dogs"
+    )
 
 
 def test_extract_json_nested_object():
-    raw = (
-        'Here is the result: {"title_suggestion":"Guide dogs story","speaker":"Paul",'
-        '"entities":{"people":["Paul","Annie"],"animals":["Rocco"]},"search_phrases":["a","b"]} end'
-    )
+    raw = 'Here is the result: {"title_suggestion":"Guide dogs story","speaker":"Paul","entities":{"people":["Paul","Annie"],"animals":["Rocco"]},"search_phrases":["a","b"]} end'
     parsed = LLMService._extract_json(raw)
     assert parsed["speaker"] == "Paul"
     assert parsed["entities"]["animals"] == ["Rocco"]
@@ -175,10 +166,7 @@ def test_enrich_profile_fills_search_phrases():
 
 def test_context_category_shortlist_ranks_music_from_transcript():
     svc = CategorizationService()
-    tx = (
-        "We discuss a remix of Joan of Arc by Orchestral Manoeuvres in the Dark, "
-        "the song lyrics, and how the melody feels."
-    )
+    tx = "We discuss a remix of Joan of Arc by Orchestral Manoeuvres in the Dark, the song lyrics, and how the melody feels."
     zs = {"Music": 0.82, "Podcast": 0.41, "Entertainment": 0.55, "Gaming": 0.1}
     kw = {"#music": 0.7, "#podcast": 0.3}
     shortlist = svc._build_context_category_shortlist(
@@ -200,9 +188,7 @@ def test_finalize_categories_uses_nli_when_llm_empty():
 def test_categorizer_does_not_inject_subject_labels():
     svc = CategorizationService()
     tags, cats = svc._rebalance_subject_over_format(
-        "A discussion about a song.",
-        ["#podcast", "#gaming"],
-        ["Podcast", "Entertainment"],
+        "A discussion about a song.", ["#podcast", "#gaming"], ["Podcast", "Entertainment"]
     )
     assert tags == ["#gaming"]
     assert cats == ["Podcast", "Entertainment"]

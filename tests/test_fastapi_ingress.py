@@ -1,6 +1,5 @@
 from hear.deployments.gateway import http_app
 
-
 EXPECTED_HTTP_ENDPOINTS = {
     ("/", "get"),
     ("/health", "get"),
@@ -44,9 +43,7 @@ def test_process_is_the_primary_http_job_submission_route():
     assert "/api/v1/process" not in paths
     operation = schema["paths"]["/process"]["post"]
     assert "requestBody" in operation
-    assert {parameter["name"] for parameter in operation["parameters"]} == {
-        "X-Service-Key"
-    }
+    assert {parameter["name"] for parameter in operation["parameters"]} == {"X-Service-Key"}
 
 
 def test_process_contract_exposes_magic_clean_stem_percentages():
@@ -55,9 +52,7 @@ def test_process_contract_exposes_magic_clean_stem_percentages():
 
     for field in ("speech", "music", "background"):
         definition = request["properties"][field]
-        percentage = next(
-            item for item in definition["anyOf"] if item.get("type") == "integer"
-        )
+        percentage = next(item for item in definition["anyOf"] if item.get("type") == "integer")
         assert percentage["minimum"] == 0
         assert percentage["maximum"] == 100
 

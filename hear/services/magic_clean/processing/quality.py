@@ -3,8 +3,9 @@ import pyloudnorm as pyln
 import torch
 import torchaudio
 
+from hear.utils.audio_dsp import match_length
+
 from .audio_io import AudioIO
-from .helpers import match_length
 
 
 class QualityMetrics:
@@ -20,7 +21,7 @@ class QualityMetrics:
     @staticmethod
     def compute_lufs(w: torch.Tensor) -> float:
         try:
-            meter    = pyln.Meter(AudioIO.TARGET_SR)
+            meter = pyln.Meter(AudioIO.TARGET_SR)
             loudness = meter.integrated_loudness(w.cpu().squeeze(0).numpy().astype(np.float64))
             return loudness if np.isfinite(loudness) else -99.0
         except Exception:
@@ -70,9 +71,7 @@ class QualityMetrics:
     ) -> float:
         # ``0`` is the wire-compatible unavailable SNR sentinel. Callers must
         # exclude it rather than awarding the sentinel a positive SNR score.
-        snr_score = (
-            min(1.0, max(0.0, (snr_db + 5) / 40)) if snr_available else 0.0
-        )
+        snr_score = min(1.0, max(0.0, (snr_db + 5) / 40)) if snr_available else 0.0
         lufs_score = 1.0 - min(1.0, abs(lufs - QualityMetrics.TARGET_LUFS) / 20)
-        clip_pen   = 0.3 if clipping else 0.0
+        clip_pen = 0.3 if clipping else 0.0
         return round(max(0.0, snr_score * 0.6 + lufs_score * 0.4 - clip_pen), 3)

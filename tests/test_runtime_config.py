@@ -8,20 +8,22 @@ from cryptography.fernet import Fernet
 
 from hear.config import Settings
 from hear.deployments import app, fish_speech, transcription
-from main import validate_runtime
+from main import RuntimeApplication
 
 
 def configured_settings(model_dir: Path, **overrides) -> Settings:
     service_key_hash = hashlib.sha256(b"test-secret").hexdigest()
     values = {
-        "BACKEND_REGISTRY_JSON": json.dumps({
-            "backend-a": {
-                "service_key_sha256": service_key_hash,
-                "allowed_endpoint_urls": ["https://s3.example.test"],
-                "allowed_buckets": ["bucket-a"],
-                "allowed_public_base_urls": ["https://cdn.example.test"],
+        "BACKEND_REGISTRY_JSON": json.dumps(
+            {
+                "backend-a": {
+                    "service_key_sha256": service_key_hash,
+                    "allowed_endpoint_urls": ["https://s3.example.test"],
+                    "allowed_buckets": ["bucket-a"],
+                    "allowed_public_base_urls": ["https://cdn.example.test"],
+                }
             }
-        }),
+        ),
         "STORAGE_CONTEXT_ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "DATABASE_URL": "postgresql+psycopg2://test:test@db:5432/test",
         "MODEL_CACHE_DIR": str(model_dir),
@@ -43,7 +45,7 @@ def configured_settings(model_dir: Path, **overrides) -> Settings:
 
 @pytest.fixture(autouse=True)
 def installed_runtime_modules(monkeypatch):
-    monkeypatch.setattr("main._missing_modules", lambda _names: [])
+    monkeypatch.setattr("main.RuntimeApplication._missing_modules", lambda _names: [])
 
 
 def test_runtime_validation_accepts_preprovisioned_artifacts(tmp_path):
@@ -52,8 +54,7 @@ def test_runtime_validation_accepts_preprovisioned_artifacts(tmp_path):
     (tmp_path / "last_best_checkpoint").touch()
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
-
-    validate_runtime(configured_settings(tmp_path))
+    RuntimeApplication.validate_runtime(configured_settings(tmp_path))
 
 
 def test_runtime_validation_rejects_missing_model_path(tmp_path):
@@ -63,9 +64,8 @@ def test_runtime_validation_rejects_missing_model_path(tmp_path):
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
     settings = configured_settings(tmp_path, QWEN_ASR_MODEL_PATH="")
-
     with pytest.raises(RuntimeError, match="QWEN_ASR_MODEL_PATH must be configured"):
-        validate_runtime(settings)
+        RuntimeApplication.validate_runtime(settings)
 
 
 def test_runtime_validation_rejects_missing_backend_registry(tmp_path):
@@ -75,9 +75,8 @@ def test_runtime_validation_rejects_missing_backend_registry(tmp_path):
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
     settings = configured_settings(tmp_path, BACKEND_REGISTRY_JSON="")
-
     with pytest.raises(RuntimeError, match="BACKEND_REGISTRY_JSON"):
-        validate_runtime(settings)
+        RuntimeApplication.validate_runtime(settings)
 
 
 def test_runtime_validation_rejects_invalid_storage_encryption_key(tmp_path):
@@ -87,9 +86,8 @@ def test_runtime_validation_rejects_invalid_storage_encryption_key(tmp_path):
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
     settings = configured_settings(tmp_path, STORAGE_CONTEXT_ENCRYPTION_KEY="invalid")
-
     with pytest.raises(RuntimeError, match="STORAGE_CONTEXT_ENCRYPTION_KEY"):
-        validate_runtime(settings)
+        RuntimeApplication.validate_runtime(settings)
 
 
 def test_runtime_validation_rejects_incomplete_mossformer_checkpoint(tmp_path):
@@ -97,14 +95,12 @@ def test_runtime_validation_rejects_incomplete_mossformer_checkpoint(tmp_path):
     (tmp_path / "codec.pth").touch()
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
-
     with pytest.raises(RuntimeError, match="missing MossFormer2 checkpoint"):
-        validate_runtime(configured_settings(tmp_path))
+        RuntimeApplication.validate_runtime(configured_settings(tmp_path))
 
 
 def test_durable_defaults_use_workspace():
     defaults = Settings(_env_file=None)
-
     assert defaults.MODEL_CACHE_DIR == "/workspace/models"
     assert defaults.QWEN_ASR_MODEL_PATH == "/workspace/models/qwen3-asr-1.7b"
     assert defaults.MOSSFORMER_MODEL_PATH == "/workspace/models/mossformer2-se-48k"
@@ -118,9 +114,7 @@ def test_durable_paths_allow_environment_overrides(monkeypatch, tmp_path):
     fish_root = tmp_path / "fish-speech"
     monkeypatch.setenv("MODEL_CACHE_DIR", str(model_root))
     monkeypatch.setenv("FISH_SPEECH_HOME", str(fish_root))
-
     configured = Settings(_env_file=None)
-
     assert configured.MODEL_CACHE_DIR == str(model_root)
     assert configured.FISH_SPEECH_HOME == str(fish_root)
 
@@ -135,9 +129,8 @@ def test_runtime_validation_rejects_unsafe_cleanup_grace(tmp_path):
     (tmp_path / "last_best_checkpoint").touch()
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
-
     with pytest.raises(RuntimeError, match="CLEANUP_GRACE_SECONDS must be positive"):
-        validate_runtime(
+        RuntimeApplication.validate_runtime(
             configured_settings(tmp_path, MAGIC_CLEAN_CLEANUP_GRACE_SECONDS=0)
         )
 
@@ -148,26 +141,14 @@ def test_runtime_validation_requires_cleanup_safe_storage_credential_ttl(tmp_pat
     (tmp_path / "last_best_checkpoint").touch()
     (tmp_path / "demucs-signature.th").touch()
     (tmp_path / "htdemucs.yaml").write_text("models: [demucs-signature]\n")
-
-    with pytest.raises(
-        RuntimeError,
-        match="STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed",
-    ):
-        validate_runtime(
-            configured_settings(
-                tmp_path,
-                MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS=1800,
-            )
+    with pytest.raises(RuntimeError, match="STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed"):
+        RuntimeApplication.validate_runtime(
+            configured_settings(tmp_path, MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS=1800)
         )
-
-    with pytest.raises(
-        RuntimeError,
-        match="STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed",
-    ):
-        validate_runtime(
+    with pytest.raises(RuntimeError, match="STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed"):
+        RuntimeApplication.validate_runtime(
             configured_settings(
-                tmp_path,
-                MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS=float("nan"),
+                tmp_path, MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS=float("nan")
             )
         )
 
@@ -176,25 +157,18 @@ def test_runtime_validation_rejects_missing_local_demucs_model(tmp_path):
     (tmp_path / "model.safetensors").touch()
     (tmp_path / "codec.pth").touch()
     (tmp_path / "last_best_checkpoint").touch()
-
     with pytest.raises(RuntimeError, match="missing local Demucs model manifest"):
-        validate_runtime(configured_settings(tmp_path))
+        RuntimeApplication.validate_runtime(configured_settings(tmp_path))
 
 
 def test_default_single_gpu_deployment_budget_allows_one_heavy_actor(tmp_path):
     runtime = configured_settings(tmp_path)
-    resident = (
-        0.20  # transcription
-        + 0.10  # small models
-        + 0.25  # LLM
-        + 0.05  # orchestrator
-    )
+    resident = 0.2 + 0.1 + 0.25 + 0.05
     on_demand = 0.35
-
     assert runtime.MAGIC_CLEAN_REPLICA_COUNT == 1
     assert runtime.FISH_SPEECH_REPLICA_COUNT == 1
     assert resident + on_demand <= 1.0
-    assert resident + (2 * on_demand) > 1.0
+    assert resident + 2 * on_demand > 1.0
 
 
 def test_on_demand_gpu_models_have_a_short_idle_timeout(tmp_path):
@@ -216,7 +190,6 @@ def test_transcription_deployment_uses_qwen_backend(monkeypatch):
 
     monkeypatch.setattr(transcription, "load_qwen_asr_model", fake_load)
     deployment = transcription.TranscriptionDeployment.func_or_class()
-
     assert captured["model_path"] == transcription.settings.QWEN_ASR_MODEL_PATH
     assert captured["qwen_forced_aligner"] == transcription.settings.ALIGNER_MODEL_PATH
     assert captured["local_files_only"] is True
@@ -241,7 +214,7 @@ def test_ray_graph_uses_audio_cleanup(monkeypatch):
 
     monkeypatch.setattr(app.ApplicationBuilder, "_bind", staticmethod(bind))
     runtime = Settings(_env_file=None, QWEN_LLM_ENABLED=False, FISH_SPEECH_TTS_ENABLED=False)
-    assert app.build_application(runtime) == "GrpcGateway"
+    assert app.ApplicationBuilder.build_application(runtime) == "GrpcGateway"
     assert "AudioCleanupDeployment" in [call[1] for call in calls]
     assert "FishSpeechDeployment" not in [call[1] for call in calls]
     assert "LLMDeployment" not in [call[1] for call in calls]
@@ -250,5 +223,4 @@ def test_ray_graph_uses_audio_cleanup(monkeypatch):
 
 def test_main_registers_only_pipeline_grpc_service():
     source = Path(__import__("main").__file__).read_text()
-
     assert "add_PipelineServicer_to_server" in source

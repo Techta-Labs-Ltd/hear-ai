@@ -10,11 +10,11 @@ import torchaudio
 import torchaudio.functional as F_audio
 
 from hear.config import settings
-from hear.core.db_gate import commit_with_retry
-from hear.core.downloader import download_audio
-from hear.core.hear_temp import drop_temp_standalone, hear_temp_directory
-from hear.core.storage import B2Storage, decrypt_storage_context, encrypt_storage_context
-from hear.models.database import RegenerationPreview, SessionLocal
+from hear.core.db_gate import DatabaseCommitter
+from hear.core.downloader import AudioDownloader
+from hear.core.hear_temp import TempWorkspace
+from hear.core.storage import B2Storage, StorageContexts
+from hear.models.database import DatabaseRuntime, RegenerationPreview
 from hear.services.reconstruction.quality import RegenerationQualityAssessor
 from hear.services.reconstruction.synthesizer import (
     SegmentAudioResult,
@@ -40,9 +40,7 @@ class PreviewResult:
 
 class RegenerationService:
     def __init__(
-        self,
-        synthesizer: SpeechSynthesizer,
-        quality_assessor: RegenerationQualityAssessor,
+        self, synthesizer: SpeechSynthesizer, quality_assessor: RegenerationQualityAssessor
     ):
         self._synthesizer = synthesizer
         self._quality_assessor = quality_assessor
@@ -63,14 +61,12 @@ class RegenerationService:
         preview_id = str(uuid.uuid4())
         job_id = job_id or preview_id
         logger.info("Creating preview for track=%s changes=%d", track_id, len(changes))
-
         await self._broadcast_event(track_id, "preview_downloading", {"track_id": track_id})
-
-        source_path = await download_audio(audio_url, suffix=".wav", convert_to_wav=True)
-
+        source_path = await AudioDownloader.download_audio(
+            audio_url, suffix=".wav", convert_to_wav=True
+        )
         try:
             await self._broadcast_event(track_id, "preview_synthesizing", {"track_id": track_id})
-
             preview_audio = await self._synthesizer.generate_preview(
                 original_audio_path=source_path,
                 track_id=track_id,
@@ -79,15 +75,11 @@ class RegenerationService:
                 job_id=job_id,
                 storage=storage,
             )
-
             await self._broadcast_event(track_id, "preview_quality_check", {"track_id": track_id})
-
             original_waveform, orig_sr = torchaudio.load(source_path)
             if orig_sr != self._synthesizer.TARGET_SR:
                 original_waveform = F_audio.resample(
-                    original_waveform,
-                    orig_sr,
-                    self._synthesizer.TARGET_SR,
+                    original_waveform, orig_sr, self._synthesizer.TARGET_SR
                 )
             quality_metrics: dict = {}
             preview_dl_path = None
@@ -98,19 +90,14 @@ class RegenerationService:
                 preview_waveform, preview_sr = torchaudio.load(preview_dl_path)
                 if preview_sr != self._synthesizer.TARGET_SR:
                     preview_waveform = F_audio.resample(
-                        preview_waveform,
-                        preview_sr,
-                        self._synthesizer.TARGET_SR,
+                        preview_waveform, preview_sr, self._synthesizer.TARGET_SR
                     )
-
                 first_change = changes[0] if changes else {}
                 ref_start = int(
-                    float(first_change.get("segment_start", 0))
-                    * self._synthesizer.TARGET_SR
+                    float(first_change.get("segment_start", 0)) * self._synthesizer.TARGET_SR
                 )
                 ref_end = int(
-                    float(first_change.get("segment_end", 0))
-                    * self._synthesizer.TARGET_SR
+                    float(first_change.get("segment_end", 0)) * self._synthesizer.TARGET_SR
                 )
                 ref_segment = (
                     original_waveform[:, ref_start:ref_end]
@@ -118,9 +105,7 @@ class RegenerationService:
                     else original_waveform
                 )
                 quality_report = self._quality_assessor.assess(
-                    preview_waveform,
-                    ref_segment,
-                    self._synthesizer.TARGET_SR,
+                    preview_waveform, ref_segment, self._synthesizer.TARGET_SR
                 )
                 quality_metrics = {
                     "dnsmos_ovr": float(quality_report.dnsmos_ovr),
@@ -138,19 +123,19 @@ class RegenerationService:
                 }
             finally:
                 if preview_dl_path:
-                    drop_temp_standalone(preview_dl_path)
-
+                    TempWorkspace.drop_temp_standalone(preview_dl_path)
             expires_at = datetime.utcnow() + timedelta(
                 seconds=settings.REGENERATION_PREVIEW_TTL_SECONDS
             )
-
-            db = SessionLocal()
+            db = DatabaseRuntime.SessionLocal()
             try:
                 preview_row = RegenerationPreview(
                     id=preview_id,
                     job_id=job_id,
                     backend_id=backend_id,
-                    storage_context_encrypted=encrypt_storage_context(storage.context),
+                    storage_context_encrypted=StorageContexts.encrypt_storage_context(
+                        storage.context
+                    ),
                     track_id=track_id,
                     action="replace",
                     changes_json={"changes": changes, "same_speaker": same_speaker},
@@ -159,11 +144,9 @@ class RegenerationService:
                     original_audio_url=audio_url,
                     quality_metrics=quality_metrics,
                     status="pending",
-                    seed=(
-                        self._synthesizer._compute_seed(job_id or track_id, track_id)
-                        if job_id
-                        else None
-                    ),
+                    seed=self._synthesizer._compute_seed(job_id or track_id, track_id)
+                    if job_id
+                    else None,
                     user_id=user_id,
                     created_at=datetime.utcnow(),
                     expires_at=expires_at,
@@ -172,15 +155,17 @@ class RegenerationService:
                 await self._commit(db)
             finally:
                 db.close()
-
-            await self._broadcast_event(track_id, "preview_ready", {
-                "preview_id": preview_id,
-                "preview_audio_url": preview_audio.audio_url,
-                "quality_metrics": quality_metrics,
-                "track_id": track_id,
-                "user_id": user_id,
-            })
-
+            await self._broadcast_event(
+                track_id,
+                "preview_ready",
+                {
+                    "preview_id": preview_id,
+                    "preview_audio_url": preview_audio.audio_url,
+                    "quality_metrics": quality_metrics,
+                    "track_id": track_id,
+                    "user_id": user_id,
+                },
+            )
             return PreviewResult(
                 preview_id=preview_id,
                 preview_audio_url=preview_audio.audio_url,
@@ -193,18 +178,21 @@ class RegenerationService:
                 segments=preview_audio.segments,
             )
         finally:
-            drop_temp_standalone(source_path)
+            TempWorkspace.drop_temp_standalone(source_path)
 
     async def confirm_preview(self, preview_id: str, backend_id: str) -> SynthesisResult:
         logger.info("Confirming preview=%s", preview_id)
-
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            preview = db.query(RegenerationPreview).filter(
-                RegenerationPreview.id == preview_id,
-                RegenerationPreview.backend_id == backend_id,
-                RegenerationPreview.status == "pending",
-            ).first()
+            preview = (
+                db.query(RegenerationPreview)
+                .filter(
+                    RegenerationPreview.id == preview_id,
+                    RegenerationPreview.backend_id == backend_id,
+                    RegenerationPreview.status == "pending",
+                )
+                .first()
+            )
             if not preview:
                 raise ValueError(f"Preview {preview_id} not found or not pending")
             if preview.expires_at <= datetime.utcnow():
@@ -220,20 +208,17 @@ class RegenerationService:
             changes_data = preview_changes.get("changes", [])
             same_speaker = bool(preview_changes.get("same_speaker", True))
             backend_id = preview.backend_id
-            storage = B2Storage(decrypt_storage_context(preview.storage_context_encrypted))
+            storage = B2Storage(
+                StorageContexts.decrypt_storage_context(preview.storage_context_encrypted)
+            )
         finally:
             db.close()
-
         await self._broadcast_event(
-            track_id,
-            "confirm_splicing",
-            {"track_id": track_id, "preview_id": preview_id},
+            track_id, "confirm_splicing", {"track_id": track_id, "preview_id": preview_id}
         )
-
-        source_path = await download_audio(
+        source_path = await AudioDownloader.download_audio(
             original_audio_url, suffix=".wav", convert_to_wav=True
         )
-
         try:
             result = await self._synthesizer.reconstruct_segments(
                 original_audio_path=source_path,
@@ -243,30 +228,28 @@ class RegenerationService:
                 job_id=preview.job_id or preview_id,
                 storage=storage,
             )
-
             await self._broadcast_event(track_id, "confirm_uploading", {"track_id": track_id})
-
-            await self._broadcast_event(track_id, "confirm_complete", {
-                "preview_id": preview_id,
-                "final_audio_url": result.audio_url,
-                "b2_key": result.b2_key,
-                "duration": result.duration,
-                "track_id": track_id,
-                "segments_applied": len(changes_data),
-            })
-
+            await self._broadcast_event(
+                track_id,
+                "confirm_complete",
+                {
+                    "preview_id": preview_id,
+                    "final_audio_url": result.audio_url,
+                    "b2_key": result.b2_key,
+                    "duration": result.duration,
+                    "track_id": track_id,
+                    "segments_applied": len(changes_data),
+                },
+            )
             try:
                 storage.delete_object(preview.preview_b2_key)
             except Exception as exc:
                 logger.warning(
-                    "Failed to delete preview B2 object %s: %s",
-                    preview.preview_b2_key,
-                    exc,
+                    "Failed to delete preview B2 object %s: %s", preview.preview_b2_key, exc
                 )
-
             return result
         finally:
-            drop_temp_standalone(source_path)
+            TempWorkspace.drop_temp_standalone(source_path)
 
     async def remove_segment(
         self,
@@ -281,18 +264,16 @@ class RegenerationService:
         if storage is None:
             raise ValueError("missing_storage_context")
         logger.info("Removing segment track=%s [%.2f-%.2f]", track_id, segment_start, segment_end)
-
         await self._broadcast_event(track_id, "remove_downloading", {"track_id": track_id})
-
-        source_path = await download_audio(audio_url, suffix=".wav", convert_to_wav=True)
-
+        source_path = await AudioDownloader.download_audio(
+            audio_url, suffix=".wav", convert_to_wav=True
+        )
         try:
-            await self._broadcast_event(track_id, "remove_cutting", {
-                "track_id": track_id,
-                "segment_start": segment_start,
-                "segment_end": segment_end,
-            })
-
+            await self._broadcast_event(
+                track_id,
+                "remove_cutting",
+                {"track_id": track_id, "segment_start": segment_start, "segment_end": segment_end},
+            )
             result = await self._synthesizer.remove_segment(
                 original_audio_path=source_path,
                 track_id=track_id,
@@ -301,58 +282,66 @@ class RegenerationService:
                 storage=storage,
                 job_id=job_id or track_id,
             )
-
-            await self._broadcast_event(track_id, "remove_complete", {
-                "final_audio_url": result.audio_url,
-                "b2_key": result.b2_key,
-                "duration": result.duration,
-                "track_id": track_id,
-                "removed_duration": round(segment_end - segment_start, 3),
-                "user_id": user_id,
-            })
-
+            await self._broadcast_event(
+                track_id,
+                "remove_complete",
+                {
+                    "final_audio_url": result.audio_url,
+                    "b2_key": result.b2_key,
+                    "duration": result.duration,
+                    "track_id": track_id,
+                    "removed_duration": round(segment_end - segment_start, 3),
+                    "user_id": user_id,
+                },
+            )
             return result
         finally:
-            drop_temp_standalone(source_path)
+            TempWorkspace.drop_temp_standalone(source_path)
 
     async def rollback_preview(self, preview_id: str, backend_id: str) -> bool:
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            preview = db.query(RegenerationPreview).filter(
-                RegenerationPreview.id == preview_id,
-                RegenerationPreview.backend_id == backend_id,
-            ).first()
+            preview = (
+                db.query(RegenerationPreview)
+                .filter(
+                    RegenerationPreview.id == preview_id,
+                    RegenerationPreview.backend_id == backend_id,
+                )
+                .first()
+            )
             if not preview or preview.status == "rolled_back":
                 return False
-
             preview.status = "rolled_back"
             await self._commit(db)
-
             try:
-                storage = B2Storage(decrypt_storage_context(preview.storage_context_encrypted))
+                storage = B2Storage(
+                    StorageContexts.decrypt_storage_context(preview.storage_context_encrypted)
+                )
                 storage.delete_object(preview.preview_b2_key)
             except Exception as e:
                 logger.warning(
-                    "Failed to delete preview B2 asset %s: %s",
-                    preview.preview_b2_key,
-                    e,
+                    "Failed to delete preview B2 asset %s: %s", preview.preview_b2_key, e
                 )
-
-            await self._broadcast_event(preview.track_id, "preview_rolled_back", {
-                "preview_id": preview_id,
-                "track_id": preview.track_id,
-            })
+            await self._broadcast_event(
+                preview.track_id,
+                "preview_rolled_back",
+                {"preview_id": preview_id, "track_id": preview.track_id},
+            )
             return True
         finally:
             db.close()
 
     async def get_preview(self, preview_id: str, backend_id: str) -> dict | None:
-        db = SessionLocal()
+        db = DatabaseRuntime.SessionLocal()
         try:
-            preview = db.query(RegenerationPreview).filter(
-                RegenerationPreview.id == preview_id,
-                RegenerationPreview.backend_id == backend_id,
-            ).first()
+            preview = (
+                db.query(RegenerationPreview)
+                .filter(
+                    RegenerationPreview.id == preview_id,
+                    RegenerationPreview.backend_id == backend_id,
+                )
+                .first()
+            )
             if not preview:
                 return None
             return {
@@ -364,7 +353,7 @@ class RegenerationService:
                 "audio_url": preview.preview_audio_url,
                 "b2_key": preview.preview_b2_key,
                 "bucket_name": B2Storage(
-                    decrypt_storage_context(preview.storage_context_encrypted)
+                    StorageContexts.decrypt_storage_context(preview.storage_context_encrypted)
                 ).bucket_name,
                 "quality_metrics": preview.quality_metrics,
                 "status": preview.status,
@@ -380,12 +369,14 @@ class RegenerationService:
         logger.debug("regeneration event track=%s event=%s data=%s", track_id, event, data)
 
     async def _commit(self, db):
-        await commit_with_retry(db)
+        await DatabaseCommitter.commit_with_retry(db)
 
     def _download_to_temp(self, url: str) -> str:
         resp = httpx.get(url, timeout=60)
         resp.raise_for_status()
-        path = os.path.join(hear_temp_directory(), f"preview_dl_{uuid.uuid4().hex}.wav")
+        path = os.path.join(
+            TempWorkspace.hear_temp_directory(), f"preview_dl_{uuid.uuid4().hex}.wav"
+        )
         with open(path, "wb") as f:
             f.write(resp.content)
         return path

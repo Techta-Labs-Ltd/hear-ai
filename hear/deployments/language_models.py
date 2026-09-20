@@ -16,6 +16,7 @@ from hear.core.blocking import NativeWorker
 
 logger = logging.getLogger(__name__)
 
+
 @serve.deployment(
     name="small_models",
     ray_actor_options={"num_gpus": 0.10, "num_cpus": 0.3},
@@ -62,10 +63,16 @@ class SmallModelsDeployment:
         try:
             if model_name == "toxic_bert":
                 result = self._toxic(text[:512], truncation=True)
-                return {"labels": [r["label"] for r in result], "scores": [r["score"] for r in result]}
+                return {
+                    "labels": [r["label"] for r in result],
+                    "scores": [r["score"] for r in result],
+                }
             elif model_name == "sentiment":
                 result = self._sentiment(text[:512], truncation=True)
-                return {"labels": [r["label"] for r in result], "scores": [r["score"] for r in result]}
+                return {
+                    "labels": [r["label"] for r in result],
+                    "scores": [r["score"] for r in result],
+                }
             elif model_name == "nli":
                 nli_kwargs: dict[str, Any] = {}
                 if hypothesis_template:
@@ -136,15 +143,22 @@ class LLMDeployment:
 
     def _generate(self, messages: list[dict], max_tokens: int) -> str:
         prompt = self._tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
         )
         inputs = self._tokenizer(prompt, return_tensors="pt").to("cuda")
         with torch.no_grad():
             output = self._model.generate(
-                **inputs, max_new_tokens=max_tokens, temperature=0.7, top_p=0.9, do_sample=True,
+                **inputs,
+                max_new_tokens=max_tokens,
+                temperature=0.7,
+                top_p=0.9,
+                do_sample=True,
             )
         response = self._tokenizer.decode(
-            output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True,
+            output[0][inputs["input_ids"].shape[1] :],
+            skip_special_tokens=True,
         )
         return response.strip()
 

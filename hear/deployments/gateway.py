@@ -7,13 +7,13 @@ from ray import serve
 from ray.serve.handle import DeploymentHandle
 
 from hear.config import settings
-from hear.core.backend_registry import authenticate_backend, service_key_backend
+from hear.core.backend_registry import BackendRegistry
 from hear.core.category_loader import category_loader
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.core.health import RayHealthSnapshot, ServiceHealth
 from hear.core.keyword_loader import auto_tag_keyword_loader, harm_keyword_loader
 from hear.core.storage import StorageCredentialsExpiringError
-from hear.models.database import init_db
+from hear.models.database import DatabaseRuntime
 from hear.models.schemas import DiscoveryProcessRequest, PipelineRequest, ProcessResponse
 from hear.proto import pipeline_pb2
 from hear.services.categorization.service import CategorizationService
@@ -22,7 +22,7 @@ from hear.services.jobs.submission import (
     SubmissionConflictError,
     SubmissionUnavailableError,
 )
-from hear.services.model_client import RayModelClient, set_model_client
+from hear.services.model_client import ModelClientRegistry, RayModelClient
 from hear.services.moderation.service import ModerationService
 from hear.services.reconstruction.quality import RegenerationQualityAssessor
 from hear.services.reconstruction.service import RegenerationService
@@ -32,7 +32,6 @@ from hear.services.transport.grpc import PipelineGrpcService
 from hear.services.transport.operations import Operations
 
 logger = logging.getLogger(__name__)
-
 http_app = FastAPI(
     title="Hear AI",
     description="Ray Serve ingress for the Hear AI application.",
@@ -62,12 +61,11 @@ class GrpcGateway:
         small_models: DeploymentHandle,
         llm: DeploymentHandle,
     ) -> None:
-        init_db()
+        DatabaseRuntime.init_db()
         category_loader.load()
         discovery_taxonomy_loader.load()
         harm_keyword_loader.load()
         auto_tag_keyword_loader.load()
-
         model_client = RayModelClient(
             {
                 "transcription": transcription,
@@ -76,7 +74,7 @@ class GrpcGateway:
                 "llm": llm,
             }
         )
-        set_model_client(model_client)
+        ModelClientRegistry.set_model_client(model_client)
         operations = Operations(
             ModerationService(),
             CategorizationService(),
@@ -84,10 +82,12 @@ class GrpcGateway:
                 SpeechSynthesizer(model_client, TranscriptionService(model_client)),
                 RegenerationQualityAssessor(),
             ),
-            ServiceHealth(RayHealthSnapshot(
-                settings.GRPC_APPLICATION_NAME,
-                ("transcription", "small_models", "llm", "fish_speech", "magic_clean"),
-            )),
+            ServiceHealth(
+                RayHealthSnapshot(
+                    settings.GRPC_APPLICATION_NAME,
+                    ("transcription", "small_models", "llm", "fish_speech", "magic_clean"),
+                )
+            ),
         )
         self._pipeline = PipelineGrpcService(orchestrator, operations)
         self._submission = JobSubmissionService(orchestrator)
@@ -135,7 +135,7 @@ class GrpcGateway:
         response: Response,
         service_key: str | None = Header(default=None, alias="X-Service-Key"),
     ) -> ProcessResponse:
-        if not authenticate_backend(body.backend_id, service_key):
+        if not BackendRegistry.authenticate_backend(body.backend_id, service_key):
             raise HTTPException(status_code=401, detail="invalid service key")
         try:
             result = await self._submission.submit(body)
@@ -153,19 +153,14 @@ class GrpcGateway:
         response.status_code = 200 if result.replayed else 202
         return ProcessResponse(**result.__dict__)
 
-    @http_app.post(
-        "/discovery",
-        response_model=ProcessResponse,
-        status_code=202,
-        tags=["jobs"],
-    )
+    @http_app.post("/discovery", response_model=ProcessResponse, status_code=202, tags=["jobs"])
     async def process_discovery(
         self,
         body: DiscoveryProcessRequest,
         response: Response,
         service_key: str | None = Header(default=None, alias="X-Service-Key"),
     ) -> ProcessResponse:
-        if not authenticate_backend(body.backend_id, service_key):
+        if not BackendRegistry.authenticate_backend(body.backend_id, service_key):
             raise HTTPException(status_code=401, detail="invalid service key")
         request = PipelineRequest(
             backend_id=body.backend_id,
@@ -193,7 +188,7 @@ class GrpcGateway:
         metadata = dict(context.invocation_metadata() or ()) if context else {}
         supplied = metadata.get("x-api-key", "")
         application = metadata.get("application", "")
-        authenticated_backend = service_key_backend(supplied)
+        authenticated_backend = BackendRegistry.service_key_backend(supplied)
         authenticated = (
             application == settings.GRPC_APPLICATION_NAME
             and authenticated_backend is not None
@@ -224,45 +219,37 @@ class GrpcGateway:
                 job_type=request.job_type or "pipeline",
                 max_tags=request.max_tags or 8,
                 audio_url=request.audio_url if request.HasField("audio_url") else None,
-                edited_transcript=(
-                    request.edited_transcript
-                    if request.HasField("edited_transcript") else None
-                ),
+                edited_transcript=request.edited_transcript
+                if request.HasField("edited_transcript")
+                else None,
                 changes=[
                     {
                         "segment_start": item.segment_start,
                         "segment_end": item.segment_end,
                         "new_text": item.new_text,
-                        "original_text": (
-                            item.original_text if item.HasField("original_text") else None
-                        ),
+                        "original_text": item.original_text
+                        if item.HasField("original_text")
+                        else None,
                     }
                     for item in request.changes
                 ],
-                same_speaker=(
-                    request.same_speaker if request.HasField("same_speaker") else True
-                ),
+                same_speaker=request.same_speaker if request.HasField("same_speaker") else True,
                 grouped=request.grouped,
                 group_id=request.group_id if request.HasField("group_id") else None,
                 kind=request.kind or "track",
                 source=request.source if request.HasField("source") else None,
                 track_count=request.track_count or 1,
                 speed_multipliers=list(request.speed_multipliers),
-                playback_instruction=(
-                    request.playback_instruction
-                    if request.HasField("playback_instruction") else None
-                ),
+                playback_instruction=request.playback_instruction
+                if request.HasField("playback_instruction")
+                else None,
                 user_id=request.user_id if request.HasField("user_id") else "",
                 speech=request.speech if request.HasField("speech") else None,
                 music=request.music if request.HasField("music") else None,
                 background=request.background if request.HasField("background") else None,
-                cut_silence=(
-                    request.cut_silence if request.HasField("cut_silence") else False
-                ),
+                cut_silence=request.cut_silence if request.HasField("cut_silence") else False,
                 type=request.type if request.HasField("type") else None,
-                media_file_id=(
-                    request.media_file_id if request.HasField("media_file_id") else None
-                ),
+                media_file_id=request.media_file_id if request.HasField("media_file_id") else None,
             )
             result = await self._submission.submit(body)
             return pipeline_pb2.SubmitJobResponse(
@@ -330,7 +317,6 @@ class GrpcGateway:
 
     async def ListDiscovery(self, request, grpc_context=None):
         return await self._pipeline.ListDiscovery(request, grpc_context)
-
 
     async def UpdatePlatformSettings(self, request, grpc_context=None):
         return await self._pipeline.UpdatePlatformSettings(request, grpc_context)

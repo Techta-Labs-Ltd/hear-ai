@@ -8,7 +8,7 @@ def test_runpod_workspace_script_prepares_only_local_directories(tmp_path):
     command = (
         f'HEAR_WORKSPACE_ROOT="{tmp_path}"; '
         f'source "{SCRIPT}"; '
-        "printf '%s\\n' \"$MODEL_CACHE_DIR\" \"$HF_HUB_CACHE\" \"$UV_CACHE_DIR\""
+        'printf \'%s\\n\' "$MODEL_CACHE_DIR" "$HF_HUB_CACHE" "$UV_CACHE_DIR"'
     )
 
     result = subprocess.run(

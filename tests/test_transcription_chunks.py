@@ -1,6 +1,6 @@
 import numpy as np
 
-from hear.services.transcription.chunks import (
+from hear.utils.transcription_chunks import (
     adaptive_batch_size,
     append_shifted_result,
     finalize_combined_result,

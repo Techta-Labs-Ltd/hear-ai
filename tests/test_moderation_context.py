@@ -12,28 +12,19 @@ async def test_platform_keyword_without_harmful_context_is_not_flagged(monkeypat
         moderation_module,
         "harm_keyword_loader",
         SimpleNamespace(
-            all_keywords=["shoot"],
-            harm_keywords=[],
-            sync_platform_keywords=lambda _values: None,
+            all_keywords=["shoot"], harm_keywords=[], sync_platform_keywords=lambda _values: None
         ),
     )
     monkeypatch.setattr(
-        moderation_module,
+        moderation_module.ModelClientRegistry,
         "get_model_client",
         lambda: SimpleNamespace(
-            moderate_sync=lambda _text: {
-                "labels": ["toxic", "threat"],
-                "scores": [0.04, 0.02],
-            }
+            moderate_sync=lambda _text: {"labels": ["toxic", "threat"], "scores": [0.04, 0.02]}
         ),
     )
-
     result = await ModerationService().moderate(
-        "We will shoot the music video tomorrow",
-        blocked_keywords=["shoot"],
+        "We will shoot the music video tomorrow", blocked_keywords=["shoot"]
     )
-
     assert result["flagged"] is False
     assert result["intent"] == "safe"
     assert result["blocked_words_found"] == ["shoot"]
-

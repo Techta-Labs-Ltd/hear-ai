@@ -1,18 +1,19 @@
 import asyncio
 import json
 
-_client = None
 
+class ModelClientRegistry:
+    _client = None
 
-def set_model_client(client: "RayModelClient") -> None:
-    global _client
-    _client = client
+    @classmethod
+    def set_model_client(cls, client: "RayModelClient") -> None:
+        cls._client = client
 
-
-def get_model_client() -> "RayModelClient":
-    if _client is None:
-        raise RuntimeError("RayModelClient not initialized")
-    return _client
+    @classmethod
+    def get_model_client(cls) -> "RayModelClient":
+        if cls._client is None:
+            raise RuntimeError("RayModelClient not initialized")
+        return cls._client
 
 
 class RayModelClient:
@@ -46,9 +47,7 @@ class RayModelClient:
             samples, batch_size, language
         )
 
-    async def small_model_infer(
-        self, model_name: str, text: str, candidates=None,
-    ) -> dict:
+    async def small_model_infer(self, model_name: str, text: str, candidates=None) -> dict:
         handle = self._get_handle("small_models")
         request: dict = {"model_name": model_name, "text": text, "candidates": candidates}
         return await handle.remote(request)
@@ -70,12 +69,7 @@ class RayModelClient:
         seed: int | None = None,
     ) -> bytes:
         return await self._get_handle("fish_speech").generate_speech.remote(
-            text,
-            max_new_tokens,
-            references,
-            reference_id,
-            language,
-            seed,
+            text, max_new_tokens, references, reference_id, language, seed
         )
 
     def moderate_sync(self, text: str) -> dict:
@@ -83,9 +77,14 @@ class RayModelClient:
         return self._resolve_sync(self._get_handle("small_models").remote(req))
 
     def nli_sync(
-        self, text: str, candidates: list[str], hypothesis_template: str | None = None,
+        self, text: str, candidates: list[str], hypothesis_template: str | None = None
     ) -> dict:
-        req = {"model_name": "nli", "text": text, "candidates": candidates, "hypothesis_template": hypothesis_template}
+        req = {
+            "model_name": "nli",
+            "text": text,
+            "candidates": candidates,
+            "hypothesis_template": hypothesis_template,
+        }
         return self._resolve_sync(self._get_handle("small_models").remote(req))
 
     def sentiment_sync(self, text: str) -> dict:

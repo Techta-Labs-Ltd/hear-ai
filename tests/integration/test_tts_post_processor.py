@@ -7,11 +7,10 @@ synthetic waveforms to validate each processing stage.
 
 import numpy as np
 import pyloudnorm as pyln
-import torch
 import pytest
+import torch
 
 from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
-
 
 SR = 44100
 
@@ -23,7 +22,9 @@ def _sine(freq: float, duration_s: float, amplitude: float = 0.5, sr: int = SR) 
     return torch.from_numpy(samples).unsqueeze(0)
 
 
-def _composite_sine(freqs_amps: list[tuple[float, float]], duration_s: float, sr: int = SR) -> torch.Tensor:
+def _composite_sine(
+    freqs_amps: list[tuple[float, float]], duration_s: float, sr: int = SR
+) -> torch.Tensor:
     """Generate a composite of multiple sine waves."""
     t = np.linspace(0, duration_s, int(sr * duration_s), endpoint=False)
     samples = np.zeros_like(t, dtype=np.float32)
@@ -58,8 +59,8 @@ def _band_energy(waveform: torch.Tensor, sr: int, low: float, high: float) -> fl
 # Silence stripping tests
 # ---------------------------------------------------------------------------
 
-class TestStripTTSSilence:
 
+class TestStripTTSSilence:
     def test_removes_leading_trailing_silence(self):
         """0.5s silence + 1s tone + 0.5s silence -> silence removed, shorter."""
         tone = _sine(440, 1.0, 0.5)
@@ -71,7 +72,9 @@ class TestStripTTSSilence:
 
         original_dur = waveform.shape[1] / SR
         result_dur = result.shape[1] / SR
-        assert result_dur < original_dur, f"Duration should shrink: {result_dur:.2f}s vs {original_dur:.2f}s"
+        assert result_dur < original_dur, (
+            f"Duration should shrink: {result_dur:.2f}s vs {original_dur:.2f}s"
+        )
         assert result_dur >= 0.8, f"Should keep most of the tone: {result_dur:.2f}s"
 
     def test_preserves_speech_only(self):
@@ -100,8 +103,8 @@ class TestStripTTSSilence:
 # Loudness matching tests
 # ---------------------------------------------------------------------------
 
-class TestMatchLoudness:
 
+class TestMatchLoudness:
     def test_loudness_matched_within_1db(self):
         """After matching, TTS LUFS should be within 1 dB of reference."""
         ref = _sine(440, 1.0, 0.5)
@@ -154,8 +157,8 @@ class TestMatchLoudness:
 # Spectral envelope matching tests
 # ---------------------------------------------------------------------------
 
-class TestMatchSpectralEnvelope:
 
+class TestMatchSpectralEnvelope:
     def test_low_band_boosted_when_ref_has_more_bass(self):
         """Reference has boosted low freq; TTS should get low-band gain."""
         ref = _composite_sine([(100, 0.8), (1000, 0.2), (5000, 0.1)], duration_s=1.0)
@@ -193,16 +196,19 @@ class TestMatchSpectralEnvelope:
 # Full process() pipeline tests
 # ---------------------------------------------------------------------------
 
-class TestProcessPipeline:
 
+class TestProcessPipeline:
     def test_process_strips_silence_and_matches_loudness(self):
         """Full pipeline: silence stripped, loudness matched."""
         ref = _sine(440, 1.0, 0.5)
-        tts = torch.cat([
-            _silence(0.3),
-            _sine(440, 0.8, 0.1),  # quiet tone
-            _silence(0.3),
-        ], dim=1)
+        tts = torch.cat(
+            [
+                _silence(0.3),
+                _sine(440, 0.8, 0.1),  # quiet tone
+                _silence(0.3),
+            ],
+            dim=1,
+        )
 
         result = TTSPostProcessor.process(tts, ref, SR)
 
@@ -246,8 +252,8 @@ class TestProcessPipeline:
 # Integration with splice logic test
 # ---------------------------------------------------------------------------
 
-class TestIntegrationWithSplice:
 
+class TestIntegrationWithSplice:
     def test_silence_stripped_tts_splices_correctly(self):
         """Verify silence-stripped TTS output works with the _splice_segment logic."""
         TARGET_SR = 44100
@@ -261,11 +267,14 @@ class TestIntegrationWithSplice:
         end_sample = int(1.5 * TARGET_SR)
 
         # Create TTS output with surrounding silence
-        tts_with_silence = torch.cat([
-            _silence(0.2),
-            _sine(600, 0.5, 0.4),
-            _silence(0.2),
-        ], dim=1)
+        tts_with_silence = torch.cat(
+            [
+                _silence(0.2),
+                _sine(600, 0.5, 0.4),
+                _silence(0.2),
+            ],
+            dim=1,
+        )
 
         # Apply post-processing to clean it up
         ref_segment = original[:, start_sample:end_sample]
@@ -286,8 +295,7 @@ class TestIntegrationWithSplice:
             fade_out = torch.linspace(1.0, 0.0, cross_len).unsqueeze(0)
             fade_in = torch.linspace(0.0, 1.0, cross_len).unsqueeze(0)
             before[:, -cross_len:] = (
-                before[:, -cross_len:] * fade_out
-                + tts_clean[:, :cross_len] * fade_in
+                before[:, -cross_len:] * fade_out + tts_clean[:, :cross_len] * fade_in
             )
 
         if after.shape[1] >= cross_len and cross_len > 0:
@@ -295,8 +303,7 @@ class TestIntegrationWithSplice:
             tail_out = torch.linspace(1.0, 0.0, cross_len).unsqueeze(0)
             tail_in = torch.linspace(0.0, 1.0, cross_len).unsqueeze(0)
             tts_clean_tail[:, -cross_len:] = (
-                tts_clean_tail[:, -cross_len:] * tail_out
-                + after[:, :cross_len] * tail_in
+                tts_clean_tail[:, -cross_len:] * tail_out + after[:, :cross_len] * tail_in
             )
             after = after[:, cross_len:]
             spliced = torch.cat([before, tts_clean_tail[:, cross_len:], after], dim=1)
@@ -305,7 +312,9 @@ class TestIntegrationWithSplice:
 
         # Verify the spliced result
         assert spliced.shape[1] > 0, "Spliced result should not be empty"
-        assert spliced.abs().max().item() <= 1.0, f"Spliced result should not clip: {spliced.abs().max().item():.3f}"
+        assert spliced.abs().max().item() <= 1.0, (
+            f"Spliced result should not clip: {spliced.abs().max().item():.3f}"
+        )
 
         # Verify no NaN or Inf
         assert torch.isfinite(spliced).all().item(), "Spliced result should be finite"

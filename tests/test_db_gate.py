@@ -4,7 +4,7 @@ import threading
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from hear.core.db_gate import commit_with_retry
+from hear.core.db_gate import DatabaseCommitter
 
 
 class _SerializationFailure(Exception):
@@ -22,11 +22,7 @@ class _Session:
     def commit(self) -> None:
         self.commit_calls += 1
         if self.fail_first_commit and self.commit_calls == 1:
-            raise OperationalError(
-                "COMMIT",
-                {},
-                _SerializationFailure("serialization failure"),
-            )
+            raise OperationalError("COMMIT", {}, _SerializationFailure("serialization failure"))
         self.persisted.extend(self.pending)
         self.pending.clear()
 
@@ -37,9 +33,7 @@ class _Session:
 
 def test_commit_with_retry_commits_staged_mutations() -> None:
     session = _Session()
-
-    asyncio.run(commit_with_retry(session))
-
+    asyncio.run(DatabaseCommitter.commit_with_retry(session))
     assert session.commit_calls == 1
     assert session.rollback_calls == 0
     assert session.persisted == ["mutation"]
@@ -47,10 +41,8 @@ def test_commit_with_retry_commits_staged_mutations() -> None:
 
 def test_commit_with_retry_never_commits_empty_transaction_after_transient_failure() -> None:
     session = _Session(fail_first_commit=True)
-
     with pytest.raises(OperationalError, match="serialization failure"):
-        asyncio.run(commit_with_retry(session, retries=3))
-
+        asyncio.run(DatabaseCommitter.commit_with_retry(session, retries=3))
     assert session.commit_calls == 1
     assert session.rollback_calls == 1
     assert session.pending == []
@@ -69,16 +61,14 @@ async def _exercise_commit_cancellation_waits_for_dbapi_worker() -> None:
         original_commit()
 
     session.commit = delayed_commit
-    task = asyncio.create_task(commit_with_retry(session))
+    task = asyncio.create_task(DatabaseCommitter.commit_with_retry(session))
     assert await asyncio.to_thread(started.wait, 5)
-
     task.cancel()
     await asyncio.sleep(0)
     assert not task.done()
     release.set()
     with pytest.raises(asyncio.CancelledError):
         await task
-
     assert session.commit_calls == 1
     assert session.persisted == ["mutation"]
 

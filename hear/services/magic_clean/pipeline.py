@@ -106,15 +106,19 @@ class MagicCleanPipeline:
 
     @torch.inference_mode()
     def process_chunked(
-        self, waveform: torch.Tensor, sr: int, mode: ContentMode,
-        levels: StemLevels | None = None, cut_silence: bool = False, *,
-        chunk_seconds: float = 60.0, overlap_seconds: float = 2.0,
+        self,
+        waveform: torch.Tensor,
+        sr: int,
+        mode: ContentMode,
+        levels: StemLevels | None = None,
+        cut_silence: bool = False,
+        *,
+        chunk_seconds: float = 60.0,
+        overlap_seconds: float = 2.0,
     ) -> torch.Tensor:
         """Process context windows, retain their cores, then master exactly once."""
         self._validate_waveform(waveform, sr)
-        chunk_samples, overlap_samples = self._chunk_sizes(
-            sr, chunk_seconds, overlap_seconds
-        )
+        chunk_samples, overlap_samples = self._chunk_sizes(sr, chunk_seconds, overlap_seconds)
         if waveform.shape[1] <= chunk_samples:
             return self.process(waveform, sr, mode, levels, cut_silence)
 
@@ -150,9 +154,7 @@ class MagicCleanPipeline:
         )
 
     @staticmethod
-    def _chunk_sizes(
-        sr: int, chunk_seconds: float, overlap_seconds: float
-    ) -> tuple[int, int]:
+    def _chunk_sizes(sr: int, chunk_seconds: float, overlap_seconds: float) -> tuple[int, int]:
         if sr <= 0 or chunk_seconds <= 0 or overlap_seconds < 0:
             raise ValueError("sample rate and chunk duration must be positive")
         chunk_samples = max(1, round(sr * chunk_seconds))
@@ -179,11 +181,7 @@ class MagicCleanPipeline:
         speech = stems["vocals"]
         speech_reference = speech
         music_stems = [stem for name, stem in stems.items() if name != "vocals"]
-        music = (
-            torch.stack(music_stems).sum(dim=0)
-            if music_stems
-            else torch.zeros_like(waveform)
-        )
+        music = torch.stack(music_stems).sum(dim=0) if music_stems else torch.zeros_like(waveform)
         self._validate_processed(speech, waveform.shape)
         self._validate_processed(music, waveform.shape)
         background = waveform - speech - music
@@ -301,20 +299,16 @@ class MagicCleanPipeline:
         )
         active_samples = source_frames.abs() >= SILENCE_RMS_THRESHOLD
         severely_attenuated_samples = active_samples & (
-            speech_frames.abs()
-            < source_frames.abs() * self.SEVERE_SAMPLE_ATTENUATION_RATIO
+            speech_frames.abs() < source_frames.abs() * self.SEVERE_SAMPLE_ATTENUATION_RATIO
         )
         active_sample_count = active_samples.sum(dim=2)
         severely_attenuated_fraction = severely_attenuated_samples.sum(
             dim=2
         ) / active_sample_count.clamp(min=1)
         fragmented = (active_sample_count > 0) & (
-            severely_attenuated_fraction
-            >= self.MAX_ERASED_ACTIVE_SAMPLE_FRACTION
+            severely_attenuated_fraction >= self.MAX_ERASED_ACTIVE_SAMPLE_FRACTION
         )
-        collapsed = source_active & (
-            (speech_rms < source_rms * 0.25) | fragmented
-        )
+        collapsed = source_active & ((speech_rms < source_rms * 0.25) | fragmented)
         restored = speech_frames * (1.0 - dry_mix) + source_frames * dry_mix
         protected = torch.where(
             collapsed[:, :, None],

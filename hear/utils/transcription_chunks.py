@@ -51,6 +51,7 @@ def append_shifted_result(
         segment["id"] = len(combined["segments"])
         combined["segments"].append(segment)
 
+
 def finalize_combined_result(combined: dict[str, Any]) -> dict[str, Any]:
     segments = combined.get("segments") or []
     combined["text"] = " ".join(

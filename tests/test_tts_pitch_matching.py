@@ -60,7 +60,7 @@ def test_boundary_pitch_match_corrects_joins_without_shifting_middle():
         SAMPLE_RATE,
     )
     middle_pitch = TTSPostProcessor._estimate_median_pitch_hz(
-        matched[:, 2 * SAMPLE_RATE:3 * SAMPLE_RATE],
+        matched[:, 2 * SAMPLE_RATE : 3 * SAMPLE_RATE],
         SAMPLE_RATE,
     )
     closing_pitch = TTSPostProcessor._estimate_median_pitch_hz(
@@ -258,7 +258,7 @@ def test_post_processor_does_not_compound_pitch_shift_at_boundaries(monkeypatch)
         SAMPLE_RATE,
     )
     middle_pitch = TTSPostProcessor._estimate_median_pitch_hz(
-        result[:, SAMPLE_RATE:2 * SAMPLE_RATE],
+        result[:, SAMPLE_RATE : 2 * SAMPLE_RATE],
         SAMPLE_RATE,
     )
 

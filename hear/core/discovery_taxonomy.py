@@ -3,7 +3,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from hear.models.database import SessionLocal, TaxonomyPath
+from hear.models.database import DatabaseRuntime, TaxonomyPath
 
 
 @dataclass
@@ -12,34 +12,36 @@ class DiscoveryTaxonomyData:
     path_lookup: dict[str, str] = field(default_factory=dict)
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").strip().lower())
+class TaxonomyLabels:
+    @staticmethod
+    def _norm(s: str) -> str:
+        return re.sub("\\s+", " ", (s or "").strip().lower())
 
+    @staticmethod
+    def _hierarchical_segments(key: str) -> list[str]:
+        return [TaxonomyLabels._norm(part) for part in (key or "").split(" > ") if part.strip()]
 
-def _hierarchical_segments(key: str) -> list[str]:
-    return [_norm(part) for part in (key or "").split(" > ") if part.strip()]
-
-
-def _topic_matches_taxonomy_path(topic: str, key: str) -> bool:
-    """Avoid matching generic words (e.g. technology) inside longer path segments."""
-    nt = _norm(topic)
-    if not nt or len(nt) < 3:
-        return False
-    if nt == key:
-        return True
-    if " > " in key:
-        segments = _hierarchical_segments(key)
-        if nt in segments:
+    @staticmethod
+    def _topic_matches_taxonomy_path(topic: str, key: str) -> bool:
+        """Avoid matching generic words (e.g. technology) inside longer path segments."""
+        nt = TaxonomyLabels._norm(topic)
+        if not nt or len(nt) < 3:
+            return False
+        if nt == key:
             return True
-        if len(nt) >= 5 and any(nt == seg for seg in segments):
+        if " > " in key:
+            segments = TaxonomyLabels._hierarchical_segments(key)
+            if nt in segments:
+                return True
+            if len(nt) >= 5 and any(nt == seg for seg in segments):
+                return True
+            if any(len(seg) >= 5 and seg in nt for seg in segments):
+                return True
+            return False
+        if nt in key or key in nt:
             return True
-        if any(len(seg) >= 5 and seg in nt for seg in segments):
-            return True
-        return False
-    if nt in key or key in nt:
-        return True
-    tokens = [t for t in re.findall(r"[a-z]{4,}", key)]
-    return bool(tokens) and sum(1 for t in tokens if t in nt) >= min(2, len(tokens))
+        tokens = [t for t in re.findall("[a-z]{4,}", key)]
+        return bool(tokens) and sum(1 for t in tokens if t in nt) >= min(2, len(tokens))
 
 
 class DiscoveryTaxonomyLoader:
@@ -71,12 +73,14 @@ class DiscoveryTaxonomyLoader:
                     elif section == "TAXONOMY":
                         paths.append(line)
         else:
-            db = SessionLocal()
+            db = DatabaseRuntime.SessionLocal()
             try:
-                paths = [row.path for row in db.query(TaxonomyPath).order_by(TaxonomyPath.path).all()]
+                paths = [
+                    row.path for row in db.query(TaxonomyPath).order_by(TaxonomyPath.path).all()
+                ]
             finally:
                 db.close()
-        lookup = {_norm(p): p for p in paths}
+        lookup = {TaxonomyLabels._norm(p): p for p in paths}
         with self._lock:
             self._data = DiscoveryTaxonomyData(paths=paths, path_lookup=lookup)
 
@@ -91,27 +95,27 @@ class DiscoveryTaxonomyLoader:
         matched: list[str] = []
         seen: set[str] = set()
         for topic in topics:
-            nt = _norm(topic)
+            nt = TaxonomyLabels._norm(topic)
             if not nt:
                 continue
             for key, path in self.data.path_lookup.items():
                 if key in seen:
                     continue
-                if _topic_matches_taxonomy_path(nt, key):
+                if TaxonomyLabels._topic_matches_taxonomy_path(nt, key):
                     matched.append(path)
                     seen.add(key)
         return matched[:12]
 
     def canonicalize_path(self, path: str) -> str:
-        cleaned = re.sub(r"\s+", " ", (path or "").strip())
+        cleaned = re.sub("\\s+", " ", (path or "").strip())
         if not cleaned:
             return ""
-        key = _norm(cleaned)
+        key = TaxonomyLabels._norm(cleaned)
         hit = self.data.path_lookup.get(key)
         if hit:
             return hit
         for k, canonical in self.data.path_lookup.items():
-            if _topic_matches_taxonomy_path(key, k):
+            if TaxonomyLabels._topic_matches_taxonomy_path(key, k):
                 return canonical
         return cleaned
 
@@ -119,11 +123,11 @@ class DiscoveryTaxonomyLoader:
         """Normalized segment and full-path labels — not valid human speaker names."""
         terms: set[str] = set()
         for path in self.data.paths:
-            terms.add(_norm(path))
+            terms.add(TaxonomyLabels._norm(path))
             for segment in path.split(" > "):
                 seg = segment.strip()
                 if seg:
-                    terms.add(_norm(seg))
+                    terms.add(TaxonomyLabels._norm(seg))
         return frozenset(terms)
 
 

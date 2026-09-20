@@ -13,8 +13,8 @@ from whisperx.asr_qwen import load_model as load_qwen_asr_model
 
 from hear.config import settings
 from hear.core.blocking import NativeWorker
-from hear.core.hear_temp import hear_temp_directory
-from hear.services.transcription.chunks import (
+from hear.core.hear_temp import TempWorkspace
+from hear.utils.transcription_chunks import (
     adaptive_batch_size,
     append_shifted_result,
     finalize_combined_result,
@@ -23,9 +23,10 @@ from hear.services.transcription.chunks import (
 
 logger = logging.getLogger(__name__)
 
+
 @serve.deployment(
     name="transcription",
-    ray_actor_options={"num_gpus": 0.20, "num_cpus": 0.3},
+    ray_actor_options={"num_gpus": 0.2, "num_cpus": 0.3},
     autoscaling_config={
         "min_replicas": 1,
         "max_replicas": 1,
@@ -59,17 +60,12 @@ class TranscriptionDeployment:
             qwen_forced_aligner=settings.ALIGNER_MODEL_PATH,
             max_inference_batch_size=settings.WHISPER_BATCH_SIZE,
         )
-        # qwen-asr delegates generation to its nested thinker model. Its
-        # GenerationConfig does not inherit the repository's pad token, so
-        # Transformers otherwise logs the same fallback warning for every
-        # inference batch. 151643 is the model's declared padding/EOS token.
         qwen_wrapper = getattr(self._asr, "model", None)
         backend_model = getattr(qwen_wrapper, "model", None)
         thinker = getattr(backend_model, "thinker", None)
         generation_config = getattr(thinker, "generation_config", None)
         if generation_config is not None and generation_config.pad_token_id is None:
             generation_config.pad_token_id = 151643
-
         logger.info("WhisperX Qwen3-ASR + Qwen3 ForcedAligner ready")
 
     async def transcribe(self, audio_bytes: bytes, batch_size: int) -> str:
@@ -100,7 +96,7 @@ class TranscriptionDeployment:
 
     def _transcribe(self, audio_bytes: bytes, batch_size: int) -> str:
         with tempfile.NamedTemporaryFile(
-            suffix=".wav", delete=False, dir=hear_temp_directory()
+            suffix=".wav", delete=False, dir=TempWorkspace.hear_temp_directory()
         ) as f:
             f.write(audio_bytes)
             tmp_path = f.name
@@ -108,9 +104,7 @@ class TranscriptionDeployment:
             audio = whisperx.load_audio(tmp_path)
             duration_seconds = len(audio) / 16000
             effective_batch_size = adaptive_batch_size(
-                duration_seconds,
-                batch_size,
-                settings.WHISPER_LONG_AUDIO_BATCH_SIZE,
+                duration_seconds, batch_size, settings.WHISPER_LONG_AUDIO_BATCH_SIZE
             )
             combined: dict[str, Any] = {
                 "segments": [],
@@ -118,21 +112,13 @@ class TranscriptionDeployment:
                 "audio_duration": duration_seconds,
             }
             for offset_seconds, chunk in iter_audio_chunks(
-                audio,
-                sample_rate=16000,
-                chunk_seconds=settings.WHISPER_CHUNK_SECONDS,
+                audio, sample_rate=16000, chunk_seconds=settings.WHISPER_CHUNK_SECONDS
             ):
                 with torch.no_grad():
                     result = self._asr.transcribe(
-                        chunk,
-                        batch_size=effective_batch_size,
-                        language="en",
+                        chunk, batch_size=effective_batch_size, language="en"
                     )
-                append_shifted_result(
-                    combined,
-                    result,
-                    offset_seconds=offset_seconds,
-                )
+                append_shifted_result(combined, result, offset_seconds=offset_seconds)
                 del result
                 torch.cuda.empty_cache()
             return json.dumps(finalize_combined_result(combined))

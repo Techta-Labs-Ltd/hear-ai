@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+
 class Settings(BaseSettings):
     RAY_ADDRESS: str = "local"
     RAY_DASHBOARD_HOST: str = "127.0.0.1"
@@ -106,5 +107,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
 
 settings = Settings()

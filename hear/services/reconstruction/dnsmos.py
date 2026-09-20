@@ -44,21 +44,17 @@ class DNSMOSScorer:
         try:
             waveform = audio.data.float()
             if audio.sample_rate != self.SR:
-                waveform = torchaudio.functional.resample(
-                    waveform, audio.sample_rate, self.SR
-                )
+                waveform = torchaudio.functional.resample(waveform, audio.sample_rate, self.SR)
             signal = waveform.squeeze(0).cpu().numpy().astype(np.float32)
             hop = int(self.HOP_SECONDS * self.SR)
             scores = []
             for start in range(0, len(signal), hop):
-                segment = signal[start:start + self.WINDOW_SAMPLES]
+                segment = signal[start : start + self.WINDOW_SAMPLES]
                 if len(segment) < self.WINDOW_SAMPLES:
                     break
                 with self._lock:
                     input_name = self._session.get_inputs()[0].name
-                    outputs = self._session.run(
-                        None, {input_name: segment.copy().reshape(1, -1)}
-                    )
+                    outputs = self._session.run(None, {input_name: segment.copy().reshape(1, -1)})
                 output_index = 2 if len(outputs) >= 3 else 0
                 scores.append(float(outputs[output_index][0][0]))
             return float(np.mean(scores)) if scores else 0.0

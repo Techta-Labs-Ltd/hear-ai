@@ -9,16 +9,11 @@ from functools import partial
 import torch
 
 from hear.config import settings
-from hear.core.blocking import (
-    run_blocking_to_completion as _run_blocking_to_completion,
-)
-from hear.core.hear_temp import (
-    drop_temp_standalone,
-    hear_temp_job_dir,
-    hear_temp_standalone_dir,
-)
+from hear.core.blocking import AsyncCompletion
+from hear.core.hear_temp import TempWorkspace
+from hear.core.noise import NoiseReducer
 from hear.core.storage import B2Storage
-from hear.services.magic_clean.lineage import magic_clean_artifact_hashes
+from hear.services.magic_clean.lineage import MagicCleanLineageResolver
 from hear.services.magic_clean.models import (
     DEFAULT_STEM_LEVELS,
     ContentMode,
@@ -28,13 +23,13 @@ from hear.services.magic_clean.models import (
 from hear.services.magic_clean.pipeline import MagicCleanPipeline
 from hear.services.magic_clean.processing.dynamics import DynamicsProcessor
 from hear.services.magic_clean.processing.mossformer import MossFormer2Enhancer
-from hear.core.noise import NoiseReducer
 from hear.services.magic_clean.processing.quality import QualityMetrics
 from hear.services.magic_clean.processing.silence import SilenceProcessor
 from hear.services.magic_clean.processing.speech import SpeechProcessor
 from hear.services.magic_clean.processing.stems import StemSeparator
-from hear.services.magic_clean.processing.validation import validate_delivered_audio
-from hear.services.magic_clean.streaming import clean_file_streaming
+from hear.services.magic_clean.processing.validation import AudioValidator
+from hear.services.magic_clean.streaming import StreamingAudioCleaner
+from hear.utils.timing import elapsed_seconds
 
 
 class MagicCleanAudioEnhancer:
@@ -62,9 +57,7 @@ class MagicCleanAudioEnhancer:
 
     def load(self) -> None:
         self._pipeline.load(
-            settings.DEMUCS_MODEL,
-            settings.MOSSFORMER_MODEL_PATH,
-            settings.DEMUCS_MODEL_PATH,
+            settings.DEMUCS_MODEL, settings.MOSSFORMER_MODEL_PATH, settings.DEMUCS_MODEL_PATH
         )
         self._loaded = True
 
@@ -94,45 +87,33 @@ class MagicCleanAudioEnhancer:
             raise RuntimeError("Magic Clean is not loaded")
         if storage is None:
             raise ValueError("missing_storage_context")
-
         stem_levels = self._stem_levels(speech, music, background)
         selected_mode = ContentMode.SPEECH if mode == ContentMode.AUTO else mode
         started_total = time.perf_counter()
-
         started = time.perf_counter()
-        source_file_sha256, source_pcm_sha256 = await _run_blocking_to_completion(
-            partial(magic_clean_artifact_hashes, input_path)
+        source_file_sha256, source_pcm_sha256 = await AsyncCompletion.run_blocking_to_completion(
+            partial(MagicCleanLineageResolver.magic_clean_artifact_hashes, input_path)
         )
-        if (
-            expected_source_file_sha256
-            and source_file_sha256 != expected_source_file_sha256
-        ):
+        if expected_source_file_sha256 and source_file_sha256 != expected_source_file_sha256:
             raise RuntimeError("Magic Clean actor downloaded different source bytes")
-        if (
-            expected_source_pcm_sha256
-            and source_pcm_sha256 != expected_source_pcm_sha256
-        ):
+        if expected_source_pcm_sha256 and source_pcm_sha256 != expected_source_pcm_sha256:
             raise RuntimeError("Magic Clean actor downloaded different decoded audio")
-        source_hash_seconds = _elapsed(started)
-
+        source_hash_seconds = elapsed_seconds(started)
         async with self._gpu_lock:
             job_scoped_output = bool(ai_job_id and ai_run_id)
             output_dir = (
-                hear_temp_job_dir(ai_job_id, ai_run_id)
+                TempWorkspace.hear_temp_job_dir(ai_job_id, ai_run_id)
                 if ai_job_id and ai_run_id
-                else hear_temp_standalone_dir("enhance_output")
+                else TempWorkspace.hear_temp_standalone_dir("enhance_output")
             )
             output_path = os.path.join(output_dir, "enhance_output.mp3")
-            validation_reference_path = os.path.join(
-                output_dir,
-                "enhance_reference.wav",
-            )
+            validation_reference_path = os.path.join(output_dir, "enhance_reference.wav")
             uploaded_key: str | None = None
             processing_cancelled = threading.Event()
             try:
-                clean_result = await _run_blocking_to_completion(
+                clean_result = await AsyncCompletion.run_blocking_to_completion(
                     partial(
-                        clean_file_streaming,
+                        StreamingAudioCleaner.clean_file_streaming,
                         self._pipeline,
                         input_path,
                         output_path,
@@ -148,38 +129,30 @@ class MagicCleanAudioEnhancer:
                     ),
                     on_cancel=processing_cancelled.set,
                 )
-
                 started = time.perf_counter()
-                delivered = await _run_blocking_to_completion(
+                delivered = await AsyncCompletion.run_blocking_to_completion(
                     partial(
-                        validate_delivered_audio,
+                        AudioValidator.validate_delivered_audio,
                         input_path,
                         output_path,
                         cut_silence=cut_silence,
                         retained_reference_path=validation_reference_path,
-                        # If any component is intentionally removed, a source
-                        # channel containing only that component may correctly
-                        # become silent. Full source/channel-retention gates
-                        # apply only when every component remains requested.
-                        expect_audible=self._preserves_all_source_components(
-                            stem_levels
-                        ),
+                        expect_audible=self._preserves_all_source_components(stem_levels),
                         metrics=self._metrics,
                     )
                 )
-                validation_seconds = _elapsed(started)
-
+                validation_seconds = elapsed_seconds(started)
                 started = time.perf_counter()
-                delivered_file_sha256, delivered_pcm_sha256 = (
-                    await _run_blocking_to_completion(
-                        partial(magic_clean_artifact_hashes, output_path)
-                    )
+                (
+                    delivered_file_sha256,
+                    delivered_pcm_sha256,
+                ) = await AsyncCompletion.run_blocking_to_completion(
+                    partial(MagicCleanLineageResolver.magic_clean_artifact_hashes, output_path)
                 )
-                hashing_seconds = _elapsed(started)
-
+                hashing_seconds = elapsed_seconds(started)
                 uploaded_key = storage.key("enhanced", f"{job_id}.mp3")
                 started = time.perf_counter()
-                enhanced_url = await _run_blocking_to_completion(
+                enhanced_url = await AsyncCompletion.run_blocking_to_completion(
                     partial(
                         storage.upload_file,
                         output_path,
@@ -188,15 +161,14 @@ class MagicCleanAudioEnhancer:
                         checksum_sha256=delivered_file_sha256,
                     )
                 )
-                upload_seconds = _elapsed(started)
-
+                upload_seconds = elapsed_seconds(started)
                 stage_times = {
                     **clean_result.stage_times,
                     "hash_source": source_hash_seconds,
                     "validate_delivery": validation_seconds,
                     "hash_artifacts": hashing_seconds,
                     "upload": upload_seconds,
-                    "total": _elapsed(started_total),
+                    "total": elapsed_seconds(started_total),
                 }
                 return EnhancementResult(
                     b2_key=uploaded_key,
@@ -219,42 +191,27 @@ class MagicCleanAudioEnhancer:
             except BaseException:
                 if uploaded_key is not None:
                     try:
-                        await _run_blocking_to_completion(
+                        await AsyncCompletion.run_blocking_to_completion(
                             partial(storage.delete_object, uploaded_key)
                         )
                     except BaseException:
                         pass
                 raise
             finally:
-                drop_temp_standalone(output_path)
-                drop_temp_standalone(validation_reference_path)
+                TempWorkspace.drop_temp_standalone(output_path)
+                TempWorkspace.drop_temp_standalone(validation_reference_path)
                 if not job_scoped_output:
-                    drop_temp_standalone(output_dir)
+                    TempWorkspace.drop_temp_standalone(output_dir)
 
     @staticmethod
     def _preserves_all_source_components(levels: StemLevels) -> bool:
-        return all(
-            value > 0
-            for value in (levels.speech, levels.music, levels.background)
-        )
+        return all(value > 0 for value in (levels.speech, levels.music, levels.background))
 
     @staticmethod
-    def _stem_levels(
-        speech: int | None,
-        music: int | None,
-        background: int | None,
-    ) -> StemLevels:
+    def _stem_levels(speech: int | None, music: int | None, background: int | None) -> StemLevels:
         supplied = (speech, music, background)
         if all(value is None for value in supplied):
             return DEFAULT_STEM_LEVELS
         if speech is None or music is None or background is None:
             raise ValueError("speech, music, and background must be supplied together")
-        return StemLevels(
-            speech=int(speech),
-            music=int(music),
-            background=int(background),
-        )
-
-
-def _elapsed(started: float) -> float:
-    return round(time.perf_counter() - started, 3)
+        return StemLevels(speech=int(speech), music=int(music), background=int(background))

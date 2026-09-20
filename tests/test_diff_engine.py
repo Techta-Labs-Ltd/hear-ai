@@ -5,17 +5,15 @@ merging, and the edit_segments_to_changes conversion helper.  No GPU or
 network access required.
 """
 
-import pytest
-
-from hear.services.reconstruction.diff import (
+from hear.utils.transcript_diff import (
     EditSegment,
-    _WordToken,
     _compute_edited_text,
     _edit_distance,
     _expand_ranges,
     _flatten_words,
     _merge_overlapping_ranges,
     _normalize_text,
+    _WordToken,
     compute_edit_segments,
     correct_whisper_mishearings,
     edit_segments_to_changes,
@@ -26,7 +24,15 @@ from hear.services.reconstruction.diff import (
 def _make_word_segments(pairs: list[tuple[str, float, float]]) -> list[dict]:
     """Helper to build word_segments from (word, start, end) tuples."""
     words = [{"word": w, "start": s, "end": e, "prob": 0.95} for w, s, e in pairs]
-    return [{"id": 0, "start": words[0]["start"], "end": words[-1]["end"], "text": " ".join(w for w, _, _ in pairs), "words": words}]
+    return [
+        {
+            "id": 0,
+            "start": words[0]["start"],
+            "end": words[-1]["end"],
+            "text": " ".join(w for w, _, _ in pairs),
+            "words": words,
+        }
+    ]
 
 
 def _make_multi_segment(segments: list[list[tuple[str, float, float]]]) -> list[dict]:
@@ -34,13 +40,15 @@ def _make_multi_segment(segments: list[list[tuple[str, float, float]]]) -> list[
     result = []
     for idx, pairs in enumerate(segments):
         words = [{"word": w, "start": s, "end": e, "prob": 0.95} for w, s, e in pairs]
-        result.append({
-            "id": idx,
-            "start": words[0]["start"],
-            "end": words[-1]["end"],
-            "text": " ".join(w for w, _, _ in pairs),
-            "words": words,
-        })
+        result.append(
+            {
+                "id": idx,
+                "start": words[0]["start"],
+                "end": words[-1]["end"],
+                "text": " ".join(w for w, _, _ in pairs),
+                "words": words,
+            }
+        )
     return result
 
 
@@ -53,10 +61,12 @@ class TestFlattenWords:
         assert flat[1].word == "world"
 
     def test_multi_segment(self):
-        segs = _make_multi_segment([
-            [("hello", 0.0, 0.5)],
-            [("world", 1.0, 1.5)],
-        ])
+        segs = _make_multi_segment(
+            [
+                [("hello", 0.0, 0.5)],
+                [("world", 1.0, 1.5)],
+            ]
+        )
         flat = _flatten_words(segs)
         assert len(flat) == 2
         assert flat[0].start == 0.0
@@ -135,13 +145,15 @@ class TestComputeEditSegments:
         assert result == []
 
     def test_single_word_change(self):
-        segs = _make_word_segments([
-            ("today", 0.0, 0.4),
-            ("we", 0.4, 0.6),
-            ("sold", 0.6, 0.9),
-            ("fifteen", 0.9, 1.4),
-            ("products", 1.4, 1.9),
-        ])
+        segs = _make_word_segments(
+            [
+                ("today", 0.0, 0.4),
+                ("we", 0.4, 0.6),
+                ("sold", 0.6, 0.9),
+                ("fifteen", 0.9, 1.4),
+                ("products", 1.4, 1.9),
+            ]
+        )
         result = compute_edit_segments(
             "today we sold fifteen products",
             "today we sold twenty products",
@@ -153,10 +165,12 @@ class TestComputeEditSegments:
         assert any("twenty" in seg.edited_text for seg in result)
 
     def test_insertion(self):
-        segs = _make_word_segments([
-            ("hello", 0.0, 0.5),
-            ("world", 0.5, 1.0),
-        ])
+        segs = _make_word_segments(
+            [
+                ("hello", 0.0, 0.5),
+                ("world", 0.5, 1.0),
+            ]
+        )
         result = compute_edit_segments(
             "hello world",
             "hello beautiful world",
@@ -167,11 +181,13 @@ class TestComputeEditSegments:
         assert any("beautiful" in seg.edited_text for seg in result)
 
     def test_deletion(self):
-        segs = _make_word_segments([
-            ("hello", 0.0, 0.5),
-            ("beautiful", 0.5, 1.0),
-            ("world", 1.0, 1.5),
-        ])
+        segs = _make_word_segments(
+            [
+                ("hello", 0.0, 0.5),
+                ("beautiful", 0.5, 1.0),
+                ("world", 1.0, 1.5),
+            ]
+        )
         result = compute_edit_segments(
             "hello beautiful world",
             "hello world",
@@ -192,13 +208,15 @@ class TestComputeEditSegments:
         assert result[0].edited_text == "edited text"
 
     def test_expansion_context(self):
-        segs = _make_word_segments([
-            ("the", 0.0, 0.2),
-            ("quick", 0.2, 0.5),
-            ("brown", 0.5, 0.8),
-            ("fox", 0.8, 1.1),
-            ("jumps", 1.1, 1.4),
-        ])
+        segs = _make_word_segments(
+            [
+                ("the", 0.0, 0.2),
+                ("quick", 0.2, 0.5),
+                ("brown", 0.5, 0.8),
+                ("fox", 0.8, 1.1),
+                ("jumps", 1.1, 1.4),
+            ]
+        )
         result = compute_edit_segments(
             "the quick brown fox jumps",
             "the quick red fox jumps",
@@ -212,10 +230,12 @@ class TestComputeEditSegments:
             assert seg.end_time > seg.start_time
 
     def test_multi_segment_input(self):
-        segs = _make_multi_segment([
-            [("hello", 0.0, 0.5), ("there", 0.5, 1.0)],
-            [("good", 2.0, 2.5), ("morning", 2.5, 3.0)],
-        ])
+        segs = _make_multi_segment(
+            [
+                [("hello", 0.0, 0.5), ("there", 0.5, 1.0)],
+                [("good", 2.0, 2.5), ("morning", 2.5, 3.0)],
+            ]
+        )
         result = compute_edit_segments(
             "hello there good morning",
             "hello there great morning",
@@ -230,9 +250,12 @@ class TestEditSegmentsToChanges:
     def test_filters_fallback_segments(self):
         segments = [
             EditSegment(
-                start_time=0.0, end_time=0.0,
-                original_text="old", edited_text="new",
-                left_context="", right_context="",
+                start_time=0.0,
+                end_time=0.0,
+                original_text="old",
+                edited_text="new",
+                left_context="",
+                right_context="",
             )
         ]
         assert edit_segments_to_changes(segments) == []
@@ -240,9 +263,12 @@ class TestEditSegmentsToChanges:
     def test_valid_segments(self):
         segments = [
             EditSegment(
-                start_time=1.0, end_time=2.0,
-                original_text="old text", edited_text="new text",
-                left_context="before", right_context="after",
+                start_time=1.0,
+                end_time=2.0,
+                original_text="old text",
+                edited_text="new text",
+                left_context="before",
+                right_context="after",
             )
         ]
         changes = edit_segments_to_changes(segments)
@@ -254,9 +280,12 @@ class TestEditSegmentsToChanges:
     def test_filters_zero_duration(self):
         segments = [
             EditSegment(
-                start_time=1.5, end_time=1.5,
-                original_text="same", edited_text="same",
-                left_context="", right_context="",
+                start_time=1.5,
+                end_time=1.5,
+                original_text="same",
+                edited_text="same",
+                left_context="",
+                right_context="",
             )
         ]
         assert edit_segments_to_changes(segments) == []
@@ -332,10 +361,12 @@ class TestRestorePunctuationFromEdit:
 
 class TestEditedTextCasing:
     def test_preserves_original_casing(self):
-        segs = _make_word_segments([
-            ("hello", 0.0, 0.5),
-            ("world", 0.5, 1.0),
-        ])
+        segs = _make_word_segments(
+            [
+                ("hello", 0.0, 0.5),
+                ("world", 0.5, 1.0),
+            ]
+        )
         result = compute_edit_segments(
             "hello world",
             "Hello, World.",

@@ -1,4 +1,3 @@
-import pytest
 import torch
 
 from hear.services.reconstruction.synthesizer import SpeechSynthesizer

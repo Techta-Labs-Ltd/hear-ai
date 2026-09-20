@@ -37,11 +37,12 @@ hand-managed virtual environment workflow. Resolve dependencies during a
 controlled development/build step:
 
 ```bash
-uv lock
-uv sync --frozen
+python scripts/setup_runtime.py
 ```
 
-Production images should run `uv sync --frozen --no-dev` while being built.
+Setup installs the committed lockfile and automatically applies verified dependency patches.
+See [class ownership and patch automation](docs/CLASS_OWNERSHIP_AND_PATCHES.md).
+Production images should run `python scripts/setup_runtime.py --no-dev` while being built.
 When the image already provides the locked packages in its system Python, run
 uv in no-project mode. This does not create a project environment or install
 anything during startup:
@@ -80,7 +81,7 @@ against the previous image:
 cd /workspace/hear-ai
 source scripts/runpod-workspace-env.sh
 mv .venv .venv.pre-cuda13  # recoverable backup, if an old environment exists
-uv sync --frozen
+python scripts/setup_runtime.py
 uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 uv run --no-project python main.py --validate-only
 ```

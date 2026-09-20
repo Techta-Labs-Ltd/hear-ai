@@ -15,9 +15,7 @@ class RecordingProcessor:
         self.calls.append("mossformer")
         return waveform
 
-    def spectral_suppress(
-        self, waveform: torch.Tensor, sr: int, strength: float
-    ) -> torch.Tensor:
+    def spectral_suppress(self, waveform: torch.Tensor, sr: int, strength: float) -> torch.Tensor:
         self.calls.append(f"spectral:{strength}")
         return waveform
 
@@ -33,9 +31,7 @@ class RecordingProcessor:
         self.calls.append("music_eq")
         return waveform
 
-    def compress(
-        self, waveform: torch.Tensor, sr: int, mode: ContentMode
-    ) -> torch.Tensor:
+    def compress(self, waveform: torch.Tensor, sr: int, mode: ContentMode) -> torch.Tensor:
         self.calls.append("compress")
         return waveform
 
@@ -47,9 +43,7 @@ class RecordingProcessor:
         self.calls.append("limit")
         return waveform
 
-    def detect_and_strip_silence(
-        self, waveform: torch.Tensor, sr: int
-    ) -> torch.Tensor:
+    def detect_and_strip_silence(self, waveform: torch.Tensor, sr: int) -> torch.Tensor:
         self.calls.append("cut_silence")
         return waveform[:, : waveform.shape[1] // 2]
 
@@ -297,9 +291,7 @@ def _reference_lookahead_limit(
     for index, peak in enumerate(peaks):
         required = min(ceiling / (peak + 1e-10), 1.0)
         previous = (
-            required
-            if required < previous
-            else release * previous + (1 - release) * required
+            required if required < previous else release * previous + (1 - release) * required
         )
         gain[index] = previous
     delayed = np.ones(len(signal), dtype=np.float64)

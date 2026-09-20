@@ -6,7 +6,7 @@ import soundfile as sf
 
 from hear.core import storage
 from hear.models.schemas import StorageContext
-from hear.core.audio_utils import (
+from hear.utils.audio import (
     convert_wav_file_to_mp3,
     delivery_bitrate_kbps,
     probe_audio,
@@ -66,7 +66,7 @@ def test_upload_rejects_remote_size_mismatch(tmp_path, monkeypatch):
 
 def test_delivery_bitrate_reduces_compressed_source(monkeypatch):
     monkeypatch.setattr(
-        "hear.core.audio_utils.probe_audio",
+        "hear.utils.audio.probe_audio",
         lambda _path: {"bitrate_bps": 80_000, "format": "mp3"},
     )
 
@@ -75,7 +75,7 @@ def test_delivery_bitrate_reduces_compressed_source(monkeypatch):
 
 def test_delivery_bitrate_caps_lossless_source(monkeypatch):
     monkeypatch.setattr(
-        "hear.core.audio_utils.probe_audio",
+        "hear.utils.audio.probe_audio",
         lambda _path: {"bitrate_bps": 1_536_000, "format": "wav"},
     )
 

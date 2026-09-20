@@ -4,8 +4,8 @@ from enum import StrEnum
 
 class ContentMode(StrEnum):
     SPEECH = "speech"
-    MUSIC  = "music"
-    AUTO   = "auto"
+    MUSIC = "music"
+    AUTO = "auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,16 +31,16 @@ DEFAULT_STEM_LEVELS = StemLevels(speech=100, music=10, background=10)
 
 @dataclass
 class EnhancementResult:
-    b2_key:            str
-    enhanced_url:      str
-    local_path:        str
-    quality_score:     float
-    snr_db:            float
-    peak_db:           float
-    lufs:              float
+    b2_key: str
+    enhanced_url: str
+    local_path: str
+    quality_score: float
+    snr_db: float
+    peak_db: float
+    lufs: float
     clipping_detected: bool
-    mode_used:         str
-    bucket_name:       str
+    mode_used: str
+    bucket_name: str
     stage_times: dict[str, float] = field(default_factory=dict)
     source_file_sha256: str = ""
     source_pcm_sha256: str = ""

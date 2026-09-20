@@ -29,12 +29,8 @@ class SilenceProcessor:
         output_path: str,
     ) -> int:
         """Apply one bounded-memory edit using source/output activity union."""
-        source_rms, source_rate, source_channels, source_samples = (
-            self._scan_file_rms(source_path)
-        )
-        enhanced_rms, sample_rate, channels, sample_count = self._scan_file_rms(
-            enhanced_path
-        )
+        source_rms, source_rate, source_channels, source_samples = self._scan_file_rms(source_path)
+        enhanced_rms, sample_rate, channels, sample_count = self._scan_file_rms(enhanced_path)
         if (
             sample_rate != source_rate
             or channels != source_channels
@@ -93,9 +89,7 @@ class SilenceProcessor:
                     rms_parts.append(np.max(channel_rms, axis=1))
                 remainder = combined[complete:].copy()
             if remainder.shape[0]:
-                channel_rms = np.sqrt(
-                    np.mean(remainder.astype(np.float64) ** 2, axis=0)
-                )
+                channel_rms = np.sqrt(np.mean(remainder.astype(np.float64) ** 2, axis=0))
                 rms_parts.append(np.array([np.max(channel_rms)]))
         return np.concatenate(rms_parts), sample_rate, channels, sample_count
 
@@ -179,14 +173,17 @@ class SilenceProcessor:
             )
 
         output_samples = 0
-        with sf.SoundFile(input_path) as source, sf.SoundFile(
-            output_path,
-            mode="w",
-            samplerate=sample_rate,
-            channels=channels,
-            format="RF64",
-            subtype="FLOAT",
-        ) as destination:
+        with (
+            sf.SoundFile(input_path) as source,
+            sf.SoundFile(
+                output_path,
+                mode="w",
+                samplerate=sample_rate,
+                channels=channels,
+                format="RF64",
+                subtype="FLOAT",
+            ) as destination,
+        ):
             skipped_prefix = 0
             for index, region in enumerate(regions):
                 fade = fades[index] if index < len(fades) else 0
@@ -208,8 +205,7 @@ class SilenceProcessor:
                         raise RuntimeError("silence editor could not read a complete join")
                     phase = np.linspace(0.0, np.pi / 2.0, fade, dtype=np.float32)
                     joined = (
-                        previous_tail * np.cos(phase)[:, None]
-                        + next_head * np.sin(phase)[:, None]
+                        previous_tail * np.cos(phase)[:, None] + next_head * np.sin(phase)[:, None]
                     )
                     destination.write(joined)
                     output_samples += fade
@@ -375,9 +371,7 @@ class SilenceProcessor:
             regions.append({"start": start, "end": total_samples})
         return regions
 
-    def _merge_close_samples(
-        self, regions: list[dict], merge_gap: int
-    ) -> list[dict]:
+    def _merge_close_samples(self, regions: list[dict], merge_gap: int) -> list[dict]:
         if not regions:
             return []
         merged = [dict(regions[0])]
