@@ -4,11 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-if [[ -f "$ROOT/.env" ]]; then
-  set -a
-  . "$ROOT/.env"
-  set +a
-fi
+env_file="${HEAR_ENV_FILE:-$ROOT/.env}"
+source "$ROOT/scripts/load-env.sh" "$env_file"
 
 eval "$(python3 <<'PY'
 import os

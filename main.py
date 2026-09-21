@@ -61,7 +61,9 @@ class RuntimeApplication:
         if missing_modules:
             errors.append("missing Python modules: " + ", ".join(missing_modules))
         try:
-            BackendRegistry.parse_backend_registry(settings.BACKEND_REGISTRY_JSON)
+            BackendRegistry.parse_backend_registry(
+                settings.BACKEND_REGISTRY_JSON, environment=settings.ENVIRONMENT
+            )
         except RuntimeError as exc:
             errors.append(str(exc))
         try:

@@ -102,7 +102,8 @@ as `RAY_ADDRESS=auto` take precedence over the file.
 `AI_SERVICE_URL` and `AI_SERVICE_SECRET` are backend-client names and are not
 AI-server settings. On this service, authentication is configured with the
 `BACKEND_REGISTRY_JSON` SHA-256 digest; the backend keeps the matching
-plaintext `HEAR_SERVICE_KEY`.
+plaintext `HEAR_SERVICE_KEY`. Registrations are environment-scoped; see
+[development and production credentials](docs/ENVIRONMENTS.md).
 
 The server stores only service-key SHA-256 digests. Generate a new backend key
 and install its digest with:

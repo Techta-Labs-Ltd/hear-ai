@@ -17,7 +17,9 @@ from pathlib import Path
 
 class ServiceKeyGenerator:
     @staticmethod
-    def replace_registry(env_path: Path, backend_id: str, digest: str) -> None:
+    def replace_registry(
+        env_path: Path, backend_id: str, digest: str, environment: str | None
+    ) -> None:
         lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
         for index, line in enumerate(lines):
             if not line.startswith("BACKEND_REGISTRY_JSON="):
@@ -33,6 +35,8 @@ class ServiceKeyGenerator:
             if not isinstance(registration, dict):
                 raise SystemExit(f"backend {backend_id!r} registration must be an object")
             registration["service_key_sha256"] = digest
+            if environment:
+                registration["environment"] = environment
             lines[index] = "BACKEND_REGISTRY_JSON=" + json.dumps(
                 registry, separators=(",", ":"), sort_keys=True
             ) + "\n"
@@ -47,6 +51,11 @@ class ServiceKeyGenerator:
         parser.add_argument("--backend-id", required=True)
         parser.add_argument("--env-file", type=Path, default=Path(".env"))
         parser.add_argument(
+            "--environment",
+            choices=("development", "production"),
+            help="set the registration environment while updating its digest",
+        )
+        parser.add_argument(
             "--write",
             action="store_true",
             help="replace that backend's service_key_sha256 in --env-file",
@@ -58,7 +67,9 @@ class ServiceKeyGenerator:
         if args.write:
             if not args.env_file.is_file():
                 raise SystemExit(f"env file does not exist: {args.env_file}")
-            ServiceKeyGenerator.replace_registry(args.env_file, args.backend_id, digest)
+            ServiceKeyGenerator.replace_registry(
+                args.env_file, args.backend_id, digest, args.environment
+            )
 
         print(f"HEAR_SERVICE_KEY={key}")
         print(f"BACKEND_ID={args.backend_id}")

@@ -5,7 +5,8 @@ readonly project_root="/workspace/hear-ai"
 readonly postgres_bin="/usr/lib/postgresql/16/bin"
 readonly postgres_data="/postgres/data"
 readonly postgres_socket="/postgres/socket"
-readonly database_url="$(sed -n 's/^DATABASE_URL=//p' "${project_root}/.env")"
+readonly env_file="${HEAR_ENV_FILE:-${project_root}/.env}"
+readonly database_url="$(sed -n 's/^DATABASE_URL=//p' "$env_file")"
 
 if [[ ! "$database_url" =~ ^postgresql\+psycopg2://hear:([^@]+)@127\.0\.0\.1:5432/hear$ ]]; then
   echo "DATABASE_URL must use the local hear PostgreSQL database" >&2

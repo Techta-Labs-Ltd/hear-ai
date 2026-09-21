@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -7,6 +8,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_ROOT = Path("/models")
 FISH_SPEECH_SOURCE_ROOT = Path("/fish-speech")
 TEMP_ROOT = Path("/audio")
+CONFIGURED_ENV_FILE = os.environ.get("HEAR_ENV_FILE", "").strip()
+ENV_FILES = (
+    (Path(CONFIGURED_ENV_FILE),)
+    if CONFIGURED_ENV_FILE
+    else (PROJECT_ROOT / ".env", PROJECT_ROOT.parent / ".env")
+)
 
 
 class Settings(BaseSettings):
@@ -112,7 +119,7 @@ class Settings(BaseSettings):
     ENABLE_DOCS: bool = False
 
     model_config = SettingsConfigDict(
-        env_file=(PROJECT_ROOT / ".env", PROJECT_ROOT.parent / ".env"),
+        env_file=ENV_FILES,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
