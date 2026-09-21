@@ -184,6 +184,8 @@ class RuntimeApplication:
                 errors.append(
                     f"invalid local Demucs model manifest: {demucs_manifest} ({type(exc).__name__})"
                 )
+        if not Path(settings.DNSMOS_MODEL_PATH).is_file():
+            errors.append(f"missing DNSMOS model: {settings.DNSMOS_MODEL_PATH}")
         fish_checkpoint = Path(settings.FISH_SPEECH_CHECKPOINT_PATH)
         codec = Path(settings.FISH_SPEECH_CODEC_PATH)
         if settings.FISH_SPEECH_TTS_ENABLED and (not codec.is_file()):

@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     MOSSFORMER_MODEL_PATH: str = str(MODEL_ROOT / "mossformer2-se-48k")
     DEMUCS_MODEL: str = "htdemucs"
     DEMUCS_MODEL_PATH: str = str(MODEL_ROOT / "demucs")
+    DNSMOS_MODEL_PATH: str = str(MODEL_ROOT / "dnsmos" / "sig_bak_ovr.onnx")
 
     FISH_SPEECH_TTS_ENABLED: bool = True
 

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 @serve.deployment(
     name="fish_speech",
     ray_actor_options={
-        "num_gpus": 0.35,
+        "num_gpus": 0.30,
         "num_cpus": 0.3,
         "runtime_env": {
             "env_vars": {
@@ -75,7 +75,12 @@ class FishSpeechDeployment:
             queue_kwargs["bnb_mode"] = settings.FISH_SPEECH_BNB_MODE or None
         if "lazy_load" in queue_parameters:
             queue_kwargs["lazy_load"] = False
-        llama_queue, self._llama_thread = launch_thread_safe_queue(**queue_kwargs)
+        queue_result = launch_thread_safe_queue(**queue_kwargs)
+        if isinstance(queue_result, tuple):
+            llama_queue, self._llama_thread = queue_result
+        else:
+            llama_queue = queue_result
+            self._llama_thread = None
         decoder = load_decoder_model(
             config_name="modded_dac_vq",
             checkpoint_path=codec,

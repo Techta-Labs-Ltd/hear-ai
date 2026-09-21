@@ -24,6 +24,9 @@ DEMUCS_MANIFEST = "models: ['955717e8']\n"
 DEMUCS_CHECKPOINT_URL = (
     "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/955717e8-8726e21a.th"
 )
+DNSMOS_MODEL_URL = (
+    "https://raw.githubusercontent.com/microsoft/DNS-Challenge/master/DNSMOS/DNSMOS/sig_bak_ovr.onnx"
+)
 
 
 class ModelProvisioner:
@@ -47,6 +50,11 @@ class ModelProvisioner:
             for relative_path, repo_id in MODEL_MANIFEST.items()
         }
         results["demucs"] = str(ModelProvisioner._provision_demucs(root / "demucs"))
+        results["dnsmos"] = str(
+            ModelProvisioner._provision_file(
+                DNSMOS_MODEL_URL, root / "dnsmos" / "sig_bak_ovr.onnx"
+            )
+        )
         return results
 
     @staticmethod
@@ -55,12 +63,19 @@ class ModelProvisioner:
         manifest = destination / "htdemucs.yaml"
         if not manifest.is_file() or manifest.read_text() != DEMUCS_MANIFEST:
             manifest.write_text(DEMUCS_MANIFEST)
-        checkpoint = destination / "955717e8-8726e21a.th"
-        if checkpoint.is_file() and checkpoint.stat().st_size > 0:
+        ModelProvisioner._provision_file(
+            DEMUCS_CHECKPOINT_URL, destination / "955717e8-8726e21a.th"
+        )
+        return destination
+
+    @staticmethod
+    def _provision_file(url: str, destination: Path) -> Path:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_file() and destination.stat().st_size > 0:
             return destination
-        with urlopen(DEMUCS_CHECKPOINT_URL, timeout=300) as response:
+        with urlopen(url, timeout=300) as response:
             with tempfile.NamedTemporaryFile(
-                dir=destination, prefix=".demucs-", suffix=".part", delete=False
+                dir=destination.parent, prefix=f".{destination.name}-", suffix=".part", delete=False
             ) as stream:
                 partial = Path(stream.name)
                 try:
@@ -68,8 +83,8 @@ class ModelProvisioner:
                     stream.flush()
                     os.fsync(stream.fileno())
                     if stream.tell() == 0:
-                        raise RuntimeError("empty_demucs_checkpoint")
-                    partial.replace(checkpoint)
+                        raise RuntimeError(f"empty_model_file:{destination.name}")
+                    partial.replace(destination)
                 finally:
                     partial.unlink(missing_ok=True)
         return destination

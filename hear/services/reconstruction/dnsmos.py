@@ -6,6 +6,8 @@ import numpy as np
 import onnxruntime as ort
 import torchaudio
 
+from hear.config import settings
+
 from .audio_buffer import AudioBuffer
 
 logger = logging.getLogger(__name__)
@@ -21,10 +23,7 @@ class DNSMOSScorer:
         self._lock = threading.Lock()
 
     def load(self) -> bool:
-        model_directory = Path(__file__).resolve().parents[3] / "models" / "dnsmos"
-        model_path = model_directory / "sig_bak_ovr.onnx"
-        if not model_path.exists():
-            model_path = model_directory / "model_v8.onnx"
+        model_path = Path(settings.DNSMOS_MODEL_PATH)
         if not model_path.exists():
             logger.warning("DNSMOS model not found at %s", model_path)
             return False
