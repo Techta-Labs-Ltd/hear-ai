@@ -1,0 +1,92 @@
+{
+  "recorded_on": "2026-09-21",
+  "repo_id": "facebook/sam-audio-small",
+  "revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "local_directory": "models/sam-audio-small/20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "download": {
+    "result": "downloaded_and_verified",
+    "ray_task_id": "449ba2c0438c7318ffffffffffffffffffffffff0b000000",
+    "num_cpus": 1,
+    "num_gpus": 0,
+    "max_retries": 0,
+    "verification": "streamed SHA-256 of every downloaded file; checkpoint matched upstream LFS SHA-256; sizes matched repository metadata"
+  },
+  "files": [
+    {
+      "path": ".gitattributes",
+      "size_bytes": 1519,
+      "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+    },
+    {
+      "path": "LICENSE",
+      "size_bytes": 7353,
+      "sha256": "4dea99bfaa016e21bc860d73f344236bd1e5c4977d1a9a8fd32f822b500ae1be"
+    },
+    {
+      "path": "README.md",
+      "size_bytes": 7273,
+      "sha256": "ed4ca3fa4fefb9d7ebc0803ea5a1cbc85b66fd2f5cc3f50c1f5ec3535a366a87"
+    },
+    {
+      "path": "checkpoint.pt",
+      "size_bytes": 5100547943,
+      "sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+      "upstream_lfs_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06"
+    },
+    {
+      "path": "config.json",
+      "size_bytes": 2251,
+      "sha256": "50a67c841676043afdd3af6484ef6a1b47e300e36ee24eb3e07c31da8216f47b"
+    }
+  ],
+  "inspection": {
+    "method": "torch.load(weights_only=True, mmap=True, map_location='cpu') in a one-use zero-GPU Ray task; tensor metadata only",
+    "torch_version": "2.8.0+cu128",
+    "top_type": "dict",
+    "cuda_initialized": false,
+    "top_keys": [
+      "audio_codec.encoder.block.0.bias",
+      "audio_codec.encoder.block.0.weight_g",
+      "audio_codec.encoder.block.0.weight_v",
+      "audio_codec.encoder.block.1.block.0.block.0.alpha",
+      "audio_codec.encoder.block.1.block.0.block.1.bias",
+      "audio_codec.encoder.block.1.block.0.block.1.weight_g",
+      "audio_codec.encoder.block.1.block.0.block.1.weight_v",
+      "audio_codec.encoder.block.1.block.0.block.2.alpha",
+      "audio_codec.encoder.block.1.block.0.block.3.bias",
+      "audio_codec.encoder.block.1.block.0.block.3.weight_g",
+      "audio_codec.encoder.block.1.block.0.block.3.weight_v",
+      "audio_codec.encoder.block.1.block.1.block.0.alpha"
+    ],
+    "tensor_count": 1165,
+    "prefix_tensor_counts": {
+      "audio_codec": 317,
+      "vision_encoder": 601,
+      "transformer": 235,
+      "proj": 2,
+      "memory_proj": 2,
+      "align_masked_video": 5,
+      "embed_anchors": 3
+    },
+    "prefix_tensor_bytes": {
+      "audio_codec": 430684684,
+      "vision_encoder": 2684551172,
+      "transformer": 1968359424,
+      "proj": 4724736,
+      "memory_proj": 4724736,
+      "align_masked_video": 6309892,
+      "embed_anchors": 788484
+    },
+    "dtype_elements": {
+      "torch.float32": 1275035782
+    },
+    "non_tensor_entries": []
+  },
+  "limitations": [
+    "No full model construction, inference, parity test or GPU allocation",
+    "Tensor storage sizes are not GPU execution-memory estimates",
+    "Config names t5-base but checkpoint has no text_encoder prefix; inspect upstream source and pin required external text assets",
+    "Audio-only optional-module omissions still require strict loading/parity validation",
+    "Model is downloaded, not registered as a ready/certified profile"
+  ]
+}

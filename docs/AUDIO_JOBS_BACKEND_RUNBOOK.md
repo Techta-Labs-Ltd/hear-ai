@@ -139,7 +139,7 @@ gate is not passed until these mismatches are fixed and contract-tested.
 ```json
 {
   "job_id": "job-clean-001",
-  "backend_id": "hear-backend",
+  "backend_id": "backend-a",
   "track_id": "track-001",
   "user_id": "user-001",
   "job_type": "magic_clean",

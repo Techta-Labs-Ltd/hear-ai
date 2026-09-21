@@ -1,0 +1,22 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "0dcdcd3105e6ed33243f94262986104170e338ee10e3d56568e651fa01a70eea",
+  "test_source_sha256": "44c98d17c7054666ec59ffa8880c81ac883d3bef417741ca7b4cfaec31ed75bb",
+  "command": "OMP_NUM_THREADS=1 .venv/bin/pytest -q tests/test_cleaner_v2_sam_plan.py tests/test_cleaner_v2_resampling.py tests/test_cleaner_v2_sam_file_pipeline.py tests/test_cleaner_v2_sam_pipeline.py tests/test_cleaner_v2_packaging.py tests/test_architecture.py",
+  "tests_passed": 59,
+  "elapsed_seconds": 21.81,
+  "verification": {
+    "real_ffmpeg_fixture_inference": true,
+    "source_rates": [8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000],
+    "exact_restored_frame_counts": true,
+    "finite_output": true,
+    "source_unchanged": true,
+    "inference_failure_removes_conversion_files": true,
+    "ruff_and_format": "passed"
+  },
+  "limitations": [
+    "No real SAM inference in the source-rate tests",
+    "Production runtime provenance must bind the resampling policy",
+    "Stereo preflight, loader/session adapter and quality/GPU certification remain unfinished"
+  ]
+}

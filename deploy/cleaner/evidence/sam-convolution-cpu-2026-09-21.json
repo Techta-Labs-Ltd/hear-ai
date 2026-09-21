@@ -1,0 +1,65 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+  "probe": {
+    "result": "passed",
+    "layers_tested": 90,
+    "cases": 180,
+    "input_lengths": [
+      31,
+      32
+    ],
+    "output_chunk_frames": 13,
+    "max_abs_difference": 4.172325134277344e-7,
+    "worst_layer": "decoder.model.0",
+    "tolerance": {
+      "atol": 0.000001,
+      "rtol": 0.00001
+    },
+    "elapsed_seconds": 7.24865753389895,
+    "geometry_counts": {
+      "SamConvolutionGeometry(kernel=7, stride=1, dilation=1, padding=3, output_padding=0, transposed=False, auto_padding=False, causal=False)": 11,
+      "SamConvolutionGeometry(kernel=1, stride=1, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=False, causal=False)": 26,
+      "SamConvolutionGeometry(kernel=7, stride=1, dilation=3, padding=9, output_padding=0, transposed=False, auto_padding=False, causal=False)": 8,
+      "SamConvolutionGeometry(kernel=7, stride=1, dilation=9, padding=27, output_padding=0, transposed=False, auto_padding=False, causal=False)": 8,
+      "SamConvolutionGeometry(kernel=4, stride=2, dilation=1, padding=1, output_padding=0, transposed=False, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=16, stride=8, dilation=1, padding=4, output_padding=0, transposed=False, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=20, stride=10, dilation=1, padding=5, output_padding=0, transposed=False, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=24, stride=12, dilation=1, padding=6, output_padding=0, transposed=False, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=3, stride=1, dilation=1, padding=1, output_padding=0, transposed=False, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=24, stride=12, dilation=1, padding=6, output_padding=0, transposed=True, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=16, stride=8, dilation=1, padding=0, output_padding=0, transposed=True, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=3, stride=1, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 8,
+      "SamConvolutionGeometry(kernel=1, stride=1, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 8,
+      "SamConvolutionGeometry(kernel=16, stride=8, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=20, stride=10, dilation=1, padding=5, output_padding=0, transposed=True, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=10, stride=5, dilation=1, padding=0, output_padding=0, transposed=True, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=10, stride=5, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=16, stride=8, dilation=1, padding=4, output_padding=0, transposed=True, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=8, stride=4, dilation=1, padding=0, output_padding=0, transposed=True, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=8, stride=4, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=4, stride=2, dilation=1, padding=1, output_padding=0, transposed=True, auto_padding=False, causal=False)": 1,
+      "SamConvolutionGeometry(kernel=4, stride=2, dilation=1, padding=0, output_padding=0, transposed=True, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=4, stride=2, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 1,
+      "SamConvolutionGeometry(kernel=7, stride=1, dilation=1, padding=0, output_padding=0, transposed=False, auto_padding=True, causal=True)": 4
+    },
+    "cuda_initialized": false,
+    "torch_version": "2.8.0+cu128"
+  },
+  "method": {
+    "weights": "Strict load of the complete 317-key codec subset before enumerating all Conv1d and ConvTranspose1d modules",
+    "execution": "Original module forward for both full reference and planned tile; weight normalization hooks and padding/unpadding preserved",
+    "features": "Synthetic batch-one intermediate features with actual layer channel counts",
+    "precision": "CPU FP32, one torch thread",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0
+  },
+  "limitations": [
+    "Layer-by-layer geometry test, not a composed bounded codec or full SAM parity test",
+    "No on-disk intermediate feature runner or complete watermark/recurrent graph yet",
+    "Short feature lengths only; hour-length geometry test establishes tile-size arithmetic, not measured long-form model memory",
+    "No GPU or listening certification"
+  ]
+}

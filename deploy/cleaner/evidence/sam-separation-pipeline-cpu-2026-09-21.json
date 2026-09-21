@@ -1,0 +1,115 @@
+{
+  "recorded_on": "2026-09-21",
+  "sam_source_commit": "bb4c6999d2677c7402360e426afc01ddfad6dce0",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "text_revision": "a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1",
+  "source_sha256_after_run": {
+    "hear/runtime/cleaner/sam_pipeline.py": "b20004deb59cafd05425980b4fd94b0094c37df33df48fa2f0bdc43e55eed5c7",
+    "hear/runtime/cleaner/sam_features.py": "4b74bceb869ac59bd4d8d815dd7371a1f32acaed82c0b7140d7df6076f8a21f3",
+    "scripts/benchmark_cleaner_sam_core.py": "6ea24853a19d6341f54964b62516e9223290a11eaa3f26f25ba39389d84c44f9"
+  },
+  "probe": {
+    "strict_core_keys": 247,
+    "cases": [
+      {
+        "frames": 2,
+        "time": 0,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          2,
+          256
+        ],
+        "finite": true
+      },
+      {
+        "frames": 7,
+        "time": 0.5,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          7,
+          256
+        ],
+        "finite": true
+      },
+      {
+        "frames": 13,
+        "time": 1,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          13,
+          256
+        ],
+        "finite": true
+      }
+    ],
+    "solver_case": null,
+    "pipeline_case": {
+      "strict_codec_keys": 317,
+      "frames": 3841,
+      "latent_frames": 3,
+      "steps": 16,
+      "output_shape": [
+        2,
+        1,
+        3841
+      ],
+      "stream_order": [
+        "target",
+        "residual"
+      ],
+      "maximum_absolute_difference": 1.210719347000122e-8,
+      "matches_reference_tolerance": true,
+      "finite": true,
+      "borrowed_inputs_unchanged": true,
+      "intermediate_cleanup": true
+    },
+    "text_shape": [
+      1,
+      2,
+      768
+    ],
+    "text_sha256": "2ae37fee196dd64b3fc2229fdbb56d5d454f43bda5606c4b83ec15700e35bf12",
+    "prompt": "speech (engineering fixture, not approved preset)",
+    "cuda_initialized": false,
+    "optional_modules_imported": [],
+    "torch": "2.8.0+cu128",
+    "transformers": "4.57.6",
+    "upstream_source_sha256": {
+      "model.py": "b85217b41f8fcc083908db3dd6c37a211048f52b8e601e5eb4794bef18d56108",
+      "config.py": "0fc427191f9f8f0914d47f545448db1ec1f7d3c599d86e242d7b19f2cb422578",
+      "transformer.py": "ed25fe2a3ed4466859b45b35e0dfc87d5cd9af044f290ef804c5953a5ead9bf8",
+      "rope.py": "c920b965863e7349ad88593e03c0d49734138b614d0569e6d7acc7af179944be",
+      "patcher.py": "d4b406dca9a9eb4200b514b7d3c528aca0d5af006ac871320a00f836b0291082",
+      "align.py": "8d4d1b61587f71cbc687e73dfcc6226336b242d65e5edc02e6a9ee4b4a43ab9c"
+    }
+  },
+  "method": {
+    "script": "scripts/benchmark_cleaner_sam_core.py --codec-source <pinned-source> --pipeline-only",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "source": "3841 mono samples, 48 kHz, synthetic 440 Hz sine amplitude 0.01",
+    "initial_noise": "Explicit sine-valued [3,256] state, not a certified stochastic initialization policy",
+    "message": "Independent alternating/inverse 16-bit messages for target and residual",
+    "candidate": "Bounded encode_mean -> disk-backed global midpoint (16 steps, window250/overlap50) -> decode_joint -> original-length trim",
+    "reference": "Original full encoder/mean projection, independent full-context midpoint using original core method bodies and unit blending, original out-projection/watermark decoder",
+    "atol": 0.000001,
+    "rtol": 0.00001
+  },
+  "verification": {
+    "targeted_tests_passed": 215,
+    "warnings": "Two existing upstream Torch CPU-backend context warnings",
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "limitations": [
+    "Approximately 80 ms synthetic fixture with one latent window; not long-form speech separation or overlap quality evidence",
+    "Prompt is engineering-only; no approved prompt cache, no-target or hallucination acceptance",
+    "Production model loading, source/delivery file adapters, RNG identity and engine admission remain unfinished",
+    "Earlier feature/conditioning parity failures are not waived by waveform agreement",
+    "No GPU memory/load-time, listening, service coexistence or deployment certification"
+  ]
+}

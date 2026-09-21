@@ -1,0 +1,79 @@
+{
+  "schema": "sam-cuda-window-crossing-v1",
+  "date": "2026-09-21",
+  "probe_sha256": "804c3db64b78e8ef504cd07482d403c8ca2070d79f2db111d29c97a1f0c50a9e",
+  "wheel_sha256": "64f1de9910f7f719263f2a8883a6c9486533448373efa3aa13a4760eb5c75448",
+  "source_evidence": "sam-installed-cuda-short-2026-09-21.json",
+  "result": {
+    "codec_tile_frames": 4096,
+    "conditioning_admission": "pinned-raw-file",
+    "conditioning_asset_sha256": "3451a4a77edca22f2c381037aa24905b579caeda057ac712fc99801913ddeedd",
+    "cpu_comparison": null,
+    "cuda_initialized": true,
+    "device": "cuda:0",
+    "exact_known_answer": false,
+    "fixture_frames": 576001,
+    "isolated_python": true,
+    "latent_frames": 301,
+    "limitations": "Short synthetic fixture; not aggregate NVML, long-form or quality certification",
+    "module": "/tmp/hear-cleaner-sam-package.8MWUFr/venv/lib/python3.12/site-packages/hear/runtime/cleaner/sam_loader.py",
+    "repeat_output_identical": true,
+    "runtime": {
+      "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+      "engine": "sam_audio_small",
+      "longform_policy_sha256": "bf3a1f10875eb9a69bb593434e9a154f9ddb1df570b7cfa039b1d2aadb72f977",
+      "precision_policy_sha256": "cb6ab2a99bbf112abd3b22534de17e4d4105ee3f2520b9d8c9e4d3d1ee5ea7f5",
+      "runtime_sha256": "24dd676cd7986f075bc65136b8427528b3ebe6df07b2bdb4d452b67d84a4232e"
+    },
+    "scratch_and_namespace_cleanup": true,
+    "sessions": [
+      {
+        "allocated_after_close_bytes": 8519680,
+        "index": 0,
+        "reserved_after_close_bytes": 3575644160,
+        "target_sha256": "17bc6527d016232f1a807257f1d2bcd0bad4276667227c665ed2037dd8034ec4"
+      }
+    ],
+    "source_preserved": true,
+    "target_sha256": "17bc6527d016232f1a807257f1d2bcd0bad4276667227c665ed2037dd8034ec4",
+    "torch_memory": {
+      "allocated_after_close_bytes": 8519680,
+      "allocated_after_empty_cache_bytes": 8519680,
+      "allocated_after_gc_bytes": 8519680,
+      "allocator_cap_bytes": 9000000000,
+      "gpu": "NVIDIA A40",
+      "peak_allocated_bytes": 3387147776,
+      "peak_reserved_bytes": 3575644160,
+      "reserved_after_empty_cache_bytes": 20971520
+    }
+  },
+  "execution": {
+    "cwd": "/tmp/hear-cleaner-sam-cuda.6hA66j",
+    "isolated_python": true,
+    "CUDA_VISIBLE_DEVICES": "0",
+    "OMP_NUM_THREADS": "1",
+    "scratch_budget_bytes": 2000000000,
+    "max_frames": 577921,
+    "allocator_cap_bytes": 9000000000
+  },
+  "prior_rejections": [
+    {
+      "reason": "unsupported feature shape",
+      "cause": "Probe frame allowance excluded codec padding"
+    },
+    {
+      "reason": "feature scratch reservation failed",
+      "scratch_budget_bytes": 512000000
+    }
+  ],
+  "regression": {
+    "passed": 36,
+    "seconds": 21.01
+  },
+  "limitations": [
+    "One execution only; repeat_output_identical is vacuous for one session",
+    "No independent CPU/full-runtime reference for this fixture",
+    "No aggregate NVML, multi-hour, quality or release certification",
+    "Scratch occupancy peak not measured"
+  ]
+}

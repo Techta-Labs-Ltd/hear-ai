@@ -1,0 +1,108 @@
+{
+  "recorded_on": "2026-09-21",
+  "sam_source": {
+    "repository": "https://github.com/facebookresearch/sam-audio",
+    "commit": "bb4c6999d2677c7402360e426afc01ddfad6dce0",
+    "local_checkout": "/tmp/hear-sam-source.mYBkqM",
+    "checkout_clean": true
+  },
+  "t5_assets": {
+    "result": "downloaded_and_verified",
+    "repo_id": "google-t5/t5-base",
+    "revision": "a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1",
+    "files": [
+      {
+        "path": "README.md",
+        "size_bytes": 8477,
+        "sha256": "c43c23f205b6839a6adb10f0757265f76c1c6f96b7793a4e53582d3a61cbfb23",
+        "upstream_lfs_sha256": null
+      },
+      {
+        "path": "config.json",
+        "size_bytes": 1208,
+        "sha256": "46dd7cb62d29c81fb551e0ef1ea274c24a46ba441eeb948897706252933df033",
+        "upstream_lfs_sha256": null
+      },
+      {
+        "path": "model.safetensors",
+        "size_bytes": 891646390,
+        "sha256": "a90903540cc02cbeb7ff9f823f1a80eb778c7e22426a0e620b01c77a5ec8f5b4",
+        "upstream_lfs_sha256": "a90903540cc02cbeb7ff9f823f1a80eb778c7e22426a0e620b01c77a5ec8f5b4"
+      },
+      {
+        "path": "spiece.model",
+        "size_bytes": 791656,
+        "sha256": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86",
+        "upstream_lfs_sha256": null
+      },
+      {
+        "path": "tokenizer.json",
+        "size_bytes": 1389353,
+        "sha256": "d2acde0d8d71dd30a711834b07781b9c89feaac33fd332f60507699282740066",
+        "upstream_lfs_sha256": null
+      }
+    ]
+  },
+  "offline_cpu_probe": {
+    "result": "passed",
+    "prompt": "speech",
+    "prompt_status": "engineering fixture only, not an approved product preset",
+    "tokenizer_class": "T5TokenizerFast",
+    "input_ids": [
+      [
+        5023,
+        1
+      ]
+    ],
+    "attention_mask": [
+      [
+        1,
+        1
+      ]
+    ],
+    "embedding_shape": [
+      1,
+      2,
+      768
+    ],
+    "embedding_sha256": "2ae37fee196dd64b3fc2229fdbb56d5d454f43bda5606c4b83ec15700e35bf12",
+    "repeated_output_bitwise_equal": true,
+    "missing_keys": [],
+    "mismatched_keys": [],
+    "expected_unused_decoder_keys": 0,
+    "cuda_initialized": false,
+    "versions": {
+      "torch": "2.8.0+cu128",
+      "transformers": "4.57.6",
+      "tokenizers": "0.22.2",
+      "safetensors": "0.8.0",
+      "sentencepiece": "0.2.2",
+      "numpy": "1.26.4"
+    }
+  },
+  "probe_scope": {
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "memory_reservation_bytes": 3000000000,
+    "max_retries": 0,
+    "max_calls": 1,
+    "local_files_only": true,
+    "hf_hub_offline": true,
+    "transformers_offline": true,
+    "precision": "float32",
+    "torch_threads": 1
+  },
+  "source_findings": [
+    "T5TextEncoder loads T5EncoderModel and AutoTokenizer separately from SAM state",
+    "SAMAudio constructor eagerly creates vision encoder and optional configured rankers/span predictor",
+    "No-video path produces zero visual features with configured vision dimension; text features remain real T5 outputs",
+    "BaseModel remote loader passes cls.revision to snapshot_download rather than revision argument; use verified pinned local paths",
+    "Upstream project includes unpinned git dependencies; not an approved cleaner dependency lock"
+  ],
+  "limitations": [
+    "Engineering prompt 'speech' is not an approved all-speaker product preset",
+    "No SAM separator/codec construction or inference, no audio-only parity or GPU memory evidence",
+    "Root test environment package versions recorded; not isolated SAM runtime packaging",
+    "No production embedding cache or capability registration"
+  ]
+}

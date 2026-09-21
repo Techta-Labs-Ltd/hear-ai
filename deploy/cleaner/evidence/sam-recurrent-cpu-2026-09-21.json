@@ -1,0 +1,94 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "1cfc02446b05af1d530105d07c85c7f3d59e10e3fc9c07e9f40e0c5a0ca46f58",
+  "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+  "probe": {
+    "result": "passed",
+    "torch_version": "2.8.0+cu128",
+    "cuda_initialized": false,
+    "reports": [
+      {
+        "prefix": "audio_codec.decoder.wm_model.decoder_block.pre.1.lstm.",
+        "width": 512,
+        "layers": 2,
+        "state_keys": 8,
+        "chunk_frames": 8,
+        "frames": 103,
+        "max_abs_difference": 0,
+        "state_elements": 4096
+      },
+      {
+        "prefix": "audio_codec.decoder.wm_model.decoder_block.pre.1.lstm.",
+        "width": 512,
+        "layers": 2,
+        "state_keys": 8,
+        "chunk_frames": 17,
+        "frames": 103,
+        "max_abs_difference": 0,
+        "state_elements": 4096
+      },
+      {
+        "prefix": "audio_codec.decoder.wm_model.decoder_block.pre.1.lstm.",
+        "width": 512,
+        "layers": 2,
+        "state_keys": 8,
+        "chunk_frames": 64,
+        "frames": 103,
+        "max_abs_difference": 0,
+        "state_elements": 4096
+      },
+      {
+        "prefix": "audio_codec.decoder.wm_model.encoder_block.post.0.lstm.",
+        "width": 512,
+        "layers": 2,
+        "state_keys": 8,
+        "chunk_frames": 8,
+        "frames": 103,
+        "max_abs_difference": 0,
+        "state_elements": 4096
+      },
+      {
+        "prefix": "audio_codec.decoder.wm_model.encoder_block.post.0.lstm.",
+        "width": 512,
+        "layers": 2,
+        "state_keys": 8,
+        "chunk_frames": 17,
+        "frames": 103,
+        "max_abs_difference": 0,
+        "state_elements": 4096
+      },
+      {
+        "prefix": "audio_codec.decoder.wm_model.encoder_block.post.0.lstm.",
+        "width": 512,
+        "layers": 2,
+        "state_keys": 8,
+        "chunk_frames": 64,
+        "frames": 103,
+        "max_abs_difference": 0,
+        "state_elements": 4096
+      }
+    ]
+  },
+  "method": {
+    "weights": "Both real codec watermark LSTM state subsets strictly loaded into matching torch.nn.LSTM layers",
+    "input": "Deterministic synthetic intermediate features, batch 2, channels 512, sequence length 103",
+    "precision": "CPU FP32, torch threads 1, inference mode",
+    "reference": "Full-sequence LSTM plus upstream residual connection",
+    "chunks": [
+      8,
+      17,
+      64
+    ],
+    "tolerance": {
+      "atol": 0.000001,
+      "rtol": 0.000001
+    },
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0
+  },
+  "limitations": [
+    "Isolated recurrent-layer parity, not whole codec/windowed decoder parity",
+    "No watermark message generation or convolution halo/sample mapping implemented here",
+    "No GPU, long-duration memory certification or production SAM capability"
+  ]
+}

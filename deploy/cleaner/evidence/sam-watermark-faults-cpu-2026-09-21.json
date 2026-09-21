@@ -1,0 +1,104 @@
+{
+  "recorded_on": "2026-09-21",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "strict_codec_keys": 317,
+  "source_sha256": {
+    "sam_features.py": "4a4d6dd142af0ee99162992b1ff2358116dde10244bd6d9f09086cbb46851fa2",
+    "mapped_residency.py": "d84f306409a03e5a711f2f00d3c6e3aa671fa2746e9b63c027d877958254a5b3",
+    "sam_convolution.py": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850",
+    "sam_recurrent.py": "1cfc02446b05af1d530105d07c85c7f3d59e10e3fc9c07e9f40e0c5a0ca46f58",
+    "sam_codec_graph.py": "b94b644ee42b2f07d7da4beb06a1f6b83256701be4fe564389a1dc3b9ec4574b"
+  },
+  "watermark_fault_cases": [
+    {
+      "scenario": "message_freeze",
+      "passed": true,
+      "input_preserved": true,
+      "no_partial_outputs": true
+    },
+    {
+      "scenario": "message_cancel",
+      "passed": true,
+      "input_preserved": true,
+      "no_partial_outputs": true
+    },
+    {
+      "scenario": "decoder_early_cancel",
+      "passed": true,
+      "input_preserved": true,
+      "no_partial_outputs": true
+    },
+    {
+      "scenario": "decoder_late_cancel",
+      "passed": true,
+      "input_preserved": true,
+      "no_partial_outputs": true
+    },
+    {
+      "scenario": "decoder_invalid_message",
+      "passed": true,
+      "input_preserved": true,
+      "no_partial_outputs": true
+    }
+  ],
+  "decoder_case": {
+    "input_shape": [
+      1,
+      1024,
+      2
+    ],
+    "output_shape": [
+      1,
+      1,
+      3840
+    ],
+    "message": [
+      [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ]
+    ],
+    "tile_frames": 257,
+    "matches_full_tolerance": true,
+    "maximum_absolute_difference": 7.078051567077637e-8,
+    "intermediate_cleanup": true
+  },
+  "cuda_initialized": false,
+  "torch": "2.8.0+cu128",
+  "numpy": "1.26.4",
+  "method": {
+    "script": "scripts/benchmark_cleaner_sam_features.py",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "message_freeze": "After first original message-processor forward, a hook zeros caller-owned message; all disk tiles still equal full reference with original bits",
+    "cancellation": "Message processor or first decoder convolution hook sets attempt cancellation event; typed CANCELLED required, then workspace and raw input bytes checked",
+    "invalid_message": "A bit is set to 2; ValueError required with no created output",
+    "isolation": "Each case has a fresh resource guard, cancellation event and temporary attempt directory; cancelled attempts are never resumed"
+  },
+  "verification": {
+    "targeted_tests_passed": 162,
+    "real_checkpoint_fault_cases_passed": 5,
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "limitations": [
+    "Synthetic short features, not full SAM inference or permissioned listening tests",
+    "No process-kill, host crash or GPU cancellation certification",
+    "Earlier feature numerical-tolerance failures remain; waveform roundtrip and long-form gates open"
+  ]
+}

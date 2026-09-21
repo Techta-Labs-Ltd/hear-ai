@@ -1,0 +1,48 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "4f1557cab3568182f164ec1290f1b8b328128d439101822476a0e26685377032",
+  "numpy_version": "1.26.4",
+  "policy_sha256": "7a463a86fffaee8ecfa8fcdb03d19fe2d1caad01056a88784e861c779bd9ae7a",
+  "known_answer": {
+    "seed": 42,
+    "frames": 257,
+    "channels": 256,
+    "identity": "304015eb64fc28c791c6408e401d0ad62b602567226f438f4898e24d306388a2",
+    "noise_sha256": "9ee91b1449f1ece474e876b5e4e1ab42ef40fc620a678d9380909a01ec1a509f",
+    "watermark_sha256": "ce1c6a84d98f3563860c6bbe0216e06d81913a44bf6ee3a95ba524e5e1a56034"
+  },
+  "verification": {
+    "tests_passed": 126,
+    "tile_frames_compared": [
+      1,
+      7,
+      128,
+      250,
+      1024
+    ],
+    "reference_tile_frames": 257,
+    "bytes_identical": true,
+    "global_numpy_rng_unchanged": true,
+    "watermark_independent_of_noise_consumption": true,
+    "cancellation_at_first_or_final_tile_cleans_output": true,
+    "existing_destination_preserved": true,
+    "numpy_version_mismatch_rejected": true,
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "method": {
+    "generator": "PCG64",
+    "seed_sequence": "[plan_seed,0x48454152,stream_id]",
+    "latent_stream": 1,
+    "watermark_stream": 2,
+    "latent_distribution": "standard_normal(dtype=float32)",
+    "layout": "time-major target128 then residual128",
+    "messages": "[2,16] int64 binary draws cast to FP32"
+  },
+  "limitations": [
+    "Reproducibility on pinned NumPy/runtime fixture, not equivalence to Torch.randn for the same integer seed",
+    "Not a cryptographic random generator",
+    "Production runtime identity and automatic engine invocation still need wiring",
+    "No new real-model quality, memory, GPU or release certification"
+  ]
+}

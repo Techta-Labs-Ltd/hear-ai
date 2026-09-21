@@ -1,0 +1,83 @@
+{
+  "schema": "sam-cublas-retention-diagnostic-v1",
+  "date": "2026-09-21",
+  "probe_sha256": "a296c55518625cae1cfeccf03a3c3fbab9396117f7cc066ac8ddc4820979a4cf",
+  "wheel_sha256": "64f1de9910f7f719263f2a8883a6c9486533448373efa3aa13a4760eb5c75448",
+  "source_evidence": "sam-installed-cuda-short-2026-09-21.json",
+  "result": {
+    "conditioning_admission": "pinned-raw-file",
+    "conditioning_asset_sha256": "3451a4a77edca22f2c381037aa24905b579caeda057ac712fc99801913ddeedd",
+    "cpu_comparison": {
+      "atol": 0.000001,
+      "max_abs_error": 1.0477378964424133e-8,
+      "passes": true,
+      "rtol": 0.00001
+    },
+    "cuda_initialized": true,
+    "device": "cuda:0",
+    "exact_known_answer": false,
+    "isolated_python": true,
+    "limitations": "Short synthetic fixture; not aggregate NVML, long-form or quality certification",
+    "module": "/tmp/hear-cleaner-sam-package.8MWUFr/venv/lib/python3.12/site-packages/hear/runtime/cleaner/sam_loader.py",
+    "repeat_output_identical": true,
+    "runtime": {
+      "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+      "engine": "sam_audio_small",
+      "longform_policy_sha256": "c17cc134dc80166ea099f83d976499f39f83c193f733771d0f298a5a97b6e06a",
+      "precision_policy_sha256": "cb6ab2a99bbf112abd3b22534de17e4d4105ee3f2520b9d8c9e4d3d1ee5ea7f5",
+      "runtime_sha256": "072f70160113b8007b3e67b10ff6dd258ab91fa244d15c5b6457e949028e64f3"
+    },
+    "scratch_and_namespace_cleanup": true,
+    "sessions": [
+      {
+        "allocated_after_close_bytes": 8519680,
+        "index": 0,
+        "reserved_after_close_bytes": 3038773248,
+        "target_sha256": "9dc33901dfce0b073c54965670fe87eb14659137d02071aa0b52374abc3d2c1e"
+      },
+      {
+        "allocated_after_close_bytes": 8519680,
+        "index": 1,
+        "reserved_after_close_bytes": 3038773248,
+        "target_sha256": "9dc33901dfce0b073c54965670fe87eb14659137d02071aa0b52374abc3d2c1e"
+      },
+      {
+        "allocated_after_close_bytes": 8519680,
+        "index": 2,
+        "reserved_after_close_bytes": 3038773248,
+        "target_sha256": "9dc33901dfce0b073c54965670fe87eb14659137d02071aa0b52374abc3d2c1e"
+      }
+    ],
+    "source_preserved": true,
+    "target_sha256": "9dc33901dfce0b073c54965670fe87eb14659137d02071aa0b52374abc3d2c1e",
+    "torch_memory": {
+      "allocated_after_close_bytes": 8519680,
+      "allocated_after_cublas_clear_bytes": 0,
+      "allocated_after_empty_cache_bytes": 8519680,
+      "allocated_after_gc_bytes": 8519680,
+      "allocator_cap_bytes": 9000000000,
+      "gpu": "NVIDIA A40",
+      "peak_allocated_bytes": 2890976768,
+      "peak_reserved_bytes": 3038773248,
+      "reserved_after_cublas_clear_bytes": 0,
+      "reserved_after_empty_cache_bytes": 20971520
+    }
+  },
+  "diagnostic": {
+    "hook": "torch._C._cuda_clearCublasWorkspaces",
+    "stage": "after three closed sessions, synchronize, GC and empty-cache observations",
+    "serving_uses_hook": false,
+    "inference": "The remaining 8519680-byte Torch allocation in this run was retained cuBLAS workspace; clearing it reduced allocated bytes to zero.",
+    "limitations": [
+      "Private pinned-Torch diagnostic only",
+      "Not a production cleanup recommendation",
+      "No aggregate NVML, long-form or quality certification"
+    ]
+  },
+  "checks": {
+    "architecture_tests_passed": 4,
+    "seconds": 2.29,
+    "ruff": true,
+    "format": true
+  }
+}

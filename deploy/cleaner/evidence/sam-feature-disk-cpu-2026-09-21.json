@@ -1,0 +1,52 @@
+{
+  "recorded_on": "2026-09-21",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "probe": {
+    "strict_codec_keys": 317,
+    "convolution_modules": 90,
+    "cases": 180,
+    "input_frames": [
+      31,
+      32
+    ],
+    "batch": 1,
+    "tile_frames": 13,
+    "atol": 0.000001,
+    "rtol": 0.00001,
+    "maximum_absolute_difference": 0.0000019073486328125,
+    "full_sequence_tolerance_failures": [
+      {
+        "layer": "decoder.model.1.block.4.block.1",
+        "input_frames": 32,
+        "maximum_absolute_difference": 0.0000014901161193847656
+      }
+    ],
+    "contiguous_tile_reference_exact": true,
+    "reopened_bytes_match": true,
+    "scratch_cleanup": true,
+    "elapsed_seconds": 15.04372125165537,
+    "cuda_initialized": false,
+    "torch": "2.8.0+cu128",
+    "numpy": "1.26.4",
+    "source_sha256": {
+      "sam_features.py": "acd203491a2fc8302ee291b2d1b30edf40cd9d3b1bd568c50a6f986e6e7797d8",
+      "mapped_residency.py": "d84f306409a03e5a711f2f00d3c6e3aa671fa2746e9b63c027d877958254a5b3",
+      "sam_convolution.py": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850"
+    }
+  },
+  "method": {
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "features": "sin(arange(in_channels * frames, float32) * 0.017), reshaped [1, channels, frames]",
+    "disk_reference": "Exact equality against same contiguous in-memory tile execution, plus read-only reopening",
+    "full_reference": "Original module full-sequence CPU FP32 output; tolerance not relaxed"
+  },
+  "limitations": [
+    "One full-sequence tolerance failure; not accepted as complete codec parity",
+    "Individual layers only; no composed recurrent/residual/watermark graph",
+    "No long-duration, GPU-memory, listening or release certification"
+  ],
+  "verification": "130 feature/convolution/recurrent/solver/packaging/architecture tests passed"
+}

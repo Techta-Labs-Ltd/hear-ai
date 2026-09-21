@@ -1,0 +1,35 @@
+{
+  "evidence_kind": "synthetic_cpu_engine_soak",
+  "release_certified": false,
+  "result": "passed",
+  "synthetic_audio": true,
+  "device": "cpu",
+  "frames": 172800017,
+  "channels": 2,
+  "sample_rate": 48000,
+  "inference_seconds": 221.6575743719004,
+  "rtf": 0.061571548436639,
+  "elapsed_seconds": 233.22768332390115,
+  "peak_rss_bytes": 991264768,
+  "max_window_frames": 576000,
+  "blocks": 361,
+  "output_bytes": 1382400240,
+  "tail_peak": 0.01172635331749916,
+  "pcm_sha256": "1f7311f26bf3f5d6623f3dc1ea95b5ff352e0414ab8e8aebd53bc34619598fed",
+  "runtime": {
+    "engine": "deepfilternet3",
+    "runtime_sha256": "e17a53879fe7a852bfea0f68c0c31737961a128c53da63bfb82a6caaa5dc9b3a",
+    "checkpoint_sha256": "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003",
+    "precision_policy_sha256": "0cc8d3f46f41c8b47e1dbbc2b493e29b8219878bc48e3a7672b86a7bf71ede95",
+    "longform_policy_sha256": "36e82920796b46a8a0ed6f797077d778280497da3aedf131ac9f9cde6d57a812"
+  },
+  "limitations": [
+    "Synthetic tone/noise, not speech-retention or listening evidence",
+    "CPU only; no CUDA/A40 memory or worker coexistence certification",
+    "Direct engine run, not full executor/mastering/storage pipeline",
+    "No production image digest certified",
+    "Peak RSS increased during run; repeated-job leakage not excluded",
+    "Regression tests ran concurrently with early benchmark startup",
+    "Temporary source/output audio removed automatically after validation"
+  ]
+}

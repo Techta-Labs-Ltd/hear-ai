@@ -1,0 +1,25 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "7e12e81dd5fe42ec3690137967a81210e51a723bb541295a348da773498061d7",
+  "test_source_sha256": "6b8017691cc37931d376bb466d3c56346c4e64694374ec793899e9e7b242dfe0",
+  "command": "OMP_NUM_THREADS=1 .venv/bin/pytest -q tests/test_cleaner_v2_sam_noise.py tests/test_cleaner_v2_sam_pipeline.py tests/test_cleaner_v2_packaging.py tests/test_architecture.py",
+  "verification": {
+    "tests_passed": 44,
+    "elapsed_seconds": 19.36,
+    "rng_state_allocation_failure_typed": true,
+    "watermark_allocation_failure_typed": true,
+    "partial_noise_allocation_failure_typed_and_cleaned": true,
+    "unrelated_file_preserved": true,
+    "identity_without_generator_allocation": true,
+    "non_integer_frame_and_tile_counts_rejected": true,
+    "previous_known_answer_digests_unchanged": true,
+    "ruff": "passed",
+    "format": "passed",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "Injected MemoryError fixtures, not physical host-memory exhaustion certification",
+    "No new real-model, speech-quality, long-form or GPU evidence",
+    "Production engine registration and runtime identity integration remain unfinished"
+  ]
+}

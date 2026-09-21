@@ -1,0 +1,78 @@
+{
+  "recorded_on": "2026-09-21",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "strict_codec_keys": 317,
+  "source_sha256": {
+    "sam_features.py": "0b358fbde3b00da221c51df5e85009b4268ee95aa7022929c4a2f51784e890e1",
+    "mapped_residency.py": "d84f306409a03e5a711f2f00d3c6e3aa671fa2746e9b63c027d877958254a5b3",
+    "sam_convolution.py": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850",
+    "sam_recurrent.py": "1cfc02446b05af1d530105d07c85c7f3d59e10e3fc9c07e9f40e0c5a0ca46f58",
+    "sam_codec_graph.py": "2d1c017dada0b6bcdc748f9a7e3500dbc8ba1e318abaae15cfed0720f693eb11"
+  },
+  "roundtrip_cases": [
+    {
+      "frames": 3840,
+      "padded_frames": 3840,
+      "latent_shape": [
+        1,
+        128,
+        2
+      ],
+      "mean_matches_tolerance": false,
+      "mean_maximum_absolute_difference": 0.000009894371032714844,
+      "waveform_matches_tolerance": true,
+      "waveform_maximum_absolute_difference": 1.7695128917694092e-8,
+      "final_sample": 0.006929086521267891,
+      "intermediate_cleanup": true
+    },
+    {
+      "frames": 3841,
+      "padded_frames": 5760,
+      "latent_shape": [
+        1,
+        128,
+        3
+      ],
+      "mean_matches_tolerance": false,
+      "mean_maximum_absolute_difference": 0.000038951635360717773,
+      "waveform_matches_tolerance": true,
+      "waveform_maximum_absolute_difference": 1.3969838619232178e-8,
+      "final_sample": 0.009813344106078148,
+      "intermediate_cleanup": true
+    }
+  ],
+  "cuda_initialized": false,
+  "mkldnn_enabled": true,
+  "torch": "2.8.0+cu128",
+  "numpy": "1.26.4",
+  "method": {
+    "script": "scripts/benchmark_cleaner_sam_features.py",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "waveform": "Synthetic mono float32 440 Hz sine, amplitude 0.01 at 48000 Hz",
+    "input_frames": [
+      3840,
+      3841
+    ],
+    "tile_frames": 257,
+    "hop_length": 1920,
+    "padding": "Pinned original right reflect padding to hop; explicit trim back to original length",
+    "encoding": "Original encoder and in_proj; first 128 of 256 channels are posterior mean, no random VAE sampling",
+    "decoding": "Original out_proj and full watermark decoder with fixed alternating 16-bit message",
+    "atol": 0.000001,
+    "rtol": 0.00001,
+    "cleanup": "After each roundtrip only input, caller-owned mean and caller-owned output remained"
+  },
+  "verification": {
+    "targeted_tests_passed": 181,
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "limitations": [
+    "Both mean-latent comparisons fail unchanged tolerance; waveform matches do not certify separator conditioning",
+    "Approximately 80 ms synthetic fixtures only, not speech/listening or long-form evidence",
+    "No whole-SAM generation, GPU-memory, load-time or release certification",
+    "Inputs shorter than original reflect rule supports are explicitly rejected, not silently padded another way"
+  ]
+}

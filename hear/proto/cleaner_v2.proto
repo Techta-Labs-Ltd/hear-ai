@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package hear.cleaner.v2;
+
+// Internal proposed v2 boundary. Not registered by the legacy Pipeline server.
+// Authentication, current-fence authorization and bounded semantic validation
+// are mandatory; protobuf parsing is not admission. Never expose grants publicly.
+service CleanerExecution {
+  rpc ExecuteAttempt (ExecuteAttemptRequest) returns (ManifestReference);
+}
+
+message RuntimeIdentity {
+  optional string engine = 1;
+  optional string runtime_sha256 = 2;
+  optional string checkpoint_sha256 = 3;
+  optional string precision_policy_sha256 = 4;
+  optional string longform_policy_sha256 = 5;
+}
+
+message SourceIdentity {
+  optional string revision_id = 1;
+  optional string media_id = 2;
+  optional string object_key = 3;
+  optional string object_version = 4;
+  optional string sha256 = 5;
+  optional uint64 size_bytes = 6;
+  optional uint32 sample_rate = 7;
+  optional uint32 channels = 8;
+  optional uint64 frames = 9;
+}
+
+message SampleInterval {
+  optional uint64 start_frame = 1;
+  optional uint64 end_frame = 2;
+}
+
+message NoiseReference {
+  optional uint64 start_frame = 1;
+  optional uint64 end_frame = 2;
+  optional string revision_id = 3;
+  optional bool confirmed_noise_only = 4;
+  optional string analysis_sha256 = 5;
+}
+
+message CleanPlan {
+  optional string profile = 1;
+  optional string profile_version = 2;
+  optional string catalogue_sha256 = 3;
+  RuntimeIdentity runtime = 4;
+  optional uint32 attenuation_limit_db = 5;
+  optional uint32 noise_reduction_db = 6;
+  NoiseReference noise_reference = 7;
+  optional string prompt_sha256 = 8;
+  optional string channel_policy = 9;
+  optional bool mono_acknowledged = 10;
+  optional bool adjust_loudness = 11;
+  optional bool match_comparison_loudness = 12;
+  optional bool shorten_pauses = 13;
+  optional uint64 seed = 14;
+}
+
+message AttemptTicket {
+  optional string contract_version = 1;
+  optional string backend_id = 2;
+  optional string tenant_scope = 3;
+  optional string job_id = 4;
+  optional string attempt_id = 5;
+  optional uint64 fence = 6;
+  optional string provider = 7;
+  optional string purpose = 8;
+  SourceIdentity input = 9;
+  optional string expected_active_audio_revision = 10;
+  CleanPlan plan = 11;
+  SampleInterval sample = 12;
+  optional string artifact_prefix = 13;
+  optional string manifest_key = 14;
+  // RFC3339 timezone-aware instant, matching the semantic contract.
+  optional string deadline = 15;
+  optional uint32 heartbeat_seconds = 16;
+  optional uint32 lease_seconds = 17;
+  optional string correlation_id = 18;
+}
+
+message StorageGrant {
+  optional string reference = 1;
+  optional string token = 2;
+  optional string expires_at = 3;
+}
+
+message ExecuteAttemptRequest {
+  AttemptTicket ticket = 1;
+  StorageGrant source_read_grant = 2;
+  StorageGrant artifact_write_grant = 3;
+}
+
+message ManifestReference {
+  optional string backend_id = 1;
+  optional string tenant_scope = 2;
+  optional string job_id = 3;
+  optional string attempt_id = 4;
+  optional uint64 fence = 5;
+  optional string object_key = 6;
+  optional string object_version = 7;
+  optional string sha256 = 8;
+  optional uint64 size_bytes = 9;
+  optional string outcome = 10;
+  optional string error_code = 11;
+}

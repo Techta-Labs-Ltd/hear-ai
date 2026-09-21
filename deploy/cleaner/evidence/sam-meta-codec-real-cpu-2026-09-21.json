@@ -1,0 +1,118 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": {
+    "codec_builder": "bf2f8c747e0191e36e93da4096479e4fe33eaff5de3adb9614026339afac5cd0",
+    "probe": "fe5118d4161eb6fe314acb212aaf2055803315466bd29fd868450b369aa43cd1"
+  },
+  "regression": {
+    "passed": 32,
+    "warnings": 3,
+    "seconds": 31.1
+  },
+  "ray": {
+    "cpus": 1,
+    "gpus": 0,
+    "memory_reservation_bytes": 8000000000
+  },
+  "result": {
+    "core_builder": "SamCoreBuilder",
+    "initial_core_checkpoint_tensors_meta": true,
+    "initial_core_nonpersistent_buffers_cpu": true,
+    "strict_core_keys": 247,
+    "cases": [
+      {
+        "frames": 2,
+        "time": 0,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          2,
+          256
+        ],
+        "finite": true
+      },
+      {
+        "frames": 7,
+        "time": 0.5,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          7,
+          256
+        ],
+        "finite": true
+      },
+      {
+        "frames": 13,
+        "time": 1,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          13,
+          256
+        ],
+        "finite": true
+      }
+    ],
+    "solver_case": null,
+    "pipeline_case": {
+      "codec_builder": "SamCodecBuilder",
+      "initial_codec_checkpoint_tensors_meta": true,
+      "checkpoint_loader": "SamCheckpointLoader",
+      "optional_manifest_sha256": "df43a1d8d8306fab6d9e9d70c991eb364efbdacdddac51bdc2e981a914bbed7e",
+      "excluded_vision_keys": 601,
+      "seed": 42,
+      "noise_identity": "19cab250744453806f7a1bed2b3017fd2e26a326bdd1c075cf59e99e57cba648",
+      "file_target_maximum_absolute_difference": 5.8498699218034744e-9,
+      "file_target_matches_reference_tolerance": true,
+      "file_target_matches_feature_pipeline_exactly": true,
+      "file_source_unchanged": true,
+      "file_intermediate_cleanup": true,
+      "strict_codec_keys": 317,
+      "frames": 3841,
+      "latent_frames": 3,
+      "steps": 16,
+      "output_shape": [
+        2,
+        1,
+        3841
+      ],
+      "stream_order": [
+        "target",
+        "residual"
+      ],
+      "maximum_absolute_difference": 1.4901161193847656e-8,
+      "matches_reference_tolerance": true,
+      "finite": true,
+      "borrowed_inputs_unchanged": true,
+      "intermediate_cleanup": true,
+      "codec_namespace_cleanup": true
+    },
+    "text_shape": [
+      1,
+      2,
+      768
+    ],
+    "text_sha256": "2ae37fee196dd64b3fc2229fdbb56d5d454f43bda5606c4b83ec15700e35bf12",
+    "prompt": "speech (engineering fixture, not approved preset)",
+    "cuda_initialized": false,
+    "optional_modules_imported": [],
+    "torch": "2.8.0+cu128",
+    "transformers": "4.57.6",
+    "upstream_source_sha256": {
+      "model.py": "b85217b41f8fcc083908db3dd6c37a211048f52b8e601e5eb4794bef18d56108",
+      "config.py": "0fc427191f9f8f0914d47f545448db1ec1f7d3c599d86e242d7b19f2cb422578",
+      "transformer.py": "ed25fe2a3ed4466859b45b35e0dfc87d5cd9af044f290ef804c5953a5ead9bf8",
+      "rope.py": "c920b965863e7349ad88593e03c0d49734138b614d0569e6d7acc7af179944be",
+      "patcher.py": "d4b406dca9a9eb4200b514b7d3c528aca0d5af006ac871320a00f836b0291082",
+      "align.py": "8d4d1b61587f71cbc687e73dfcc6226336b242d65e5edc02e6a9ee4b4a43ab9c"
+    }
+  },
+  "limitations": [
+    "Short synthetic one-window fixture, not speech/no-target/long-form or GPU certification",
+    "No measured peak-memory evidence",
+    "Core direct-probe load precedes strict combined reload, so this is not a final production cold-load sequence",
+    "Reference uses original method bodies and full codec operations, not full multimodal upstream separate()",
+    "Production factory, approved prompt provisioning and earlier conditioning parity gates remain open"
+  ]
+}

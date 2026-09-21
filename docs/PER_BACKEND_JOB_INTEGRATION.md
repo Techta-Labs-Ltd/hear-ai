@@ -7,7 +7,8 @@ Hear AI after backend-bound authentication and per-job storage routing.
 
 Each backend deployment needs:
 
-- A registered `backend_id`. The current local registration is `hear-backend`.
+- A registered `backend_id`. Use `backend-a` in production and `backend-a-dev`
+  in development; the active environment must match the AI deployment.
 - The original service key whose SHA-256 hash is registered in Hear AI.
 - The Hear AI HTTP URL and gRPC target.
 - A mechanism for issuing job-scoped B2 credentials.
@@ -70,7 +71,7 @@ X-Service-Key: <registered backend service key>
 ```json
 {
   "job_id": "01JBACKENDGENERATEDULID",
-  "backend_id": "hear-backend",
+  "backend_id": "backend-a",
   "track_id": "track-123",
   "user_id": "user-456",
   "job_type": "pipeline",
@@ -95,7 +96,7 @@ Successful acceptance returns:
 ```json
 {
   "job_id": "01JBACKENDGENERATEDULID",
-  "backend_id": "hear-backend",
+  "backend_id": "backend-a",
   "run_id": "generated-run-id",
   "track_id": "track-123",
   "job_type": "pipeline",
@@ -174,7 +175,7 @@ metadata = (
 accepted = client.SubmitJob(
     SubmitJobRequest(
         job_id=job_id,
-        backend_id="hear-backend",
+        backend_id="backend-a",
         track_id=track_id,
         user_id=user_id,
         job_type="pipeline",
@@ -352,7 +353,7 @@ For an end-to-end test, export credentials locally without committing them:
 
 ```bash
 export HEAR_SERVICE_KEY='...'
-export HEAR_BACKEND_ID='hear-backend'
+export HEAR_BACKEND_ID='backend-a'
 export HEAR_STORAGE_ENDPOINT_URL='...'
 export HEAR_STORAGE_BUCKET_NAME='...'
 export HEAR_STORAGE_KEY_ID='...'

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hear-cleaner-runtime"
+version = "0.1.0"
+description = "Isolated cleaner-v2 execution library; not a deployed service"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy==1.26.4",
+  "soundfile==0.12.1",
+  "pydantic==2.13.4",
+  "protobuf==6.33.6",
+  "grpcio==1.82.1",
+]
+
+[project.optional-dependencies]
+analysis = ["onnxruntime==1.27.0"]
+sam = ["torch==2.8.0+cu128", "einops==0.8.2"]
+deepfilter = [
+  "deepfilternet==0.5.6",
+  "deepfilterlib==0.5.6",
+  "torch==2.8.0+cu128",
+  "torchaudio==2.8.0+cu128",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hear*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"hear.proto" = ["cleaner_v2.proto", "cleaner_v2_pb2.pyi"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

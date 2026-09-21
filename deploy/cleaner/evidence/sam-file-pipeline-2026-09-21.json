@@ -1,0 +1,25 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "7d711cabeb2017b3db830b13974ae2daf226bc7ab93bd002d820404e40bde689",
+  "test_source_sha256": "d91e21159507bebd58f759c0716500f861b4e52fa37034c594ab40e365e0747c",
+  "command": "OMP_NUM_THREADS=1 .venv/bin/pytest -q tests/test_cleaner_v2_sam_file_pipeline.py tests/test_cleaner_v2_sam_pipeline.py tests/test_cleaner_v2_sam_pcm.py tests/test_cleaner_v2_sam_noise.py tests/test_cleaner_v2_packaging.py tests/test_architecture.py",
+  "tests_passed": 69,
+  "elapsed_seconds": 15.64,
+  "verification": {
+    "real_pcm_and_noise_io_with_fixture_separator": true,
+    "repeatable_global_noise": true,
+    "independent_watermark_stream_verified": true,
+    "target_only_export": true,
+    "source_bytes_preserved": true,
+    "separation_cancellation_and_cleanup_failure_cleanup": true,
+    "existing_destination_rejected_before_processing": true,
+    "ruff": "passed",
+    "format": "passed",
+    "git_diff_check": "passed"
+  },
+  "limitations": [
+    "No new real-model parity or quality evidence",
+    "Requires prepared mono 48000 Hz PCM and externally supplied pinned conditioning",
+    "Production prompt cache, engine registration, runtime identity integration and certification remain incomplete"
+  ]
+}

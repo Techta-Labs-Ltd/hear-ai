@@ -1,0 +1,266 @@
+{
+  "recorded_on": "2026-09-21",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "strict_codec_keys": 317,
+  "source_sha256": {
+    "sam_features.py": "0b358fbde3b00da221c51df5e85009b4268ee95aa7022929c4a2f51784e890e1",
+    "mapped_residency.py": "d84f306409a03e5a711f2f00d3c6e3aa671fa2746e9b63c027d877958254a5b3",
+    "sam_convolution.py": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850",
+    "sam_recurrent.py": "1cfc02446b05af1d530105d07c85c7f3d59e10e3fc9c07e9f40e0c5a0ca46f58",
+    "sam_codec_graph.py": "2d1c017dada0b6bcdc748f9a7e3500dbc8ba1e318abaae15cfed0720f693eb11"
+  },
+  "method": {
+    "script": "scripts/benchmark_cleaner_sam_features.py",
+    "option": "--mixed-cpu-backend",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "policy": "Isolated single-use CPU worker: MKLDNN disabled outside LSTM calls; LSTM pre/post hooks enable it during the call and restore prior flags, including failed forwards",
+    "reference": "Both same-policy full execution and independent original-default-backend full waveform/mean references",
+    "adoption": "Diagnostic only; no production runtime or readiness configuration changed"
+  },
+  "probe": {
+    "convolution_cases": 180,
+    "convolution_failures": [],
+    "graph_cases": [
+      {
+        "layer": "encoder",
+        "input_frames": 3840,
+        "tile_frames": 257,
+        "output_shape": [
+          1,
+          1024,
+          2
+        ],
+        "matches_full_tolerance": true,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1",
+        "input_frames": 31,
+        "tile_frames": 257,
+        "output_shape": [
+          1,
+          768,
+          372
+        ],
+        "matches_full_tolerance": true,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2",
+        "input_frames": 31,
+        "tile_frames": 257,
+        "output_shape": [
+          1,
+          384,
+          310
+        ],
+        "matches_full_tolerance": true,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3",
+        "input_frames": 31,
+        "tile_frames": 257,
+        "output_shape": [
+          1,
+          192,
+          248
+        ],
+        "matches_full_tolerance": true,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4",
+        "input_frames": 31,
+        "tile_frames": 257,
+        "output_shape": [
+          1,
+          96,
+          62
+        ],
+        "matches_full_tolerance": true,
+        "maximum_absolute_difference": 0
+      }
+    ],
+    "recurrent_cases": [
+      {
+        "layer": "decoder.wm_model.encoder_block.post.0.lstm",
+        "matches_full_tolerance": true,
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 8,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.post.0.lstm",
+        "matches_full_tolerance": true,
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 17,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.post.0.lstm",
+        "matches_full_tolerance": true,
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 64,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.pre.1.lstm",
+        "matches_full_tolerance": true,
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 8,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.pre.1.lstm",
+        "matches_full_tolerance": true,
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 17,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.pre.1.lstm",
+        "matches_full_tolerance": true,
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 64,
+        "maximum_absolute_difference": 0
+      }
+    ],
+    "decoder_case": {
+      "input_shape": [
+        1,
+        1024,
+        2
+      ],
+      "output_shape": [
+        1,
+        1,
+        3840
+      ],
+      "message": [
+        [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ]
+      ],
+      "tile_frames": 257,
+      "matches_full_tolerance": true,
+      "maximum_absolute_difference": 5.960464477539063e-8,
+      "intermediate_cleanup": true
+    },
+    "roundtrip_cases": [
+      {
+        "frames": 3840,
+        "padded_frames": 3840,
+        "latent_shape": [
+          1,
+          128,
+          2
+        ],
+        "mean_matches_original_default": false,
+        "mean_vs_original_default_max_abs": 0.000015832483768463135,
+        "waveform_matches_original_default": true,
+        "waveform_vs_original_default_max_abs": 2.1420419216156006e-8,
+        "mean_matches_tolerance": true,
+        "mean_maximum_absolute_difference": 0,
+        "waveform_matches_tolerance": true,
+        "waveform_maximum_absolute_difference": 8.381903171539307e-9,
+        "final_sample": 0.0069290874525904655,
+        "intermediate_cleanup": true
+      },
+      {
+        "frames": 3841,
+        "padded_frames": 5760,
+        "latent_shape": [
+          1,
+          128,
+          3
+        ],
+        "mean_matches_original_default": false,
+        "mean_vs_original_default_max_abs": 0.00006440281867980957,
+        "waveform_matches_original_default": true,
+        "waveform_vs_original_default_max_abs": 2.0489096641540527e-8,
+        "mean_matches_tolerance": true,
+        "mean_maximum_absolute_difference": 0.0000010728836059570312,
+        "waveform_matches_tolerance": true,
+        "waveform_maximum_absolute_difference": 1.4901161193847656e-8,
+        "final_sample": 0.009813345968723297,
+        "intermediate_cleanup": true
+      }
+    ],
+    "watermark_fault_cases": [
+      {
+        "scenario": "message_freeze",
+        "passed": true,
+        "input_preserved": true,
+        "no_partial_outputs": true
+      },
+      {
+        "scenario": "message_cancel",
+        "passed": true,
+        "input_preserved": true,
+        "no_partial_outputs": true
+      },
+      {
+        "scenario": "decoder_early_cancel",
+        "passed": true,
+        "input_preserved": true,
+        "no_partial_outputs": true
+      },
+      {
+        "scenario": "decoder_late_cancel",
+        "passed": true,
+        "input_preserved": true,
+        "no_partial_outputs": true
+      },
+      {
+        "scenario": "decoder_invalid_message",
+        "passed": true,
+        "input_preserved": true,
+        "no_partial_outputs": true
+      }
+    ],
+    "cuda_initialized": false,
+    "torch": "2.8.0+cu128",
+    "numpy": "1.26.4"
+  },
+  "verification": {
+    "tests_passed": 183,
+    "warnings": "Two upstream Torch warnings about oneDNN TF32 on unsupported Intel GPU; tests executed on CPU",
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "conclusions": [
+    "Candidate same-policy convolution, recurrent, block, decoder and both mean/waveform roundtrip comparisons passed unchanged tolerances",
+    "Both mean comparisons against original default backend failed, max errors approximately 1.58e-5 and 6.44e-5",
+    "Both waveform comparisons against original default backend passed",
+    "Candidate is not accepted for separator conditioning; changing the reference is not a resolution of original-default parity"
+  ],
+  "limitations": [
+    "Short synthetic fixtures only; no full SAM separator or long-form conditioning validation",
+    "Global backend hooks are diagnostic-only, not thread-safe serving policy or deployment wiring",
+    "No GPU, listening, load-time or memory certification"
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "recorded_on": "2026-09-21",
+  "sam_source_commit": "bb4c6999d2677c7402360e426afc01ddfad6dce0",
+  "dacvae_source": {
+    "repository": "https://github.com/facebookresearch/dacvae",
+    "commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+    "local_checkout": "/tmp/hear-dacvae-source.08CSwm"
+  },
+  "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+  "probe": {
+    "result": "passed",
+    "codec_state_keys": 317,
+    "missing_keys": [],
+    "unexpected_keys": [],
+    "cuda_initialized": false,
+    "watermark_blending_alpha": 0.25,
+    "watermark_retained": true,
+    "reports": [
+      {
+        "input_frames": 48000,
+        "padded_frames": 48000,
+        "latent_shape": [
+          1,
+          128,
+          25
+        ],
+        "decoded_shape": [
+          1,
+          1,
+          48000
+        ],
+        "cropped_frames": 48000,
+        "tail_peak": 0.02601435035467148,
+        "pcm_sha256": "e9c1023a5ac911f575752995e6dc329c88abeeda331593e79cc84c9d80e0f071",
+        "elapsed_seconds": 7.433443396817893,
+        "same_seed_decode_bitwise_equal": true,
+        "different_seed_max_abs_difference": 0.0004543513059616089
+      },
+      {
+        "input_frames": 48017,
+        "padded_frames": 49920,
+        "latent_shape": [
+          1,
+          128,
+          26
+        ],
+        "decoded_shape": [
+          1,
+          1,
+          49920
+        ],
+        "cropped_frames": 48017,
+        "tail_peak": 0.012003745883703232,
+        "pcm_sha256": "ad8c6fd3dae87011f5419101bb5b827910b78f141f184a65af8065628a37ab69",
+        "elapsed_seconds": 7.289460455067456,
+        "same_seed_decode_bitwise_equal": true,
+        "different_seed_max_abs_difference": 0.0004543531686067581
+      }
+    ],
+    "versions": {
+      "torch": "2.8.0+cu128",
+      "torchaudio": "2.8.0+cu128",
+      "numpy": "1.26.4",
+      "einops": "0.8.2",
+      "descript-audiotools": "0.7.2",
+      "argbind": "0.3.9"
+    }
+  },
+  "method": {
+    "device": "cpu",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "ray_memory_reservation_bytes": 3000000000,
+    "max_retries": 0,
+    "max_calls": 1,
+    "checkpoint_loading": "weights_only=True, mmap=True, map_location=cpu",
+    "state_validation": "exact equality of audio_codec key set with instantiated codec state; strict=True load",
+    "encoder": "SAM mean latent from quantizer.in_proj(encoder(reflect-padded waveform)), not random VAE sample",
+    "decoder": "unmodified quantizer.out_proj and decoder including watermarking",
+    "seed_control": "torch.random.fork_rng(devices=[]); manual_seed(42) for repeated decode, 43 for comparison",
+    "torch_threads": 1,
+    "precision": "float32"
+  },
+  "initial_probe": {
+    "result": "failed",
+    "reason": "unseeded repeated decoder output was not bitwise identical; source audit identified random watermark messages"
+  },
+  "findings": [
+    "Decoder watermark blend alpha remains 0.25; no watermark keys/modules removed",
+    "Decoder watermark pathway contains LSTM blocks; naive independent decoding windows do not preserve recurrent state",
+    "Upstream reflection padding requires separate handling/validation for ultra-short input",
+    "Partial tail probe explicitly cropped decoded padded output to original frame count"
+  ],
+  "limitations": [
+    "Standalone codec CPU probe, not SAM separator inference or audio-only/full-runtime parity",
+    "One-second synthetic waveform cases, not long-form or listening certification",
+    "Root test dependency environment with pinned DACVAE source path, not isolated production packaging",
+    "No GPU allocation, model-memory certification, checkpoint finite-weight sweep or production adapter registration"
+  ]
+}

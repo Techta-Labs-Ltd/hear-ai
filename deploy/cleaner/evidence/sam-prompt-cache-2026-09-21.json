@@ -1,0 +1,24 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "76dda36d08d7afa00c852420107ea7ffa2cf75864afbc378e344971de58ef342",
+  "test_source_sha256": "b033200ae0089bd0da567fc573e565ba115318aeb4f28a9f2fa033f55a13bbaa",
+  "command": "OMP_NUM_THREADS=1 .venv/bin/pytest -q tests/test_cleaner_v2_sam_prompt_cache.py tests/test_cleaner_v2_sam_file_pipeline.py tests/test_cleaner_v2_packaging.py tests/test_architecture.py",
+  "tests_passed": 34,
+  "elapsed_seconds": 16.83,
+  "verification": {
+    "all_identity_digest_fields_checked": true,
+    "embedding_and_mask_bytes_verified": true,
+    "input_and_output_mutation_isolation": true,
+    "shape_dtype_finite_nonzero_and_mask_validation": true,
+    "duplicate_keys_rejected": true,
+    "max_entries": 16,
+    "max_tokens": 512,
+    "closed_cache_fails_lookup": true,
+    "ruff_and_format": "passed"
+  },
+  "limitations": [
+    "Fixture embeddings, not a new real T5 encoding run",
+    "Pinned identities must come from trusted provisioning and approved presets",
+    "No prompt approval, production encoder loader, engine registration or quality certification"
+  ]
+}

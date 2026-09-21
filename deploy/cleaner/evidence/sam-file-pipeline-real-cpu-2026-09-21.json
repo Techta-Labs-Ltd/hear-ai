@@ -1,0 +1,61 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": {
+    "scripts/benchmark_cleaner_sam_core.py": "2244319ef9ad6558b065b171965f7cfb8c27e7068bbb585ad9361bf611bde49d",
+    "hear/runtime/cleaner/sam_pipeline.py": "7d711cabeb2017b3db830b13974ae2daf226bc7ab93bd002d820404e40bde689",
+    "hear/runtime/cleaner/sam_pcm.py": "4c7132cc7d7aa493ad4dec5fc0f9f5c60011a49f8ba3392ba1f5f01842106462",
+    "hear/runtime/cleaner/sam_noise.py": "7e12e81dd5fe42ec3690137967a81210e51a723bb541295a348da773498061d7"
+  },
+  "command": "OMP_NUM_THREADS=1 PYTHONPATH=/workspace/hear-ai .venv/bin/python scripts/benchmark_cleaner_sam_core.py --source-directory /tmp/hear-sam-source.mYBkqM --checkpoint-directory /workspace/hear-ai/models/sam-audio-small/20b65f56888142eebe7c37448c6f6b3b32600e9b --text-directory /workspace/hear-ai/models/t5-base/a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1 --codec-source /tmp/hear-dacvae-source.08CSwm --pipeline-only",
+  "exit_code": 0,
+  "runtime": {
+    "ray_cpus": 1,
+    "ray_gpus": 0,
+    "ray_memory_reservation_bytes": 8000000000,
+    "cuda_initialized": false,
+    "optional_modules_imported": [],
+    "torch": "2.8.0+cu128",
+    "transformers": "4.57.6",
+    "strict_core_keys": 247,
+    "strict_codec_keys": 317,
+    "text_shape": [1, 2, 768],
+    "text_sha256": "2ae37fee196dd64b3fc2229fdbb56d5d454f43bda5606c4b83ec15700e35bf12"
+  },
+  "fixture": {
+    "signal": "synthetic 440 Hz sine, amplitude 0.01",
+    "frames": 3841,
+    "sample_rate": 48000,
+    "latent_frames": 3,
+    "seed": 42,
+    "steps": 16,
+    "prompt": "speech (engineering fixture, not approved preset)",
+    "noise_identity": "19cab250744453806f7a1bed2b3017fd2e26a326bdd1c075cf59e99e57cba648"
+  },
+  "results": {
+    "file_target_maximum_absolute_difference": 5.8498699218034744e-09,
+    "file_target_matches_reference_tolerance": true,
+    "file_target_matches_feature_pipeline_exactly": true,
+    "file_source_unchanged": true,
+    "file_intermediate_cleanup": true,
+    "paired_maximum_absolute_difference": 1.4901161193847656e-08,
+    "paired_matches_reference_tolerance": true,
+    "output_shape": [2, 1, 3841],
+    "finite": true,
+    "atol": 1e-6,
+    "rtol": 1e-5,
+    "direct_core_cases_maximum_absolute_difference": 0.0
+  },
+  "regression": {
+    "tests_passed": 25,
+    "warnings": 2,
+    "elapsed_seconds": 18.82,
+    "ruff_and_format": "passed"
+  },
+  "limitations": [
+    "Reference assembles original forward-method bodies and full codec operations; not full upstream multimodal separate()",
+    "Short synthetic single-window fixture, not speech retention, no-target, hallucination or long-form certification",
+    "Ray memory reservation is not a physical memory bound or measured peak",
+    "Does not waive prior codec conditioning parity failures",
+    "No GPU, approved prompt, production loader, engine registration or release certification"
+  ]
+}

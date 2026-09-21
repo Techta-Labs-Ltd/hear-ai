@@ -1,0 +1,99 @@
+{
+  "recorded_on": "2026-09-21",
+  "sam_source_commit": "bb4c6999d2677c7402360e426afc01ddfad6dce0",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "text_revision": "a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1",
+  "source_sha256": {
+    "hear/runtime/cleaner/sam_conditioning.py": "0db3bda3b5346101c84b5852f1de9df00c8f25ec829f97262c05202de1704e3b",
+    "scripts/benchmark_cleaner_sam_core.py": "99265e710fb0d4657ce38bae8fe3b4c2626b6cc6611a595299cb25ca74b7327d"
+  },
+  "probe": {
+    "strict_core_keys": 247,
+    "cases": [
+      {
+        "frames": 2,
+        "time": 0,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          2,
+          256
+        ],
+        "finite": true
+      },
+      {
+        "frames": 7,
+        "time": 0.5,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          7,
+          256
+        ],
+        "finite": true
+      },
+      {
+        "frames": 13,
+        "time": 1,
+        "maximum_absolute_difference": 0,
+        "output_shape": [
+          1,
+          13,
+          256
+        ],
+        "finite": true
+      }
+    ],
+    "solver_case": {
+      "frames": 7,
+      "channels": 256,
+      "window_frames": 5,
+      "overlap_frames": 2,
+      "steps": 16,
+      "native_evaluations": 96,
+      "partial_tail_frames": 1,
+      "maximum_absolute_difference": 0,
+      "finite": true,
+      "intermediate_cleanup": true
+    },
+    "text_shape": [
+      1,
+      2,
+      768
+    ],
+    "text_sha256": "2ae37fee196dd64b3fc2229fdbb56d5d454f43bda5606c4b83ec15700e35bf12",
+    "prompt": "speech (engineering fixture, not approved preset)",
+    "cuda_initialized": false,
+    "optional_modules_imported": [],
+    "torch": "2.8.0+cu128",
+    "transformers": "4.57.6",
+    "upstream_source_sha256": {
+      "model.py": "b85217b41f8fcc083908db3dd6c37a211048f52b8e601e5eb4794bef18d56108",
+      "config.py": "0fc427191f9f8f0914d47f545448db1ec1f7d3c599d86e242d7b19f2cb422578",
+      "transformer.py": "ed25fe2a3ed4466859b45b35e0dfc87d5cd9af044f290ef804c5953a5ead9bf8",
+      "rope.py": "c920b965863e7349ad88593e03c0d49734138b614d0569e6d7acc7af179944be",
+      "patcher.py": "d4b406dca9a9eb4200b514b7d3c528aca0d5af006ac871320a00f836b0291082",
+      "align.py": "8d4d1b61587f71cbc687e73dfcc6226336b242d65e5edc02e6a9ee4b4a43ab9c"
+    }
+  },
+  "method": {
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "script": "scripts/benchmark_cleaner_sam_core.py --steps 16",
+    "reference": "Independent in-memory global midpoint integration invoking unchanged upstream core forward bodies with identical conditioning, initial state, overlap ramps and fixed times",
+    "execution_deadline_seconds": 600,
+    "noise": "Synthetic sine state, not production RNG"
+  },
+  "verification": {
+    "focused_tests_passed": 46,
+    "warnings": "Two existing Torch oneDNN/Intel GPU warnings in CPU-backend tests",
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "limitations": [
+    "Sixteen-step integration over seven synthetic latent frames; not hour-long input or production 250-frame windows",
+    "No complete audio-to-separated-waveform parity or listening validation",
+    "Codec conditioning default-backend mismatches remain unresolved",
+    "No production loading, GPU memory, overlap/drain or release certification"
+  ]
+}

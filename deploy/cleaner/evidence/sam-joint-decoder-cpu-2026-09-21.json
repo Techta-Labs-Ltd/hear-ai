@@ -1,0 +1,91 @@
+{
+  "recorded_on": "2026-09-21",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "strict_codec_keys": 317,
+  "source_sha256": {
+    "sam_features.py": "81e8615598ad2c84ce0140b96f68c2da7ca3323eb1bd3b2147aad8f864a58eb3",
+    "mapped_residency.py": "d84f306409a03e5a711f2f00d3c6e3aa671fa2746e9b63c027d877958254a5b3",
+    "sam_convolution.py": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850",
+    "sam_recurrent.py": "1cfc02446b05af1d530105d07c85c7f3d59e10e3fc9c07e9f40e0c5a0ca46f58",
+    "sam_codec_graph.py": "bb4205320456e46a9e78c50906692671a8a8c3747afdefe6a5469be20ab0ef51"
+  },
+  "joint_case": {
+    "frames": 3839,
+    "output_shape": [
+      2,
+      1,
+      3839
+    ],
+    "stream_order": [
+      "target",
+      "residual"
+    ],
+    "messages": [
+      [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      [
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0
+      ]
+    ],
+    "maximum_absolute_difference": 8.940696716308594e-8,
+    "matches_full_tolerance": true,
+    "intermediate_cleanup": true
+  },
+  "torch": "2.8.0+cu128",
+  "numpy": "1.26.4",
+  "cuda_initialized": false,
+  "method": {
+    "script": "scripts/benchmark_cleaner_sam_features.py",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "fixture": "Synthetic [1,256,2] joint latents, sin(arange(512,float32)*0.017)",
+    "reference": "Original generated_features reshape to [2,128,T], original out-projection and full decoder; explicit independent target/residual watermark messages",
+    "tile_frames": 257,
+    "requested_frames": 3839,
+    "atol": 0.000001,
+    "rtol": 0.00001,
+    "cleanup": "Only borrowed joint input and returned paired waveform remained"
+  },
+  "verification": {
+    "focused_tests_passed": 78,
+    "ruff": "passed"
+  },
+  "limitations": [
+    "Short synthetic latent fixture, not full audio separation",
+    "Output batch is target/residual, not stereo channels or exact algebraic complement",
+    "Earlier codec-conditioning parity failures remain unresolved",
+    "No long-form, GPU-memory or speech/listening certification"
+  ]
+}

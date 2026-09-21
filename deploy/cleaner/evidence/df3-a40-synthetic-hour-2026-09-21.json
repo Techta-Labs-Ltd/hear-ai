@@ -1,0 +1,89 @@
+{
+  "schema": "hear.cleaner.hardware-probe.v1",
+  "date": "2026-09-21",
+  "scope": "One-hour synthetic stereo DF3 A40 CUDA duration probe; not release certification",
+  "ray": {
+    "num_cpus": 1,
+    "num_gpus": 0.1,
+    "memory_reservation_bytes": 4000000000,
+    "max_retries": 0
+  },
+  "supervision": {
+    "deadline_seconds": 900,
+    "minimum_free_gpu_mib_at_admission": 20000,
+    "minimum_free_scratch_bytes_at_admission": 8000000000,
+    "process_stop_threshold_bytes": 3000000000,
+    "measurement": "nvidia-smi per-PID used_memory in MiB multiplied by 1048576; requested 200 ms cadence"
+  },
+  "observed": {
+    "baseline_gpu_csv": "NVIDIA A40, 46068, 10872, 34617",
+    "diagnostics": [],
+    "elapsed_seconds": 57.98420035885647,
+    "exit_code": 0,
+    "first_process_memory_bytes": 10485760,
+    "gpu_after_csv": "NVIDIA A40, 46068, 10872, 34617",
+    "last_process_memory_bytes": 834666496,
+    "process_peak_bytes_from_mib_samples": 834666496,
+    "result": {
+      "adapter_code_sha256": "ab3098d96033386d1fef8aae0e57074b6c35126fda7c8ab7f9795348ebc8ebb6",
+      "blocks": 361,
+      "channels": 2,
+      "cuda": {
+        "allocator_cap_bytes": 1000000000,
+        "device_name": "NVIDIA A40",
+        "peak_allocated_bytes": 293311488,
+        "peak_reserved_bytes": 501219328
+      },
+      "device": "cuda:0",
+      "elapsed_seconds": 45.98273432999849,
+      "frames": 172800017,
+      "inference_seconds": 34.56904534390196,
+      "max_window_frames": 576000,
+      "output_bytes": 1382400240,
+      "pcm_sha256": "0c2614889597b71abc64d39a53b6708bf52069be60f7efa246ecee9613337603",
+      "peak_rss_bytes": 1181962240,
+      "pid": 518585,
+      "result": "passed",
+      "rtf": 0.009602512595528323,
+      "runtime": {
+        "checkpoint_sha256": "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003",
+        "engine": "deepfilternet3",
+        "longform_policy_sha256": "36e82920796b46a8a0ed6f797077d778280497da3aedf131ac9f9cde6d57a812",
+        "precision_policy_sha256": "e920db572014e7526d243b528c79d5412cb33554ee41ad343774af8b4a53df5b",
+        "runtime_sha256": "15f57f36444c268e443d3cad855a9079e60d3a923b24d414fc7dbc0290a2a6a2"
+      },
+      "sample_rate": 48000,
+      "synthetic_audio": true,
+      "tail_peak": 0.011726342141628265
+    },
+    "samples_with_process": 164,
+    "sampling_calls": 251,
+    "sampling_interval_requested_seconds": 0.2,
+    "status": "passed",
+    "stop_reason": null,
+    "trace": [
+      {
+        "elapsed_seconds": 20.07,
+        "latest_benchmark_progress": null,
+        "process_memory_bytes_from_mib": 10485760
+      },
+      {
+        "elapsed_seconds": 40.11,
+        "latest_benchmark_progress": {
+          "completed_blocks": 198,
+          "peak_rss_bytes": 1181962240
+        },
+        "process_memory_bytes_from_mib": 830472192
+      }
+    ]
+  },
+  "limitations": [
+    "Quantized, sampled NVIDIA CLI readings can miss sub-interval peaks; monitoring does not enforce a physical VRAM partition.",
+    "Torch allocated memory is included in reserved memory; these counters must not be added.",
+    "Synthetic signal integrity and bounded-window measurements do not establish wanted-speech preservation or perceptual quality.",
+    "Other Ray services remained loaded but concurrent active workload peaks were not exercised.",
+    "SAM, model switching, forced OOM recovery and deployment overlap were not tested.",
+    "Only the measured one-hour 48 kHz stereo workload and 1 GB allocator setting are covered; maximum supported duration/layout/rate certification remains open.",
+    "No production readiness was enabled; the probe's temporary audio files were scoped to its own temporary directory."
+  ]
+}

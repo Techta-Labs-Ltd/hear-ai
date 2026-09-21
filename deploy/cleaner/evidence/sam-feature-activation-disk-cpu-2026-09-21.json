@@ -1,0 +1,552 @@
+{
+  "recorded_on": "2026-09-21",
+  "dacvae_source_commit": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+  "checkpoint_revision": "20b65f56888142eebe7c37448c6f6b3b32600e9b",
+  "checkpoint_sha256": "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06",
+  "probe": {
+    "strict_codec_keys": 317,
+    "convolution_modules": 90,
+    "cases": 180,
+    "input_frames": [
+      31,
+      32
+    ],
+    "batch": 1,
+    "tile_frames": 13,
+    "atol": 0.000001,
+    "rtol": 0.00001,
+    "maximum_absolute_difference": 0.0000019073486328125,
+    "full_sequence_tolerance_failures": [
+      {
+        "layer": "decoder.model.1.block.4.block.1",
+        "input_frames": 32,
+        "maximum_absolute_difference": 0.0000014901161193847656
+      }
+    ],
+    "recurrent_cases": [
+      {
+        "layer": "decoder.wm_model.encoder_block.post.0.lstm",
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 8,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.post.0.lstm",
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 17,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.post.0.lstm",
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 64,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.pre.1.lstm",
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 8,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.pre.1.lstm",
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 17,
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.pre.1.lstm",
+        "batch": 2,
+        "frames": 103,
+        "tile_frames": 64,
+        "maximum_absolute_difference": 0
+      }
+    ],
+    "activation_cases": [
+      {
+        "layer": "encoder.block.1.block.0.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.1.block.0.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.1.block.1.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.1.block.1.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.1.block.2.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.1.block.2.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.1.block.3",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.0.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.0.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.1.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.1.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.2.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.2.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.2.block.3",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.0.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.0.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.1.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.1.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.2.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.2.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.3.block.3",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.0.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.0.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.1.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.1.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.2.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.2.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.4.block.3",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "encoder.block.5",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.1.block.4.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.4.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.5.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.5.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.6.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.1.block.6.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.1.block.7.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.1.block.7.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.1.block.8.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.8.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.9",
+        "kind": "Identity",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.1.block.10",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.2.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.2.block.4.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.4.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.5.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.5.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.6.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.2.block.6.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.2.block.7.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.2.block.7.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.2.block.8.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.8.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.9",
+        "kind": "Identity",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.2.block.10",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.3.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.3.block.4.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.4.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.5.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.5.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.6.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.3.block.6.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.3.block.7.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.3.block.7.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.3.block.8.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.8.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.9",
+        "kind": "Identity",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.3.block.10",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.4.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.4.block.4.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.4.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.5.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.5.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.6.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.4.block.6.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.4.block.7.block.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.4.block.7.block.2",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.model.4.block.8.block.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.8.block.2",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.9",
+        "kind": "Identity",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.model.4.block.10",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.pre.0",
+        "kind": "Snake1d",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.pre.2",
+        "kind": "Tanh",
+        "maximum_absolute_difference": 0
+      },
+      {
+        "layer": "decoder.wm_model.encoder_block.post.1",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      },
+      {
+        "layer": "decoder.wm_model.decoder_block.post.0",
+        "kind": "ELU",
+        "maximum_absolute_difference": 5.960464477539063e-8
+      }
+    ],
+    "contiguous_tile_reference_exact": true,
+    "reopened_bytes_match": true,
+    "scratch_cleanup": true,
+    "elapsed_seconds": 17.253716092091054,
+    "cuda_initialized": false,
+    "torch": "2.8.0+cu128",
+    "numpy": "1.26.4",
+    "source_sha256": {
+      "sam_features.py": "51d584565ca54cb29d73a9a8f07a2074fc46554d333dde4f31ba94a0ec3cf2c7",
+      "mapped_residency.py": "d84f306409a03e5a711f2f00d3c6e3aa671fa2746e9b63c027d877958254a5b3",
+      "sam_convolution.py": "04b5dd167592fec221e6b96397fafcbc90dd26a7d68e37214f48cd6847128850",
+      "sam_recurrent.py": "1cfc02446b05af1d530105d07c85c7f3d59e10e3fc9c07e9f40e0c5a0ca46f58"
+    }
+  },
+  "method": {
+    "script": "scripts/benchmark_cleaner_sam_features.py",
+    "ray_num_cpus": 1,
+    "ray_num_gpus": 0,
+    "activation_features": "sin(arange(2 * channels * 103, float32) * 0.017), [2, channels, 103]; original Snake channels and eight channels for parameterless activations",
+    "activation_tile_frames": 17,
+    "activation_atol": 0.000001,
+    "activation_rtol": 0.000001,
+    "reference": "Original full-sequence module forward on CPU; all 317 codec keys strictly loaded"
+  },
+  "verification": {
+    "tests_passed": 146,
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "limitations": [
+    "Residual addition/cropping tested with synthetic fixtures, not complete learned residual blocks",
+    "No composed codec or whole-model parity",
+    "Convolution tolerance failure unchanged",
+    "No long-duration, GPU-memory or listening certification"
+  ]
+}

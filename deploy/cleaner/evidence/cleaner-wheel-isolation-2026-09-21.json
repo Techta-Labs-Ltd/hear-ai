@@ -1,0 +1,159 @@
+{
+  "schema": "hear.cleaner.package-evidence.v1",
+  "date": "2026-09-21",
+  "scope": "Cleaner-only Python wheel and fresh CPU analysis environment; not a container or production deployment",
+  "build": {
+    "sources": {
+      "hear/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "hear/proto/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "hear/proto/cleaner_v2.proto": "a959c10bbf4de8fba72de5b175448a3ff6606489ddfad48fb098a7418cdaf1f0",
+      "hear/proto/cleaner_v2_pb2.py": "fa4cd366226303077bd3d23b6fa513b58105449575a1059ab87be7dd4e47e089",
+      "hear/proto/cleaner_v2_pb2.pyi": "07c80bca5fc34c92f8807e290b617ed15c2fa2a277b94d935f50976eb06b23dc",
+      "hear/proto/cleaner_v2_pb2_grpc.py": "cef185f86776103fbf9f13e8e8cfea3e0bc915b936ee71cff1507fa7b563e929",
+      "hear/runtime/__init__.py": "61c4189f957b9e84248c710434432032b9bd7ba73b0c3d0742b835e474877bd3",
+      "hear/runtime/cleaner/__init__.py": "f3b49b5ee4973f6116889c87410ae9beb195f3a3f95ac36ed3ed20eb3b70219d",
+      "hear/runtime/cleaner/deepfilter_loader.py": "d7e124a50cbc97a43f5cdf73b0078a4074aa9e449cdbf25a056b8e8375ea0b30",
+      "hear/runtime/cleaner/executor.py": "2f6b3b7fe063666ff15b3665366c6e43584ad254d020be8aa0bf764ba013a834",
+      "hear/runtime/cleaner/inspection_worker.py": "97dec2723473575d492287a731fa6c3d26a3fc3c881f8851ac587a2e290bf538",
+      "hear/runtime/cleaner/longform_sam.py": "bb96ca796cc8831ab78da58b78df438d8b0993ab32b70c176b97adc1f9236579",
+      "hear/runtime/cleaner/model_registry.py": "9e3f38171e80ed0a9059d575bfbf9069e9d7eb80ae0cd197be43e915a68d98fc",
+      "hear/runtime/cleaner/noise_reference.py": "0e6b30a48d2ef3016a7317ff9a5373bfe8ffe362b0cc9b39896c99e9a80127b5",
+      "hear/runtime/cleaner/resampling.py": "4678a8f61d8d3f068f3341b4218cdaf5476488e293f89bc67bd713cd1b117828",
+      "hear/runtime/cleaner/resource_guard.py": "fc0d799c1209747375c836f994cc01516edc0826cbb1953d17e36bb61b322079",
+      "hear/runtime/cleaner/s3_verification.py": "4a35519556e1b45854c72c468dc8e7ea0b326c5507a7f5649107e905799719d3",
+      "hear/runtime/cleaner/speech_activity.py": "2b949cbf1703fbef7c2e19ad84a6ed7416634dfb1f7170f397811faed35cdb0f",
+      "hear/runtime/cleaner/speech_risk.py": "fbbea0074c6eeeefc1167d94b051545257fbeb7dc3b69cd5df07adb034045d60",
+      "hear/runtime/cleaner/subprocesses.py": "c5db1dce8410c87eda5c65d892c8497edf1a31c781095289be9ab704a35bd3c8",
+      "hear/runtime/cleaner/wire.py": "55879222d5e0c667c09965b2d7456f77d57f9291f98c2880a54714f043f2c9b8",
+      "hear/runtime/cleaner/worker_lease.py": "0d7935774d6d56437e8c2c780b9d3cd458b66d80f2facab4bdef466536c72639",
+      "hear/services/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "hear/services/magic_clean/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "hear/services/magic_clean/artifacts.py": "a90ac7b5a639756f220b4ea7e12b4ce7ed960a4b647368e120c2bba7f8c4c3c3",
+      "hear/services/magic_clean/contracts.py": "9883a9ff7776b7eefbd9a7709b20f773409b4cb2f09ade15063a6f3765db4141",
+      "hear/services/magic_clean/engines/__init__.py": "24007ae1970bdf33a311704c80aa2aa2aa9e9e701fe589915278bcc3d16176e8",
+      "hear/services/magic_clean/engines/base.py": "609ccf7998190a50e3d2ea420c8a46c5706d5b98c017a0c12d19d2ab9faf152e",
+      "hear/services/magic_clean/engines/deepfilter.py": "4da17ce289c4619f1b4fcbd2009ba674fe35791697021c1c4feb74eafa96b184",
+      "hear/services/magic_clean/engines/noise_profile.py": "643716ecf8d59239eed6bfe0a4b7905f96f2da81aa6895f413a49236067e87fb",
+      "hear/services/magic_clean/inspection.py": "ee21345daa23962911869c808e61558408e42b8b8619f457b82bb9c400ae2fa8",
+      "hear/services/magic_clean/mastering.py": "0562c8cf6aa826b9d832769c299022f7f167ce3e6ecbe71506acfd1995310be5",
+      "hear/services/magic_clean/quality.py": "eb40e4ebf7cce057bc0f7620e321cfa83366f38ee5527c5302c18f71d8627a25"
+    },
+    "wheel": "/tmp/hear-cleaner-wheel-20260921-c/hear_cleaner_runtime-0.1.0-py3-none-any.whl",
+    "wheel_sha256": "8183920ae12b3b7a78c123cebb4f269abca71400f5cf7f227f07a85f817f31ad",
+    "rebuild_identical": true,
+    "setuptools": "83.0.0",
+    "source_date_epoch": 315532800
+  },
+  "smoke": {
+    "absent_modules": [
+      "sqlalchemy",
+      "psycopg2",
+      "demucs",
+      "clearvoice",
+      "whisperx",
+      "qwen_asr",
+      "torch",
+      "ray"
+    ],
+    "channels": 2,
+    "delivery_bytes": 25389,
+    "frames": 16017,
+    "master_bytes": 77466,
+    "package_origin": "/tmp/hear-cleaner-install.ZdUP7U/venv/lib/python3.12/site-packages/hear/__init__.py",
+    "packages": [
+      [
+        "annotated-types",
+        "0.8.0"
+      ],
+      [
+        "cffi",
+        "2.1.1"
+      ],
+      [
+        "flatbuffers",
+        "25.12.19"
+      ],
+      [
+        "grpcio",
+        "1.82.1"
+      ],
+      [
+        "hear-cleaner-runtime",
+        "0.1.0"
+      ],
+      [
+        "numpy",
+        "1.26.4"
+      ],
+      [
+        "onnxruntime",
+        "1.27.0"
+      ],
+      [
+        "packaging",
+        "23.2"
+      ],
+      [
+        "protobuf",
+        "6.33.6"
+      ],
+      [
+        "pycparser",
+        "3.0"
+      ],
+      [
+        "pydantic",
+        "2.13.4"
+      ],
+      [
+        "pydantic_core",
+        "2.46.4"
+      ],
+      [
+        "soundfile",
+        "0.12.1"
+      ],
+      [
+        "typing-inspection",
+        "0.4.4"
+      ],
+      [
+        "typing_extensions",
+        "4.16.0"
+      ]
+    ],
+    "status": "passed",
+    "validation": {
+      "hard_integrity": "passed",
+      "source_warning_intervals": [],
+      "speech_activity": {
+        "analysis_sha256": "7b7de669c4127cfd98c7acc9ae61cb9ab1fb6f182165380f9d9dbecc41a800e5",
+        "comparison_sha256": "e27c7d893ef6980071b4bafee7b248c415d72119228562a0ceaf1b5018f18e83",
+        "evidence_truncated": false,
+        "output_active_frames": [
+          0,
+          0
+        ],
+        "output_sha256": "ee412ded670db11445e5d9f1d99e375a3c2a8afca54ec0a2ad6a1e23b28ae0b7",
+        "source_active_frames": [
+          0,
+          0
+        ],
+        "source_loss_intervals": [],
+        "source_sha256": "ef3316960807f1be957edbf36b327f79e2ab1f21fd29c2ef6e5337f0d036685b"
+      },
+      "wanted_content": "review_required",
+      "warning_codes": [
+        "wanted_content_requires_review"
+      ],
+      "warning_intervals_truncated": false
+    }
+  },
+  "limitations": [
+    "Docker and Podman were unavailable; no image was built or audited.",
+    "Only core plus analysis dependencies were installed in the isolated environment; GPU/deepfilter extras are resolved in the lock but not installed/tested there.",
+    "The smoke uses synthetic audio and a pre-existing explicitly supplied local Silero model; it is not a perceptual certificate.",
+    "System FFmpeg and model asset paths remain external to the wheel and require a pinned deployment image/asset inventory.",
+    "No service entrypoint, authenticated transport, production factory or readiness approval is provided by this library wheel."
+  ]
+}

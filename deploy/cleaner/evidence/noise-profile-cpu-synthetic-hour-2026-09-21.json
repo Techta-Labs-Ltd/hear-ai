@@ -1,0 +1,95 @@
+{
+  "recorded_on": "2026-09-21",
+  "scope": "Synthetic stereo CPU duration probe with real Silero reference review; no perceptual/release certification",
+  "ray": {
+    "num_cpus": 1,
+    "num_gpus": 0,
+    "memory_reservation_bytes": 2000000000,
+    "max_retries": 0,
+    "max_calls": 1,
+    "hour_task_id": "db24da893a7d2662ffffffffffffffffffffffff0a000000"
+  },
+  "smoke_30_seconds": {
+    "result": "passed",
+    "synthetic_audio": true,
+    "device": "cpu",
+    "frames": 1440017,
+    "channels": 2,
+    "sample_rate": 48000,
+    "processing_seconds": 3.2605286692269146,
+    "rtf": 0.10868428897423049,
+    "elapsed_seconds": 5.842772054951638,
+    "peak_rss_bytes": 163352576,
+    "output_bytes": 11520240,
+    "tail_peak": 0.08635474741458893,
+    "pcm_sha256": "f553650bed188ce9b96fab2b610cb15c33ea434a75d92b419d36b5f03da38f6e",
+    "adapter_code_sha256": "41ea0080de0474632de14eadfa5ed2e8198ff3a388708acb2eab5e75f665cbd8",
+    "runtime": {
+      "engine": "noise_profile",
+      "runtime_sha256": "6659c39ac698ec54116f38ea595cd5a5301701b2c2cb185c8a6f4f71ebf9fb79",
+      "checkpoint_sha256": null,
+      "precision_policy_sha256": "85ef03ea6aee33eed702bd5c3b5e44b06a521a1ca14760a2b347435f0404f0dd",
+      "longform_policy_sha256": "f188519916d9907e72bf6b6ebe6257c5a4c53317112dde3860167e2f3c4c3662"
+    },
+    "speech_policy_sha256": "7b7de669c4127cfd98c7acc9ae61cb9ab1fb6f182165380f9d9dbecc41a800e5",
+    "reference_warnings": [
+      "noise_reference_requires_confirmation",
+      "music_analysis_unavailable"
+    ],
+    "torch_imported": false
+  },
+  "hour": {
+    "result": "passed",
+    "synthetic_audio": true,
+    "device": "cpu",
+    "frames": 172800017,
+    "channels": 2,
+    "sample_rate": 48000,
+    "processing_seconds": 141.4835265353322,
+    "rtf": 0.039300979593147836,
+    "elapsed_seconds": 158.49890145799145,
+    "peak_rss_bytes": 167936000,
+    "output_bytes": 1382400240,
+    "tail_peak": 0.08053813129663467,
+    "pcm_sha256": "0f19e736028545e54fabb5528abec01b7e546273ec5654f3722bf4e0657c1775",
+    "adapter_code_sha256": "41ea0080de0474632de14eadfa5ed2e8198ff3a388708acb2eab5e75f665cbd8",
+    "runtime": {
+      "engine": "noise_profile",
+      "runtime_sha256": "6659c39ac698ec54116f38ea595cd5a5301701b2c2cb185c8a6f4f71ebf9fb79",
+      "checkpoint_sha256": null,
+      "precision_policy_sha256": "85ef03ea6aee33eed702bd5c3b5e44b06a521a1ca14760a2b347435f0404f0dd",
+      "longform_policy_sha256": "f188519916d9907e72bf6b6ebe6257c5a4c53317112dde3860167e2f3c4c3662"
+    },
+    "speech_policy_sha256": "7b7de669c4127cfd98c7acc9ae61cb9ab1fb6f182165380f9d9dbecc41a800e5",
+    "reference_warnings": [
+      "noise_reference_requires_confirmation",
+      "music_analysis_unavailable"
+    ],
+    "torch_imported": false,
+    "worker_pid": 539994
+  },
+  "hour_external_rss_samples": [
+    {
+      "elapsed": "00:01:09",
+      "rss_kib": 181144,
+      "rss_bytes": 185491456
+    },
+    {
+      "elapsed": "00:02:20",
+      "rss_kib": 181228,
+      "rss_bytes": 185577472
+    }
+  ],
+  "limitations": [
+    "Peak_rss_bytes is resource.getrusage(RUSAGE_SELF).ru_maxrss * 1024, not aggregate process-tree usage",
+    "External ps RSS readings exceeded the in-task reported high-water value; preserve both; neither certifies an upper bound",
+    "Memory reservation is scheduling accounting, not physical enforcement",
+    "No GPU work, mastering, immutable publication, real music corpus, speech retention or listening certification",
+    "Noise-reference confirmation applies only to generated synthetic fixture; music uncertainty remains"
+  ],
+  "benchmark_script_sha256": "33d49b7968d9da8bc702e768b1c292c5ec62b12113c2d83b5826ba87cba6b243",
+  "cleanup": {
+    "hour_worker_pid_absent": true,
+    "hour_temporary_workspace_absent": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "recorded_on": "2026-09-21",
+  "source_sha256": "4c7132cc7d7aa493ad4dec5fc0f9f5c60011a49f8ba3392ba1f5f01842106462",
+  "test_source_sha256": "62dbc2d8a56e5392af7a2f95316cfeb910c7071de90e589d9dc2d02bd780740a",
+  "command": "OMP_NUM_THREADS=1 .venv/bin/pytest -q tests/test_cleaner_v2_sam_pcm.py tests/test_cleaner_v2_sam_pipeline.py tests/test_cleaner_v2_sam_noise.py tests/test_cleaner_v2_packaging.py tests/test_architecture.py",
+  "tests_passed": 64,
+  "elapsed_seconds": 14.71,
+  "verification": {
+    "exact_float32_roundtrip_tiles": [1, 7, 128],
+    "roundtrip_frames": 257,
+    "output_format": "RF64 FLOAT mono 48000 Hz",
+    "explicit_target_and_residual_selection": true,
+    "reject_stereo_and_wrong_sample_rate": true,
+    "reject_nonfinite_input_and_remove_partial_output": true,
+    "preserve_existing_destinations": true,
+    "cancellation_cleans_owned_outputs_only": true,
+    "input_byte_limit": true,
+    "scratch_reservation_includes_existing_files": true,
+    "reject_incomplete_or_wrong_batch_export": true,
+    "ruff": "passed",
+    "format": "passed"
+  },
+  "limitations": [
+    "Prepared PCM boundary only; source resampling, stereo layout policy and engine orchestration remain to be integrated",
+    "No real-model run added by these adapter tests",
+    "No long-form, listening, GPU or production readiness certification"
+  ]
+}

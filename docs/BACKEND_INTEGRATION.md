@@ -36,6 +36,40 @@ HEAR_SERVICE_KEY=<service key whose SHA-256 hash is registered for that backend>
 HEAR_GRPC_APPLICATION=hear
 ```
 
+### Current service keys
+
+Copy the matching block into your backend server's private `.env` file. The
+full keys below match the registrations in the AI server's `.env` (production)
+and `.env.development` (development). Replace `hear-ai` with the reachable AI
+server hostname; use your TLS ingress address when connecting remotely.
+
+Production backend `.env`:
+
+```dotenv
+HEAR_HTTP_URL=http://hear-ai:8000
+HEAR_GRPC_TARGET=hear-ai:50051
+HEAR_BACKEND_ID=backend-a
+HEAR_SERVICE_KEY=P3k7aBBjXeQnrvHIFG7N4bLw3yapt5W3SUgzbUdJS3u1szQSRI_NRCShreh0MHk_
+HEAR_GRPC_APPLICATION=hear
+```
+
+Development backend `.env`:
+
+```dotenv
+HEAR_HTTP_URL=http://hear-ai:8000
+HEAR_GRPC_TARGET=hear-ai:50051
+HEAR_BACKEND_ID=backend-a-dev
+HEAR_SERVICE_KEY=1BLOocAHNVDTptRbH3JHFOwlSjmblPSrPTP6MYJknNB2RytM57YVLj_57Dn1Wtmx
+HEAR_GRPC_APPLICATION=hear
+```
+
+Keep each key only in the matching backend environment. These are plaintext
+credentials; do not expose them to browser JavaScript or public repositories.
+The frontend calls your backend using user authentication; only your backend
+adds this service key when calling Hear AI. The AI server stores the key's
+SHA-256 digest, not the raw key. Its active `ENVIRONMENT` must match the key's
+registration; a production deployment will not accept the development key.
+
 | Transport | Authentication |
 | --- | --- |
 | HTTP `POST /process` | `X-Service-Key: <registered backend service key>` |

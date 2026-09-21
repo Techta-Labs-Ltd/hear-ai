@@ -1,0 +1,61 @@
+{
+  "schema": "hear.cleaner.hardware-probe.v1",
+  "date": "2026-09-21",
+  "status": "passed",
+  "scope": "initial synthetic stereo DF3 CUDA smoke; not release certification",
+  "ray": {"num_cpus": 1, "num_gpus": 0.1, "max_retries": 0},
+  "supervision": {
+    "deadline_seconds": 120,
+    "minimum_free_gpu_mib_at_admission": 20000,
+    "process_stop_threshold_bytes": 3000000000,
+    "sampling_interval_requested_seconds": 0.1,
+    "sampling_calls": 178,
+    "samples_with_process": 51,
+    "measurement": "nvidia-smi per-PID used_memory in MiB, multiplied by 1048576",
+    "process_peak_bytes_from_mib_samples": 834666496,
+    "stop_reason": null,
+    "elapsed_seconds": 23.246768216602504,
+    "exit_code": 0
+  },
+  "baseline_gpu": {"name": "NVIDIA A40", "total_mib": 46068, "used_mib": 10872, "free_mib": 34617},
+  "after_gpu": {"name": "NVIDIA A40", "total_mib": 46068, "used_mib": 10872, "free_mib": 34617},
+  "result": {
+    "adapter_code_sha256": "ab3098d96033386d1fef8aae0e57074b6c35126fda7c8ab7f9795348ebc8ebb6",
+    "synthetic_audio": true,
+    "device": "cuda:0",
+    "pid": 516899,
+    "cuda": {
+      "peak_allocated_bytes": 293311488,
+      "peak_reserved_bytes": 501219328,
+      "allocator_cap_bytes": 1000000000,
+      "device_name": "NVIDIA A40"
+    },
+    "frames": 1440017,
+    "channels": 2,
+    "sample_rate": 48000,
+    "inference_seconds": 3.1249645012430847,
+    "rtf": 0.10416548337476948,
+    "elapsed_seconds": 5.198349459562451,
+    "peak_rss_bytes": 1164275712,
+    "max_window_frames": 576000,
+    "blocks": 4,
+    "output_bytes": 11520240,
+    "tail_peak": 0.013639421202242374,
+    "pcm_sha256": "d324bae95df60ecd1f1f7c56eab719bef5ae1a8de2709743f8f41bf1f2f46aba",
+    "runtime": {
+      "engine": "deepfilternet3",
+      "runtime_sha256": "15f57f36444c268e443d3cad855a9079e60d3a923b24d414fc7dbc0290a2a6a2",
+      "checkpoint_sha256": "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003",
+      "precision_policy_sha256": "e920db572014e7526d243b528c79d5412cb33554ee41ad343774af8b4a53df5b",
+      "longform_policy_sha256": "36e82920796b46a8a0ed6f797077d778280497da3aedf131ac9f9cde6d57a812"
+    }
+  },
+  "limitations": [
+    "Sampling can miss sub-interval peaks and nvidia-smi MiB values are quantized.",
+    "Torch allocated memory is included in reserved memory; do not add these counters.",
+    "Other live Ray actors were not drained or load-tested; aggregate coexistence is not certified.",
+    "The 1 GB Torch allocator cap does not limit all CUDA or whole-process allocations.",
+    "One synthetic clip does not certify long-form memory stability, perceptual quality, model switching, OOM recovery or deployment overlap.",
+    "SAM Audio Small was not tested; access remains gated. No production capability was enabled."
+  ]
+}
