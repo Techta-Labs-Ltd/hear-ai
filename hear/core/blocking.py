@@ -1,8 +1,33 @@
 from __future__ import annotations
+
 import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from functools import partial
+
+from hear.config import settings
+
+
+class BoundedDatabaseWork:
+    """Run complete synchronous DB units of work without blocking an RPC loop.
+
+    A session must be opened and closed inside ``function``.  Returning ORM
+    instances across this boundary is deliberately avoided; callers return plain
+    values instead.  The semaphore makes overload visible as backpressure rather
+    than creating an unbounded collection of blocked database calls.
+    """
+
+    _executor = ThreadPoolExecutor(
+        max_workers=settings.ASYNC_DB_MAX_WORKERS, thread_name_prefix="hear-db"
+    )
+    _slots = asyncio.Semaphore(settings.ASYNC_DB_MAX_INFLIGHT)
+
+    @classmethod
+    async def run[T](cls, function: Callable[[], T]) -> T:
+        async with cls._slots:
+            return await AsyncCompletion.run_blocking_to_completion(
+                function, executor=cls._executor
+            )
 
 
 class AsyncCompletion:

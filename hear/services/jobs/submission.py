@@ -31,6 +31,9 @@ ALLOWED_JOB_TYPES = {
     "edit_transcript",
     "discovery",
 }
+# Compatibility names are normalized before validation and persisted as the
+# canonical workflow.  Unknown names remain explicit validation failures.
+JOB_TYPE_ALIASES = {"tagging": "categorization"}
 AUDIO_REQUIRED_JOB_TYPES = {
     "pipeline",
     "magic_clean",
@@ -126,6 +129,7 @@ class SubmissionPolicy:
         job_id = request.job_id.strip()
         track_id = request.track_id.strip()
         job_type = (request.job_type or "pipeline").strip().replace("-", "_")
+        job_type = JOB_TYPE_ALIASES.get(job_type, job_type)
         user_id = request.user_id.strip()
         backend_id = request.backend_id.strip()
         if not job_id or not track_id:
@@ -208,7 +212,8 @@ class SubmissionPolicy:
 
     @staticmethod
     def request_fingerprint(payload: dict[str, Any]) -> str:
-        return SubmissionPolicy._request_fingerprint(payload, ignore_storage_expiration=False)
+        """Fingerprint immutable job semantics, never expiring credentials."""
+        return SubmissionPolicy._request_fingerprint(payload, ignore_storage_expiration=True)
 
     @staticmethod
     def _semantic_request_fingerprint(payload: dict[str, Any]) -> str:
@@ -365,14 +370,45 @@ class JobSubmissionService:
                     stored_semantic_fingerprint = SubmissionPolicy._semantic_request_fingerprint(
                         SubmissionPolicy._legacy_payload(job)
                     )
-                    if (
-                        payload["job_type"] != "magic_clean"
-                        or stored_semantic_fingerprint
-                        != SubmissionPolicy._semantic_request_fingerprint(payload)
+                    if stored_semantic_fingerprint != SubmissionPolicy._semantic_request_fingerprint(
+                        payload
                     ):
                         raise SubmissionConflictError(
                             "job_id has already been used with a different payload"
                         )
+                # Every queued job accepts a credential rotation only when it
+                # targets the same immutable storage destination.  Magic Clean
+                # adds its longer cleanup-window checks below.
+                if payload["job_type"] != "magic_clean":
+                    try:
+                        stored_storage = StorageContexts.decrypt_storage_context(
+                            getattr(job, "storage_context_encrypted", None), require_active=False
+                        )
+                    except StorageContextError as exc:
+                        raise ValueError("job has no refreshable storage context") from exc
+                    if not SubmissionPolicy._storage_destination_matches(
+                        stored_storage, request.storage
+                    ):
+                        raise SubmissionConflictError(
+                            "storage destination cannot be changed for an existing job"
+                        )
+                    if job.status != "queued" and (
+                        not SubmissionPolicy._credential_material_matches(
+                            stored_storage, request.storage
+                        )
+                        or request.storage.expires_at != stored_storage.expires_at
+                    ):
+                        raise ValueError("storage credentials cannot be refreshed after the job has started")
+                    if job.status == "queued":
+                        job.storage_context_encrypted = values["storage_context_encrypted"]
+                        refreshed_options = dict(job.job_options or {})
+                        refreshed_options["storage_destination"] = {
+                            key: value
+                            for key, value in payload["storage"].items()
+                            if key not in {"key_id", "application_key"}
+                        }
+                        job.job_options = refreshed_options
+                        job.request_hash = fingerprint
                 if payload["job_type"] == "magic_clean" and (
                     job.status in {"queued", "running"}
                     or job.status in MAGIC_CLEAN_TERMINAL_STATUSES

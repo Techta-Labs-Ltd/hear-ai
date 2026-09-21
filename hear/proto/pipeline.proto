@@ -96,6 +96,8 @@ message PipelineEvent {
   string error = 13;
   google.protobuf.Struct result = 14;
   string backend_id = 15;
+  // Structured terminal data is additive: v1 clients can continue reading error.
+  google.protobuf.Struct error_report = 16;
 }
 
 message GetResultRequest {
@@ -219,6 +221,7 @@ message JobResult {
   string status = 5;
   string current_stage = 6;
   string error = 7;
+  google.protobuf.Struct error_report = 15;
   oneof payload {
     PipelinePayload pipeline = 10;
     TranscriptionPayload transcription = 11;

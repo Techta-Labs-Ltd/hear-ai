@@ -38,6 +38,15 @@ class AiJob(Base):
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     callback_delivered = Column(Boolean, default=False)
+    __table_args__ = (
+        Index(
+            "ix_ai_jobs_magic_clean_lineage_scope",
+            "backend_id",
+            "track_id",
+            "job_type",
+            "status",
+        ),
+    )
 
 
 class AiTrackJob(Base):
@@ -179,6 +188,12 @@ class DatabaseRuntime:
             conn.execute(
                 text(
                     "UPDATE ai_jobs SET run_id = gen_random_uuid()::text WHERE run_id IS NULL OR run_id = ''"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_ai_jobs_magic_clean_lineage_scope "
+                    "ON ai_jobs (backend_id, track_id, job_type, status)"
                 )
             )
 

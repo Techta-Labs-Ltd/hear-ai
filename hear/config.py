@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE: int = 1800
     DB_POOL_PRE_PING: bool = True
     DB_STATEMENT_TIMEOUT_MS: int = 60000
+    # Synchronous SQLAlchemy is used by a few transport boundaries.  Keep that
+    # work off the event loop and cap it independently from the general executor.
+    ASYNC_DB_MAX_WORKERS: int = 4
+    ASYNC_DB_MAX_INFLIGHT: int = 16
 
     PIPELINE_MP3_BITRATE_KBPS: int = 96
 

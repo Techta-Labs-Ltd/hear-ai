@@ -102,6 +102,17 @@ class ProcessResponse(BaseModel):
     replayed: bool
 
 
+class StorageCredentialRefreshRequest(BaseModel):
+    backend_id: str = Field(min_length=1)
+    storage: StorageContext
+
+
+class StorageCredentialRefreshResponse(BaseModel):
+    job_id: str
+    run_id: str
+    status: str
+
+
 class DiscoveryProcessRequest(BaseModel):
     backend_id: str = Field(min_length=1)
     storage: StorageContext

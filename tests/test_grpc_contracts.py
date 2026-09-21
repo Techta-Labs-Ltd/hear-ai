@@ -56,6 +56,18 @@ def test_pipeline_contract_has_full_grpc_surface():
     methods = {
         method.name for method in pipeline_pb2.DESCRIPTOR.services_by_name["Pipeline"].methods
     }
+
+
+def test_v1_terminal_error_fields_are_additive_and_wire_stable():
+    """Existing v1 fields stay pinned while structured errors are additive."""
+    event = pipeline_pb2.DESCRIPTOR.message_types_by_name["PipelineEvent"]
+    result = pipeline_pb2.DESCRIPTOR.message_types_by_name["JobResult"]
+    assert event.fields_by_name["error"].number == 13
+    assert event.fields_by_name["error_report"].number == 16
+    assert result.fields_by_name["error"].number == 7
+    assert result.fields_by_name["error_report"].number == 15
+    legacy = pipeline_pb2.JobResult(job_id="job", error="failed")
+    assert pipeline_pb2.JobResult.FromString(legacy.SerializeToString()) == legacy
     assert methods == {
         "SubmitJob",
         "Subscribe",

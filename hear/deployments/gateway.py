@@ -14,9 +14,16 @@ from hear.core.health import RayHealthSnapshot, ServiceHealth
 from hear.core.keyword_loader import harm_keyword_loader
 from hear.core.storage import StorageCredentialsExpiringError
 from hear.models.database import DatabaseRuntime
-from hear.models.schemas import DiscoveryProcessRequest, PipelineRequest, ProcessResponse
+from hear.models.schemas import (
+    DiscoveryProcessRequest,
+    PipelineRequest,
+    ProcessResponse,
+    StorageCredentialRefreshRequest,
+    StorageCredentialRefreshResponse,
+)
 from hear.proto import pipeline_pb2
 from hear.services.categorization.service import CategorizationService
+from hear.services.jobs.credentials import JobCredentialService
 from hear.services.jobs.submission import (
     JobSubmissionService,
     SubmissionConflictError,
@@ -90,6 +97,7 @@ class GrpcGateway:
         )
         self._pipeline = PipelineGrpcService(orchestrator, operations)
         self._submission = JobSubmissionService(orchestrator)
+        self._credentials = JobCredentialService(orchestrator)
         self._audio_cleanup = audio_cleanup
         orchestrator.recover_jobs.remote()
         logger.info("FastAPI and gRPC gateway initialized")
@@ -151,6 +159,31 @@ class GrpcGateway:
             raise HTTPException(status_code=500, detail="job submission failed") from exc
         response.status_code = 200 if result.replayed else 202
         return ProcessResponse(**result.__dict__)
+
+    @http_app.post(
+        "/jobs/{job_id}/storage-credentials",
+        response_model=StorageCredentialRefreshResponse,
+        tags=["jobs"],
+    )
+    async def refresh_storage_credentials(
+        self,
+        job_id: str,
+        body: StorageCredentialRefreshRequest,
+        service_key: str | None = Header(default=None, alias="X-Service-Key"),
+    ) -> StorageCredentialRefreshResponse:
+        if not BackendRegistry.authenticate_backend(body.backend_id, service_key):
+            raise HTTPException(status_code=401, detail="invalid service key")
+        try:
+            result = await self._credentials.refresh(
+                backend_id=body.backend_id, job_id=job_id, storage=body.storage
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        except SubmissionConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return StorageCredentialRefreshResponse(**result.__dict__)
 
     @http_app.post("/discovery", response_model=ProcessResponse, status_code=202, tags=["jobs"])
     async def process_discovery(

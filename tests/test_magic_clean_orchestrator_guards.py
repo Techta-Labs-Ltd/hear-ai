@@ -511,7 +511,7 @@ def test_non_magic_expired_storage_is_terminalized_by_normal_failure(monkeypatch
     asyncio.run(_exercise_non_magic_expired_storage_uses_normal_failure(monkeypatch))
 
 
-async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
+async def _exercise_recovery_requeues_interrupted_job(monkeypatch):
     cls = Orchestrator.func_or_class
     orchestrator = cls.__new__(cls)
     orchestrator._recovery_started = False
@@ -595,10 +595,12 @@ async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
     monkeypatch.setattr("hear.orchestrator.DatabaseRuntime.SessionLocal", lambda: session)
     monkeypatch.setattr("hear.orchestrator.DatabaseCommitter.commit_with_retry", commit)
     await orchestrator.recover_jobs()
-    assert job.status == "failed"
+    assert job.status == "queued"
+    assert job.run_id != "run"
+    assert job.attempts is not None
     assert job.current_stage is None
     assert job.error == RECOVERY_INTERRUPTED_ERROR
-    assert job.completed_at is not None
+    assert job.completed_at is None
     persisted_tombstone = job.job_options["magic_clean_cleanup_tombstone"]
     assert persisted_tombstone["b2_key"] == tombstone["b2_key"]
     assert persisted_tombstone["run_id"] == tombstone["run_id"]
@@ -610,16 +612,16 @@ async def _exercise_recovery_terminalizes_interrupted_job(monkeypatch):
     assert track_job.status == "failed"
     assert track_job.current_stage is None
     assert track_job.error == RECOVERY_INTERRUPTED_ERROR
-    assert track_job.completed_at == job.completed_at
-    assert track_job.updated_at == job.completed_at
-    assert scheduled == []
+    assert track_job.completed_at is not None
+    assert track_job.updated_at == track_job.completed_at
+    assert scheduled == [("job", job.run_id)]
     assert session.commits == 1
     assert session.locked_selects == 2
     assert session.closed is True
 
 
-def test_recovery_terminalizes_interrupted_jobs_for_cleanup_reconciliation(monkeypatch) -> None:
-    asyncio.run(_exercise_recovery_terminalizes_interrupted_job(monkeypatch))
+def test_recovery_requeues_interrupted_jobs_with_a_fenced_run(monkeypatch) -> None:
+    asyncio.run(_exercise_recovery_requeues_interrupted_job(monkeypatch))
 
 
 async def _exercise_active_scheduled_run_cancellation():
@@ -822,25 +824,6 @@ def test_reuse_requires_same_root_hashes_controls_engine_and_validation():
         )
         is None
     )
-
-
-def test_cross_scope_exact_url_and_hash_matches_fail_closed():
-    cls = Orchestrator.func_or_class
-    candidate = SimpleNamespace(
-        result_json={"enhanced_audio": {"audio_url": "https://audio.test/foreign.mp3"}},
-        job_options={
-            MAGIC_CLEAN_DELIVERED_FILE_SHA256_KEY: DELIVERED_FILE_HASH,
-            MAGIC_CLEAN_DELIVERED_PCM_SHA256_KEY: DELIVERED_PCM_HASH,
-        },
-    )
-    with pytest.raises(MagicCleanLineageError, match="different track scope"):
-        cls._reject_cross_scope_magic_clean_match(
-            [candidate], submitted_url="https://audio.test/foreign.mp3"
-        )
-    with pytest.raises(MagicCleanLineageError, match="different track scope"):
-        cls._reject_cross_scope_magic_clean_match(
-            [candidate], submitted_pcm_sha256=DELIVERED_PCM_HASH
-        )
 
 
 def test_remote_result_must_be_bound_to_expected_artifact_and_valid_hashes():

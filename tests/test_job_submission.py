@@ -188,6 +188,19 @@ def test_discovery_is_a_supported_standalone_job():
     assert request["job_type"] == "discovery"
 
 
+def test_legacy_tagging_alias_normalizes_to_categorization():
+    request = SubmissionPolicy.normalize_request(
+        pipeline_request(
+            job_id="job",
+            track_id="track",
+            user_id="user",
+            job_type="tagging",
+            edited_transcript="short spoken description",
+        )
+    )
+    assert request["job_type"] == "categorization"
+
+
 @pytest.mark.parametrize(
     "job_type", ["pipeline", "magic_clean", "transcription", "audio_tag", "discovery"]
 )

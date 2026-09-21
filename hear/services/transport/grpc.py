@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import date, datetime
+from typing import Any
 
 import grpc
 from google.protobuf.json_format import ParseDict
@@ -13,6 +14,7 @@ from ray.serve.handle import DeploymentHandle
 
 from hear.config import settings
 from hear.core.backend_registry import BackendRegistry
+from hear.core.blocking import BoundedDatabaseWork
 from hear.models.database import AiJob, DatabaseRuntime
 from hear.models.schemas import StorageContext
 from hear.proto import pipeline_pb2
@@ -26,7 +28,15 @@ class ProtobufValues:
     def _json_safe(value: Any) -> Any:
         if isinstance(value, BaseModel):
             value = value.model_dump(mode="json")
-        return json.loads(json.dumps(value, default=str))
+        if isinstance(value, Mapping):
+            return {str(key): ProtobufValues._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [ProtobufValues._json_safe(item) for item in value]
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        return str(value)
 
     @staticmethod
     def _struct(value: Any = None) -> Struct:
@@ -117,15 +127,18 @@ class PipelineGrpcService:
         backend_id = self._backend_id(context)
         if not backend_id:
             return
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            owned = (
-                db.query(AiJob.id)
-                .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
-                .first()
-            )
-        finally:
-            db.close()
+        def owned_job() -> bool:
+            db = DatabaseRuntime.SessionLocal()
+            try:
+                return bool(
+                    db.query(AiJob.id)
+                    .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
+                    .first()
+                )
+            finally:
+                db.close()
+
+        owned = await BoundedDatabaseWork.run(owned_job)
         if not owned:
             self._set_error(context, grpc.StatusCode.NOT_FOUND, "job not found")
             return
@@ -149,6 +162,11 @@ class PipelineGrpcService:
                     setattr(event, field, raw[field])
             if raw.get("result"):
                 event.result.CopyFrom(ProtobufValues._struct(raw["result"]))
+            error_report = raw.get("error_report")
+            if error_report is None and raw.get("event") == "job_failed":
+                error_report = (raw.get("result") or {}).get("report")
+            if error_report:
+                event.error_report.CopyFrom(ProtobufValues._struct(error_report))
             yield event
             if raw.get("event") in {"job_completed", "job_failed", "job_cancelled"}:
                 break
@@ -157,47 +175,70 @@ class PipelineGrpcService:
         backend_id = self._backend_id(context)
         if not backend_id:
             return pipeline_pb2.JobResult()
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            job = (
-                db.query(AiJob)
-                .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
-                .first()
-            )
-            if not job:
-                self._set_error(context, grpc.StatusCode.NOT_FOUND, "job not found")
-                return pipeline_pb2.JobResult()
-            response = pipeline_pb2.JobResult(
-                job_id=job.id or "",
-                run_id=job.run_id or "",
-                track_id=job.track_id or "",
-                job_type=job.job_type or "",
-                status=job.status or "",
-                current_stage=job.current_stage or "",
-                error=job.error or "",
-                backend_id=job.backend_id or "",
-            )
-            oneof_field, msg_class = JOB_TYPE_PAYLOAD_MAP.get(job.job_type, (None, None))
-            if oneof_field and job.result_json:
-                payload = ParseDict(job.result_json, msg_class(), ignore_unknown_fields=True)
-                getattr(response, oneof_field).CopyFrom(payload)
-            return response
-        finally:
-            db.close()
+        def read_job() -> dict | None:
+            db = DatabaseRuntime.SessionLocal()
+            try:
+                job = (
+                    db.query(AiJob)
+                    .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
+                    .first()
+                )
+                if job is None:
+                    return None
+                return {
+                    "job_id": job.id or "", "run_id": job.run_id or "",
+                    "track_id": job.track_id or "", "job_type": job.job_type or "",
+                    "status": job.status or "", "current_stage": job.current_stage or "",
+                    "error": job.error or "", "backend_id": job.backend_id or "",
+                    "result_json": job.result_json or {},
+                }
+            finally:
+                db.close()
+
+        job = await BoundedDatabaseWork.run(read_job)
+        if job is None:
+            self._set_error(context, grpc.StatusCode.NOT_FOUND, "job not found")
+            return pipeline_pb2.JobResult()
+        response = pipeline_pb2.JobResult(
+            **{
+                key: job[key]
+                for key in (
+                    "job_id",
+                    "run_id",
+                    "track_id",
+                    "job_type",
+                    "status",
+                    "current_stage",
+                    "error",
+                    "backend_id",
+                )
+            }
+        )
+        terminal_error = job["result_json"].get("_terminal_error")
+        if terminal_error:
+            response.error_report.CopyFrom(ProtobufValues._struct(terminal_error))
+        oneof_field, msg_class = JOB_TYPE_PAYLOAD_MAP.get(job["job_type"], (None, None))
+        if oneof_field and job["result_json"]:
+            payload = ParseDict(job["result_json"], msg_class(), ignore_unknown_fields=True)
+            getattr(response, oneof_field).CopyFrom(payload)
+        return response
 
     async def CancelJob(self, request, context=None):
         backend_id = self._backend_id(context)
         if not backend_id:
             return pipeline_pb2.JobResult()
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            owned = (
-                db.query(AiJob.id)
-                .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
-                .first()
-            )
-        finally:
-            db.close()
+        def owned_job() -> bool:
+            db = DatabaseRuntime.SessionLocal()
+            try:
+                return bool(
+                    db.query(AiJob.id)
+                    .filter(AiJob.id == request.job_id, AiJob.backend_id == backend_id)
+                    .first()
+                )
+            finally:
+                db.close()
+
+        owned = await BoundedDatabaseWork.run(owned_job)
         if not owned:
             self._set_error(context, grpc.StatusCode.NOT_FOUND, "job not found")
             return pipeline_pb2.JobResult()

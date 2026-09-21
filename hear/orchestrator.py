@@ -5,15 +5,17 @@ import os
 import re
 import time
 import traceback
+import uuid
 from datetime import UTC, datetime, timedelta
 from functools import partial
+from inspect import isawaitable
 
 import sentry_sdk
 from ray import serve
 from ray.serve.handle import DeploymentHandle
 
 from hear.config import settings
-from hear.core.blocking import AsyncCompletion
+from hear.core.blocking import AsyncCompletion, BoundedDatabaseWork
 from hear.core.db_gate import DatabaseCommitter
 from hear.core.downloader import AudioDownloader
 from hear.core.hear_temp import TempWorkspace
@@ -60,7 +62,10 @@ os.environ["HF_DATASETS_OFFLINE"] = os.getenv("HF_DATASETS_OFFLINE", "0")
 logger = logging.getLogger(__name__)
 _recon_logger = logging.getLogger("reconstruct")
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-RECOVERY_INTERRUPTED_ERROR = "service_restarted"
+# A process restart is not a terminal job failure.  The message is retained as
+# durable audit information while the logical job is fenced with a new run id
+# and scheduled again.
+RECOVERY_INTERRUPTED_ERROR = "service_restarted_retrying"
 RECONSTRUCTION_LINEAGE_JOB_TYPES = {"reconstruct", "edit_transcript"}
 MAX_RECONSTRUCTION_LINEAGE_DEPTH = 32
 
@@ -312,41 +317,52 @@ class Orchestrator:
             else:
                 queue.put_nowait(event.copy())
 
-    def _subscription_snapshot(self, job_id: str) -> dict | None:
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            job = db.query(AiJob).filter(AiJob.id == job_id).first()
-            if job is None:
-                return None
-            if (
-                job.status == "queued"
-                and job.job_type == "magic_clean"
-                and (job.error == StorageCredentialsExpiringError.code)
-            ):
-                return self._magic_clean_storage_refresh_event(
-                    job, previous_stage=job.current_stage
-                )
-            event = {
-                "event": f"job_{job.status}" if job.status in TERMINAL_STATUSES else "job_snapshot",
-                "job_id": job.id,
-                "run_id": job.run_id,
-                "backend_id": job.backend_id,
-                "track_id": job.track_id,
-                "job_type": job.job_type,
-                "status": job.status,
-                "current_stage": job.current_stage,
-                "error": job.error or "",
-            }
-            if job.status == "completed":
-                result = job.result_json or {}
-                event["result"] = result
-                if job.job_type == "audio_tag" and isinstance(result, dict):
-                    for key in ("tags", "categories", "media_file_id", "type"):
-                        if key in result:
-                            event[key] = result[key]
-            return event
-        finally:
-            db.close()
+    async def _subscription_snapshot(self, job_id: str) -> dict | None:
+        def read_snapshot() -> dict | None:
+            db = DatabaseRuntime.SessionLocal()
+            try:
+                job = db.query(AiJob).filter(AiJob.id == job_id).first()
+                if job is None:
+                    return None
+                if (
+                    job.status == "queued"
+                    and job.job_type == "magic_clean"
+                    and (job.error == StorageCredentialsExpiringError.code)
+                ):
+                    return self._magic_clean_storage_refresh_event(
+                        job, previous_stage=job.current_stage
+                    )
+                event = {
+                    "event": (
+                        f"job_{job.status}"
+                        if job.status in TERMINAL_STATUSES
+                        else "job_snapshot"
+                    ),
+                    "job_id": job.id,
+                    "run_id": job.run_id,
+                    "backend_id": job.backend_id,
+                    "track_id": job.track_id,
+                    "job_type": job.job_type,
+                    "status": job.status,
+                    "current_stage": job.current_stage,
+                    "error": job.error or "",
+                }
+                if job.status == "completed":
+                    result = job.result_json or {}
+                    event["result"] = result
+                    if job.job_type == "audio_tag" and isinstance(result, dict):
+                        for key in ("tags", "categories", "media_file_id", "type"):
+                            if key in result:
+                                event[key] = result[key]
+                elif job.status in {"failed", "cancelled"}:
+                    terminal_error = (job.result_json or {}).get("_terminal_error")
+                    if terminal_error:
+                        event["error_report"] = terminal_error
+                return event
+            finally:
+                db.close()
+
+        return await BoundedDatabaseWork.run(read_snapshot)
 
     async def subscribe(self, job_id: str):
         queue = asyncio.Queue(maxsize=256)
@@ -354,6 +370,8 @@ class Orchestrator:
         terminal_events = {"job_completed", "job_failed", "job_cancelled"}
         try:
             snapshot = self._subscription_snapshot(job_id)
+            if isawaitable(snapshot):
+                snapshot = await snapshot
             if snapshot is not None:
                 yield snapshot
                 if snapshot.get("event") in terminal_events:
@@ -363,6 +381,8 @@ class Orchestrator:
                     event = await asyncio.wait_for(queue.get(), timeout=120)
                 except TimeoutError:
                     snapshot = self._subscription_snapshot(job_id)
+                    if isawaitable(snapshot):
+                        snapshot = await snapshot
                     if snapshot is not None and snapshot.get("event") in terminal_events:
                         yield snapshot
                         return
@@ -373,6 +393,8 @@ class Orchestrator:
                     return
                 if event.get("event") == "stream_reset":
                     snapshot = self._subscription_snapshot(job_id)
+                    if isawaitable(snapshot):
+                        snapshot = await snapshot
                     if snapshot is not None:
                         yield snapshot
                     return
@@ -732,14 +754,19 @@ class Orchestrator:
                 .all()
             )
             interrupted = 0
+            recovered_by_id: dict[str, tuple[str, str, object]] = {}
             recovered_at = datetime.now(UTC)
             exhausted_at = recovered_at.replace(tzinfo=None)
             for row in interrupted_rows:
+                recovered_run_id = str(uuid.uuid4())
                 job_values = {
-                    AiJob.status: "failed",
+                    AiJob.status: "queued",
+                    AiJob.run_id: recovered_run_id,
                     AiJob.current_stage: None,
                     AiJob.error: RECOVERY_INTERRUPTED_ERROR,
-                    AiJob.completed_at: exhausted_at,
+                    AiJob.started_at: None,
+                    AiJob.completed_at: None,
+                    AiJob.attempts: AiJob.attempts + 1,
                 }
                 recovery_options = self._magic_clean_recovery_options(
                     job_type=row[3],
@@ -758,6 +785,7 @@ class Orchestrator:
                 if transitioned != 1:
                     continue
                 interrupted += 1
+                recovered_by_id[row[0]] = (row[0], recovered_run_id, exhausted_at)
                 db.query(AiTrackJob).filter(
                     AiTrackJob.job_id == row[0],
                     AiTrackJob.run_id == row[1],
@@ -779,8 +807,10 @@ class Orchestrator:
                 .with_for_update()
                 .all()
             )
-            recovered = []
+            recovered = list(recovered_by_id.values())
             for row in rows:
+                if row[0] in recovered_by_id:
+                    continue
                 updated = (
                     db.query(AiJob)
                     .filter(AiJob.id == row[0], AiJob.run_id == row[1], AiJob.status == "queued")
@@ -839,6 +869,10 @@ class Orchestrator:
             ):
                 return
             job.status = "running"
+            # ``service_restarted_retrying`` is a recovery annotation, not a
+            # current failure once this fenced run has claimed the job.
+            if job.error == RECOVERY_INTERRUPTED_ERROR:
+                job.error = None
             job.attempts = int(job.attempts or 0) + 1
             await DatabaseCommitter.commit_with_retry(db)
             active = True
@@ -912,11 +946,14 @@ class Orchestrator:
                 sanitized_error = self._sanitize_error(e)
                 failed_stage = job.current_stage or (track_job.current_stage if track_job else None)
                 failure_report = {
+                    "schema_version": 1,
+                    "code": "job_failed",
                     "stage": failed_stage,
                     "error": sanitized_error,
                     "attempt": job.attempts,
                     "retryable": False,
                 }
+                durable_result = {"_terminal_error": failure_report}
                 now = datetime.utcnow()
                 transitioned = (
                     fail_db.query(AiJob)
@@ -931,6 +968,7 @@ class Orchestrator:
                             AiJob.current_stage: None,
                             AiJob.error: sanitized_error,
                             AiJob.completed_at: now,
+                            AiJob.result_json: durable_result,
                         },
                         synchronize_session=False,
                     )
@@ -954,6 +992,7 @@ class Orchestrator:
                                 AiTrackJob.error: sanitized_error,
                                 AiTrackJob.completed_at: now,
                                 AiTrackJob.updated_at: now,
+                                AiTrackJob.result_json: durable_result,
                             },
                             synchronize_session=False,
                         )
@@ -977,6 +1016,7 @@ class Orchestrator:
                     "current_stage": failed_stage,
                     "error": sanitized_error,
                     "result": {"report": failure_report},
+                    "error_report": failure_report,
                 }
             finally:
                 fail_db.close()
@@ -1802,58 +1842,6 @@ class Orchestrator:
         )
 
     @staticmethod
-    def _magic_clean_jobs_outside_scope(db, job: AiJob) -> list[AiJob]:
-        candidates = (
-            db.query(AiJob)
-            .filter(
-                AiJob.status == "completed",
-                AiJob.job_type.in_(("magic_clean", "magic-clean")),
-                AiJob.result_json.isnot(None),
-            )
-            .all()
-        )
-        return [
-            candidate
-            for candidate in candidates
-            if candidate.backend_id != job.backend_id or candidate.track_id != job.track_id
-        ]
-
-    @staticmethod
-    def _reject_cross_scope_magic_clean_match(
-        candidates: list[AiJob],
-        *,
-        submitted_url: str | None = None,
-        submitted_file_sha256: str | None = None,
-        submitted_pcm_sha256: str | None = None,
-    ) -> None:
-        for candidate in candidates:
-            if (
-                submitted_url
-                and MagicCleanLineageResolver.extract_enhanced_audio_url(candidate.result_json)
-                == submitted_url
-            ):
-                raise MagicCleanLineageError(
-                    "Known Magic Clean output belongs to a different track scope"
-                )
-            options = candidate.job_options if isinstance(candidate.job_options, dict) else {}
-            if (
-                submitted_file_sha256
-                and str(options.get(MAGIC_CLEAN_DELIVERED_FILE_SHA256_KEY) or "")
-                == submitted_file_sha256
-            ):
-                raise MagicCleanLineageError(
-                    "Known Magic Clean bytes belong to a different track scope"
-                )
-            if (
-                submitted_pcm_sha256
-                and str(options.get(MAGIC_CLEAN_DELIVERED_PCM_SHA256_KEY) or "")
-                == submitted_pcm_sha256
-            ):
-                raise MagicCleanLineageError(
-                    "Known Magic Clean audio belongs to a different track scope"
-                )
-
-    @staticmethod
     def _known_magic_clean_source_hashes(
         lineage_jobs: list[AiJob], job_ids: set[str]
     ) -> tuple[str | None, str | None]:
@@ -1882,8 +1870,6 @@ class Orchestrator:
         persisted_root = str(options.get(MAGIC_CLEAN_ROOT_URL_KEY) or "").strip()
         persisted_engine = str(options.get(MAGIC_CLEAN_ENGINE_REVISION_KEY) or "").strip()
         lineage_jobs = self._magic_clean_lineage_jobs(db, job)
-        outside_scope_jobs = self._magic_clean_jobs_outside_scope(db, job)
-        self._reject_cross_scope_magic_clean_match(outside_scope_jobs, submitted_url=submitted_url)
         expected_file_hash = (
             str(options.get(MAGIC_CLEAN_SOURCE_FILE_SHA256_KEY) or "").strip() or None
         )
@@ -1950,9 +1936,6 @@ class Orchestrator:
         )
         file_hash, pcm_hash = await AsyncCompletion.run_blocking_to_completion(
             partial(MagicCleanLineageResolver.magic_clean_artifact_hashes, audio_path)
-        )
-        self._reject_cross_scope_magic_clean_match(
-            outside_scope_jobs, submitted_file_sha256=file_hash, submitted_pcm_sha256=pcm_hash
         )
         if not persisted_root and root_url == submitted_url:
             alias = MagicCleanLineageResolver.resolve_magic_clean_hash_alias(
