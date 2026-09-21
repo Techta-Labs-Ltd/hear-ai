@@ -90,6 +90,13 @@ class ModelProvisioner:
         return destination
 
 
-@ray.remote(num_cpus=0.1)
-def provision_models_on_ray(model_root: str, hub_cache: str | None = None) -> dict[str, str]:
-    return ModelProvisioner.provision(model_root, hub_cache)
+class ModelProvisioningTask:
+    @staticmethod
+    @ray.remote(num_cpus=0.1)
+    def provision_models_on_ray(
+        model_root: str, hub_cache: str | None = None
+    ) -> dict[str, str]:
+        return ModelProvisioner.provision(model_root, hub_cache)
+
+
+provision_models_on_ray = ModelProvisioningTask.provision_models_on_ray

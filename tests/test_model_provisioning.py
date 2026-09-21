@@ -57,7 +57,7 @@ def test_provisioning_places_every_hugging_face_snapshot_under_the_model_root(
     results = ModelProvisioner.provision(str(tmp_path / "models"))
 
     root = (tmp_path / "models").resolve()
-    assert set(results) == {*MODEL_MANIFEST, "demucs"}
+    assert set(results) == {*MODEL_MANIFEST, "demucs", "dnsmos"}
     assert {repo_id for repo_id, *_args in calls} == set(MODEL_MANIFEST.values())
     assert all(Path(local_dir).is_relative_to(root) for _repo, local_dir, *_args in calls)
     assert all(Path(cache_dir).is_relative_to(root) for *_before, cache_dir, _patterns in calls)

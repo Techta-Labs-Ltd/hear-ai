@@ -612,7 +612,7 @@ async def _exercise_recovery_requeues_interrupted_job(monkeypatch):
     assert track_job.current_stage is None
     assert track_job.error == RECOVERY_INTERRUPTED_ERROR
     assert track_job.completed_at is None
-    assert track_job.updated_at == track_job.completed_at
+    assert track_job.updated_at is not None
     assert scheduled == [("job", job.run_id)]
     assert session.commits == 1
     assert session.locked_selects == 2

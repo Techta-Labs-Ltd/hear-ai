@@ -6,6 +6,7 @@ EXPECTED_HTTP_ENDPOINTS = {
     ("/ready", "get"),
     ("/process", "post"),
     ("/discovery", "post"),
+    ("/jobs/{job_id}/storage-credentials", "post"),
 }
 
 

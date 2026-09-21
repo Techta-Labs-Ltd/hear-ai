@@ -37,16 +37,23 @@ WORKFLOWS: dict[str, WorkflowSpec] = {
 JOB_TYPE_ALIASES = {"tagging": "categorization"}
 
 
-def normalize_job_type(value: str | None) -> str:
-    """Normalize transport spelling without silently inventing a workflow."""
+class WorkflowRegistry:
+    @staticmethod
+    def normalize_job_type(value: str | None) -> str:
+        """Normalize transport spelling without silently inventing a workflow."""
 
-    raw = (value or "pipeline").strip().replace("-", "_")
-    return JOB_TYPE_ALIASES.get(raw, raw)
+        raw = (value or "pipeline").strip().replace("-", "_")
+        return JOB_TYPE_ALIASES.get(raw, raw)
+
+    @classmethod
+    def workflow_for(cls, value: str | None) -> WorkflowSpec | None:
+        return WORKFLOWS.get(cls.normalize_job_type(value))
+
+    @staticmethod
+    def supported_job_types() -> frozenset[str]:
+        return frozenset(WORKFLOWS)
 
 
-def workflow_for(value: str | None) -> WorkflowSpec | None:
-    return WORKFLOWS.get(normalize_job_type(value))
-
-
-def supported_job_types() -> frozenset[str]:
-    return frozenset(WORKFLOWS)
+normalize_job_type = WorkflowRegistry.normalize_job_type
+workflow_for = WorkflowRegistry.workflow_for
+supported_job_types = WorkflowRegistry.supported_job_types
