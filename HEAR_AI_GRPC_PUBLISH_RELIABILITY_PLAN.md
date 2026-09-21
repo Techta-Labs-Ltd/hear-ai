@@ -1,9 +1,35 @@
 # HEAR: AI, gRPC, publishing and crash-recovery implementation plan
 
 **Audit date:** 21 September 2026  
-**Status:** Proposed engineering work. No repository edits, deployment changes, load tests or crash tests were performed in this review.  
-**Backend snapshot:** `Techta-Labs-Ltd/hear-backend@a117a70113cc88046f1ac3f360d1cb365bb3dd42`  
+**Status:** AI-repository stabilization implemented on 21 September 2026. Backend deployment, schema migration, load-test and hard-kill acceptance work remains a separate cross-repository rollout.
+**Backend snapshot:** `Techta-Labs-Ltd/hear-backend@a117a70113cc88046f1ac3f360d1cb365bb3dd42`
 **AI snapshot:** `Techta-Labs-Ltd/hear-ai@53407fb81603bdd8b049f2ca57afdc5505a4b96b`
+
+### Implementation note
+
+This checkout is the AI repository; the backend paths named `B01`–`B13` are
+not present here and cannot be safely changed from this workspace. The changes
+made here cover the AI-side contract/runtime issues and deployment controls:
+
+- `.env` is loaded by `pydantic-settings`, exported to Supervisor-managed Ray
+  processes, and explicit `RAY_ADDRESS=auto` overrides remain intact.
+- Job routing is declarative, `tagging` is an explicit categorization alias,
+  and unknown persisted job types fail as unsupported instead of falling into
+  another workflow.
+- Interrupted jobs re-enter the queued path with a new fenced `run_id`; their
+  track execution is also queued rather than being incorrectly terminalized.
+- The AI protobuf already contains additive compressed-output and structured
+  terminal-error fields; the generated bindings remain checked in with the
+  source contract.
+- Credential refresh remains destination-scoped, and
+  `scripts/generate_service_key.py` generates a high-entropy plaintext key
+  while installing only its SHA-256 digest in `BACKEND_REGISTRY_JSON`.
+
+The backend attempt/inbox/outbox models, Redis result intake, publication
+revalidation, catalog obligations and cross-repository mixed-version tests
+still require the backend checkout and deployment environment described by the
+remaining PRs below. They are deliberately not marked complete by changes in
+this AI-only repository.
 
 This is a static audit of the submission, transport, orchestration, result application, approval and publishing paths inspected in those snapshots. Code defects and recovery gaps are distinguished from performance hypotheses: CPU attribution still requires profiling the deployed processes. The checked repository configuration is not proof of the live Dokploy configuration or the host's capacity.
 

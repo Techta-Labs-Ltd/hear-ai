@@ -160,8 +160,11 @@ A new job returns `202`:
 
 For Magic Clean, `speech`, `music`, and `background` are integer percentages
 from `0` to `100`. Supply all three or omit all three. `speech` and `music`
-control how much of their separated stems is retained. `background` controls
-the retained residual-background level. The legacy spectral suppressor is
+control how much of the enhanced speech and separated music is retained.
+`background` controls retained noise/ambience, including noise removed from
+the vocal estimate by speech enhancement. The three components sum to the
+source before gains and mastering; `100/100/100` retains the original mix.
+The legacy spectral suppressor is
 currently disabled for speech safety, so lowering `background` does not apply
 an additional independent noise-suppression pass.
 
@@ -243,9 +246,12 @@ Custom levels:
 Returns `JobResult.magic_clean` with enhanced audio URL/key, audio-quality
 measurements, stage timings, and any transcription/moderation performed by the
 cleaning flow. The three mix percentages must be supplied together. In this
-example, `background: 10` retains 10% of the residual background estimate. The
-current safe engine disables the legacy spectral suppressor, so this control
-does not independently increase speech denoising.
+example, `background: 10` retains 10% of the noise/ambience estimate, including
+noise removed from the vocal stem. Lowering it retains less of that noise.
+All three component gains are applied after enhancement; no dry vocal fallback
+overrides the chosen background level. Profiles share the same decomposition,
+so only the requested mix changes. Final mastering applies a common gain to
+the mixed output; the sliders control the relative component levels.
 
 ### `discovery`
 

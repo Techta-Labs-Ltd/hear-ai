@@ -18,31 +18,17 @@ from hear.core.backend_registry import BackendRegistry
 from hear.core.storage import StorageContextError, StorageContexts, StorageCredentialsExpiringError
 from hear.models.database import AiJob, DatabaseRuntime
 from hear.models.schemas import PipelineRequest, StorageContext
+from hear.services.jobs.workflows import (
+    WORKFLOWS,
+    normalize_job_type,
+    supported_job_types,
+)
 from hear.services.magic_clean.models import DEFAULT_STEM_LEVELS
 
-ALLOWED_JOB_TYPES = {
-    "pipeline",
-    "magic_clean",
-    "transcription",
-    "categorization",
-    "audio_tag",
-    "rebuild",
-    "reconstruct",
-    "edit_transcript",
-    "discovery",
-}
-
-
-JOB_TYPE_ALIASES = {"tagging": "categorization"}
-AUDIO_REQUIRED_JOB_TYPES = {
-    "pipeline",
-    "magic_clean",
-    "transcription",
-    "audio_tag",
-    "reconstruct",
-    "edit_transcript",
-    "discovery",
-}
+ALLOWED_JOB_TYPES = supported_job_types()
+AUDIO_REQUIRED_JOB_TYPES = frozenset(
+    name for name, workflow in WORKFLOWS.items() if workflow.requires_audio
+)
 MAGIC_CLEAN_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
 
@@ -128,8 +114,7 @@ class SubmissionPolicy:
     ) -> dict[str, Any]:
         job_id = request.job_id.strip()
         track_id = request.track_id.strip()
-        job_type = (request.job_type or "pipeline").strip().replace("-", "_")
-        job_type = JOB_TYPE_ALIASES.get(job_type, job_type)
+        job_type = normalize_job_type(request.job_type)
         user_id = request.user_id.strip()
         backend_id = request.backend_id.strip()
         if not job_id or not track_id:

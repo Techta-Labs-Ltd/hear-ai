@@ -31,6 +31,7 @@ from hear.models.stages import StageCatalog
 from hear.services.categorization.discovery import DiscoverySupport
 from hear.services.categorization.service import CategorizationService
 from hear.services.jobs.scheduler import FairJobScheduler, PendingJob
+from hear.services.jobs.workflows import workflow_for
 from hear.services.magic_clean.lineage import (
     MAGIC_CLEAN_DELIVERED_FILE_SHA256_KEY,
     MAGIC_CLEAN_DELIVERED_PCM_SHA256_KEY,
@@ -425,9 +426,8 @@ class Orchestrator:
 
     @staticmethod
     def _execution_lane(job_type: str) -> str:
-        if job_type in {"reconstruct", "edit_transcript"}:
-            return "reconstruction"
-        return job_type
+        workflow = workflow_for(job_type)
+        return workflow.execution_lane if workflow is not None else "unsupported"
 
     def _pending_job(self, job_id: str, run_id: str) -> PendingJob | None:
         db = DatabaseRuntime.SessionLocal()
@@ -792,11 +792,11 @@ class Orchestrator:
                     AiTrackJob.status.in_(("queued", "running")),
                 ).update(
                     {
-                        AiTrackJob.status: "failed",
-                        AiTrackJob.current_stage: None,
-                        AiTrackJob.error: RECOVERY_INTERRUPTED_ERROR,
-                        AiTrackJob.completed_at: exhausted_at,
-                        AiTrackJob.updated_at: exhausted_at,
+                    AiTrackJob.status: "queued",
+                    AiTrackJob.current_stage: None,
+                    AiTrackJob.error: RECOVERY_INTERRUPTED_ERROR,
+                    AiTrackJob.completed_at: None,
+                    AiTrackJob.updated_at: exhausted_at,
                     },
                     synchronize_session=False,
                 )
@@ -864,6 +864,10 @@ class Orchestrator:
             if job is None:
                 return
             job_type = job.job_type or "pipeline"
+            workflow = workflow_for(job_type)
+            if workflow is None:
+                raise ValueError(f"unsupported job_type: {job_type}")
+            job_type = workflow.canonical_name
             if job_type == "magic_clean" and (
                 not self._queued_magic_clean_storage_is_ready(db, job)
             ):
@@ -900,7 +904,7 @@ class Orchestrator:
             elif job_type == "transcription":
                 await self._process_pipeline(job, track_job, db)
                 return
-            else:
+            elif job_type in {"pipeline", "rebuild"}:
                 await self._process_pipeline(job, track_job, db)
                 return
         except Exception as e:

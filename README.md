@@ -93,8 +93,29 @@ new NVIDIA driver before changing dependency versions.
 
 ## Start
 
-Copy `.env.example` to the deployment secret store and set every required
-model path. Validate the immutable runtime without starting Ray:
+Copy `.env.example` to `.env` (or the deployment secret store) and set every
+required model path. The application reads `/workspace/hear-ai/.env` through
+`pydantic-settings`; Supervisor also exports that file before starting Ray so
+shell tools and Python see the same values. Explicit Supervisor overrides such
+as `RAY_ADDRESS=auto` take precedence over the file.
+
+`AI_SERVICE_URL` and `AI_SERVICE_SECRET` are backend-client names and are not
+AI-server settings. On this service, authentication is configured with the
+`BACKEND_REGISTRY_JSON` SHA-256 digest; the backend keeps the matching
+plaintext `HEAR_SERVICE_KEY`.
+
+The server stores only service-key SHA-256 digests. Generate a new backend key
+and install its digest with:
+
+```bash
+python scripts/generate_service_key.py --backend-id backend-a --env-file .env --write
+```
+
+Save the printed `HEAR_SERVICE_KEY` in the backend's secret store. The backend
+must send that same plaintext key as `X-Service-Key`/`x-api-key`; never commit
+the plaintext key or put it in `BACKEND_REGISTRY_JSON`.
+
+Validate the immutable runtime without starting Ray:
 
 ```bash
 uv run --no-project python main.py --validate-only
@@ -135,6 +156,20 @@ supervisord -c deploy/supervisord.conf
 Use `scripts/bootstrap-pod.sh --start` to start Supervisor immediately after
 setup. The first server start downloads models into `/models`; it does not
 store weights under `/workspace`.
+
+When deploying code or changing `MAGIC_CLEAN_ENGINE_REVISION`, first drain
+queued/running jobs, then restart both Ray processes. Restarting only the
+application process can retain existing Serve actors with stale imports or
+settings, causing engine-revision mismatches:
+
+```bash
+supervisorctl -c deploy/supervisord.conf stop hear-ray-server
+supervisorctl -c deploy/supervisord.conf restart ray-head
+supervisorctl -c deploy/supervisord.conf start hear-ray-server
+```
+
+Wait for `/health` to report `healthy` and `control_ready: true` before
+submitting new jobs.
 
 ## Availability and concurrency
 

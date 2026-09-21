@@ -179,24 +179,19 @@ class MagicCleanPipeline:
         self._ensure_stem_loaded()
         stems = self._stem.separate(waveform, sr)
         speech = stems["vocals"]
-        speech_reference = speech
         music_stems = [stem for name, stem in stems.items() if name != "vocals"]
         music = torch.stack(music_stems).sum(dim=0) if music_stems else torch.zeros_like(waveform)
         self._validate_processed(speech, waveform.shape)
         self._validate_processed(music, waveform.shape)
-        background = waveform - speech - music
-
         speech = self._mossformer.enhance(speech, sr)
         speech = self._apply_residual_suppression(
             speech,
             sr,
-            self._suppression_strength_for_background(levels.background),
+            self.profile.residual_suppression_strength,
         )
         speech = self._apply_speech_tone_shaping(speech, sr)
-        if levels.speech > 0:
-
-
-            speech = self._protect_source_activity(speech_reference, speech, sr)
+        self._validate_processed(speech, waveform.shape)
+        background = waveform - speech - music
 
         mixed = (
             speech * (levels.speech / 100.0)

@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.115,<1",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.5,<3",
+    "python-dotenv>=1.0,<2",
     "protobuf>=6.31.1,<7",
     "sqlalchemy>=2.0,<3",
     "psycopg2-binary>=2.9,<3",

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from hear.services.magic_clean.models import ContentMode, StemLevels
@@ -183,6 +184,56 @@ def test_speech_only_stem_controls_never_restore_muted_accompaniment():
     )
 
     torch.testing.assert_close(result, torch.zeros_like(waveform))
+
+
+@pytest.mark.parametrize(
+    "levels",
+    [
+        StemLevels(100, 100, 100),
+        StemLevels(100, 10, 10),
+        StemLevels(100, 0, 0),
+        StemLevels(0, 100, 0),
+        StemLevels(0, 0, 100),
+        StemLevels(50, 25, 75),
+        StemLevels(0, 0, 0),
+    ],
+)
+def test_profiles_mix_enhanced_speech_music_and_removed_noise(levels):
+    pipeline = make_pipeline([])
+    pipeline.load("htdemucs", demucs_model_path="/models/demucs")
+    timeline = torch.arange(1_000, dtype=torch.float32) / 1_000
+    speech = (0.02 * torch.sin(2 * torch.pi * 100 * timeline)).repeat(2, 1)
+    music = (0.05 * torch.sin(2 * torch.pi * 220 * timeline)).repeat(2, 1)
+    noise = torch.full_like(speech, 0.2)
+    residual = torch.full_like(speech, 0.001)
+    source = speech + music + noise + residual
+    pipeline._stem.separate = lambda *_args: {"vocals": speech + noise, "other": music}
+    pipeline._mossformer.enhance = lambda *_args: speech
+
+    result = pipeline.process(source, 1_000, ContentMode.SPEECH, levels, finalise=False)
+
+    expected = (
+        speech * (levels.speech / 100)
+        + music * (levels.music / 100)
+        + (noise + residual) * (levels.background / 100)
+    )
+    torch.testing.assert_close(result, expected)
+    if levels == StemLevels(100, 100, 100):
+        torch.testing.assert_close(result, source)
+
+
+def test_background_control_retains_removed_noise_only_at_requested_level():
+    pipeline = make_pipeline([])
+    pipeline.load("htdemucs", demucs_model_path="/models/demucs")
+    source = torch.full((1, 1_000), 0.1)
+    pipeline._mossformer.enhance = lambda waveform, _sr: torch.zeros_like(waveform)
+
+    for background in (0, 10, 50, 100):
+        result = pipeline.process(
+            source, 1_000, ContentMode.SPEECH,
+            StemLevels(100, 0, background), finalise=False,
+        )
+        torch.testing.assert_close(result, source * (background / 100))
 
 
 def test_catastrophic_speech_enhancer_collapse_restores_source_without_attenuation():

@@ -139,8 +139,7 @@ class MossFormer2Enhancer:
         original = w.detach().clone()
         original_shape = tuple(original.shape)
         if self._cv is None:
-            logger.warning("MossFormer2 is not loaded; using the immutable input")
-            return original
+            raise RuntimeError("MossFormer2 is not loaded")
 
         try:
             working = (

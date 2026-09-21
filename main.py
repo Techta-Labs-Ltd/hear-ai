@@ -114,7 +114,8 @@ class RuntimeApplication:
             <= settings.MAGIC_CLEAN_CLEANUP_GRACE_SECONDS
         ):
             errors.append(
-                "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed MAGIC_CLEAN_CLEANUP_GRACE_SECONDS"
+                "MAGIC_CLEAN_STORAGE_CREDENTIAL_MIN_TTL_SECONDS must exceed "
+                "MAGIC_CLEAN_CLEANUP_GRACE_SECONDS"
             )
         if settings.MAGIC_CLEAN_CHUNK_SECONDS <= 0:
             errors.append("MAGIC_CLEAN_CHUNK_SECONDS must be positive")

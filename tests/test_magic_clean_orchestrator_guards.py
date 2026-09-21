@@ -20,7 +20,6 @@ from hear.services.magic_clean.lineage import (
     MAGIC_CLEAN_ROOT_URL_KEY,
     MAGIC_CLEAN_SOURCE_FILE_SHA256_KEY,
     MAGIC_CLEAN_SOURCE_PCM_SHA256_KEY,
-    MagicCleanLineageError,
 )
 
 FILE_HASH = "a" * 64
@@ -344,7 +343,7 @@ async def _exercise_process_parks_expired_storage(monkeypatch):
     parked_event = {"event": "job_queued", "job_id": "job", "status": "queued"}
     orchestrator._park_magic_clean_for_storage_refresh = AsyncMock(return_value=parked_event)
     job = SimpleNamespace(
-        id="job", run_id="run", status="queued", job_type="magic_clean", attempts=0
+        id="job", run_id="run", status="queued", job_type="magic_clean", attempts=0, error=None
     )
 
     class Query:
@@ -609,10 +608,10 @@ async def _exercise_recovery_requeues_interrupted_job(monkeypatch):
     assert persisted_tombstone["not_before"] != old_not_before
     refreshed_not_before = datetime.fromisoformat(persisted_tombstone["not_before"])
     assert refreshed_not_before > datetime.now(UTC) + timedelta(seconds=115)
-    assert track_job.status == "failed"
+    assert track_job.status == "queued"
     assert track_job.current_stage is None
     assert track_job.error == RECOVERY_INTERRUPTED_ERROR
-    assert track_job.completed_at is not None
+    assert track_job.completed_at is None
     assert track_job.updated_at == track_job.completed_at
     assert scheduled == [("job", job.run_id)]
     assert session.commits == 1

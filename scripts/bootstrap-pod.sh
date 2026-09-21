@@ -4,7 +4,7 @@ set -euo pipefail
 readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly venv_python="${project_root}/.venv/bin/python"
 readonly fish_speech_root="/fish-speech"
-readonly local_service_key="${HEAR_LOCAL_SERVICE_KEY:-hear-local-service-key}"
+local_service_key="${HEAR_LOCAL_SERVICE_KEY:-}"
 
 start_supervisor=false
 if [[ "${1:-}" == "--start" ]]; then
@@ -52,8 +52,11 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
 
-local_service_hash="$(printf '%s' "$local_service_key" | sha256sum | cut -d ' ' -f1)"
 if grep -q 'replace-with-64-char-sha256' .env; then
+  if [[ -z "$local_service_key" ]]; then
+    local_service_key="$(openssl rand -hex 32)"
+  fi
+  local_service_hash="$(printf '%s' "$local_service_key" | sha256sum | cut -d ' ' -f1)"
   sed -i "s/replace-with-64-char-sha256/${local_service_hash}/g" .env
 fi
 if grep -q '^STORAGE_CONTEXT_ENCRYPTION_KEY=replace-with-fernet-key$' .env; then
@@ -124,7 +127,11 @@ PY
 bash -n scripts/start-postgres.sh scripts/start-hear-ray-server.sh
 chmod +x scripts/bootstrap-pod.sh scripts/start-postgres.sh scripts/start-hear-ray-server.sh
 
-echo "Bootstrap complete. Local API key: ${local_service_key}"
+if [[ -n "$local_service_key" ]]; then
+  echo "Bootstrap complete. Save this API key in the backend secret store: ${local_service_key}"
+else
+  echo "Bootstrap complete. The existing backend service-key digest was preserved."
+fi
 echo "Start the managed stack with: supervisord -c ${project_root}/deploy/supervisord.conf"
 if $start_supervisor; then
   exec supervisord -c "${project_root}/deploy/supervisord.conf"

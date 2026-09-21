@@ -51,14 +51,12 @@ def test_disabled_spectral_suppression_is_exact_identity(sample_count):
     torch.testing.assert_close(result, waveform, rtol=0, atol=0)
 
 
-def test_mossformer_unloaded_bypass_is_an_immutable_exact_copy():
+def test_mossformer_unloaded_cannot_silently_deliver_unprocessed_audio():
     waveform = torch.randn(2, 44_101)
     enhancer = MossFormer2Enhancer()
 
-    result = enhancer.enhance(waveform, 44_100)
-
-    assert result.data_ptr() != waveform.data_ptr()
-    torch.testing.assert_close(result, waveform, rtol=0, atol=0)
+    with pytest.raises(RuntimeError, match="MossFormer2 is not loaded"):
+        enhancer.enhance(waveform, 44_100)
 
 
 def test_mossformer_rejects_length_drift_instead_of_returning_resampled_audio():
