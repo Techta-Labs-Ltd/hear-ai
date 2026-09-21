@@ -62,9 +62,9 @@ os.environ["HF_DATASETS_OFFLINE"] = os.getenv("HF_DATASETS_OFFLINE", "0")
 logger = logging.getLogger(__name__)
 _recon_logger = logging.getLogger("reconstruct")
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-# A process restart is not a terminal job failure.  The message is retained as
-# durable audit information while the logical job is fenced with a new run id
-# and scheduled again.
+
+
+
 RECOVERY_INTERRUPTED_ERROR = "service_restarted_retrying"
 RECONSTRUCTION_LINEAGE_JOB_TYPES = {"reconstruct", "edit_transcript"}
 MAX_RECONSTRUCTION_LINEAGE_DEPTH = 32
@@ -869,8 +869,8 @@ class Orchestrator:
             ):
                 return
             job.status = "running"
-            # ``service_restarted_retrying`` is a recovery annotation, not a
-            # current failure once this fenced run has claimed the job.
+
+
             if job.error == RECOVERY_INTERRUPTED_ERROR:
                 job.error = None
             job.attempts = int(job.attempts or 0) + 1

@@ -13,13 +13,13 @@ class SilenceProcessor:
     SEGMENT_MERGE_GAP_MS = 300
     PRE_SPEECH_PAD_MS = 200
     POST_SPEECH_PAD_MS = 150
-    # A detected activity frame can contain a stop consonant or very short
-    # interjection. Do not discard it merely for being shorter than a word.
+
+
     MIN_SPEECH_SEGMENT_MS = 1
 
-    # Keep the detector grid commensurate with the 20 ms join and the declared
-    # protection pads. This prevents a second pass from shaving an extra frame
-    # solely because the first edit moved speech onto a different frame phase.
+
+
+
     ANALYSIS_FRAME_MS = 10
 
     def detect_and_strip_silence_file(
@@ -102,10 +102,10 @@ class SilenceProcessor:
         duration_s = sample_count / sample_rate
         low_pctile = 20 if duration_s < 2.0 else 30
         low_pct = float(np.percentile(rms_values, low_pctile))
-        # A percentile of the full timeline becomes zero when activity occupies
-        # a small fraction of a long recording. The maximum is only a reference
-        # for the conservative floor-relative gate; isolated activity remains
-        # protected by the declared pads instead of being discarded.
+
+
+
+
         high_pct = float(np.max(rms_values))
         if high_pct < 1e-10:
             return None
@@ -262,7 +262,7 @@ class SilenceProcessor:
                 start = i * frame_size
                 end = min(start + frame_size, sample_count)
                 channel_rms = np.sqrt(np.mean(signal[:, start:end] ** 2, axis=1))
-                # A voice on either channel protects the shared timeline.
+
                 rms_values[i] = float(np.max(channel_rms))
 
             is_speech = self._activity_mask(rms_values, sample_count, sr)
@@ -304,8 +304,8 @@ class SilenceProcessor:
             if not padded:
                 return w
 
-            # Padding can make separate regions overlap. Merge again so samples
-            # in those overlaps are not duplicated in the output.
+
+
             padded = self._merge_close_samples(padded, 0)
 
             target_fade = max(1, int(sr * self.JOIN_FADE_MS / 1000))

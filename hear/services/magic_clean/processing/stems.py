@@ -23,17 +23,17 @@ class StemSeparator:
         model_root = Path(model_path)
         if not model_root.is_dir():
             raise FileNotFoundError(f"Demucs model repository is missing: {model_root}")
-        # PyTorch 2.6+ defaults torch.load to weights_only=True. Demucs 4
-        # checkpoints contain this small, known object graph, so explicitly
-        # allowlist only the types required by the supported HTDemucs model.
+
+
+
         numpy_multiarray: Any = np.core.multiarray
         numpy_scalar: Any = numpy_multiarray.scalar
         safe_globals: list[Any] = [
             HTDemucs,
             Fraction,
-            # NumPy 2 exposes this object from ``numpy._core`` while the
-            # official Demucs checkpoint records its legacy ``numpy.core``
-            # pickle name. Pin the serialized name explicitly.
+
+
+
             (numpy_scalar, "numpy.core.multiarray.scalar"),
             np.dtype,
             type(np.dtype(np.float64)),

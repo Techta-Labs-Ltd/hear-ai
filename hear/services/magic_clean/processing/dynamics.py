@@ -64,8 +64,8 @@ class DynamicsProcessor:
         makeup_lin = 10 ** (makeup_db / 20)
 
         signal = working.detach().cpu().numpy().astype(np.float64)
-        # One peak detector and one gain curve link every channel. This avoids
-        # stereo-image movement when a transient occurs on only one channel.
+
+
         detector = np.max(np.abs(signal), axis=0)
         envelope = np.empty_like(detector)
         envelope[0] = detector[0]
@@ -82,8 +82,8 @@ class DynamicsProcessor:
             threshold_db + (level_db[over] - threshold_db) / ratio - level_db[over]
         )
 
-        # Initialize from the first requested gain. An implicit zero-state IIR
-        # starts gain near zero and creates a destructive fade at every window.
+
+
         smoothed_gain_db = np.empty_like(target_gain_db)
         smoothed_gain_db[0] = target_gain_db[0]
         for index in range(1, target_gain_db.size):
@@ -266,11 +266,11 @@ class DynamicsProcessor:
             sig_np = working.detach().cpu().numpy().astype(np.float64)
             n = sig_np.shape[-1]
 
-            # The loudest channel drives one shared gain curve.
+
             abs_sig = np.max(np.abs(sig_np), axis=0)
 
-            # Exact forward-looking rolling maximum in O(n). The previous
-            # implementation scanned the complete window for every sample.
+
+
             peak_lookahead = np.empty(n, dtype=np.float64)
             candidates: deque[int] = deque()
             right = -1

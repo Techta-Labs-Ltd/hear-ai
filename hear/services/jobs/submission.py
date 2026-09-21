@@ -31,8 +31,8 @@ ALLOWED_JOB_TYPES = {
     "edit_transcript",
     "discovery",
 }
-# Compatibility names are normalized before validation and persisted as the
-# canonical workflow.  Unknown names remain explicit validation failures.
+
+
 JOB_TYPE_ALIASES = {"tagging": "categorization"}
 AUDIO_REQUIRED_JOB_TYPES = {
     "pipeline",
@@ -376,9 +376,9 @@ class JobSubmissionService:
                         raise SubmissionConflictError(
                             "job_id has already been used with a different payload"
                         )
-                # Every queued job accepts a credential rotation only when it
-                # targets the same immutable storage destination.  Magic Clean
-                # adds its longer cleanup-window checks below.
+
+
+
                 if payload["job_type"] != "magic_clean":
                     try:
                         stored_storage = StorageContexts.decrypt_storage_context(

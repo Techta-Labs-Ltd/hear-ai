@@ -11,8 +11,8 @@ from .processing.validation import SILENCE_PEAK_THRESHOLD, SILENCE_RMS_THRESHOLD
 @dataclass(frozen=True, slots=True)
 class MagicCleanProfile:
     use_stem_separation: bool = False
-    # The legacy spectral suppressor stays bypassed until a versioned corpus
-    # proves that it is speech-safe. Strength zero is an exact identity.
+
+
     residual_suppression_strength: float = 0.0
     enable_spectral_suppression: bool = False
     apply_fixed_tone_shaping: bool = False
@@ -54,8 +54,8 @@ class MagicCleanPipeline:
         self._mossformer.load(mossformer_model_path)
         self._demucs_model = demucs_model
         self._demucs_model_path = demucs_model_path
-        # Production always exposes stem controls, so provision Demucs during
-        # deployment startup instead of downloading/loading on a request.
+
+
         if demucs_model_path is not None:
             self._ensure_stem_loaded()
 
@@ -194,8 +194,8 @@ class MagicCleanPipeline:
         )
         speech = self._apply_speech_tone_shaping(speech, sr)
         if levels.speech > 0:
-            # Restore only the isolated vocal reference. Restoring the full
-            # mixture here would leak music/background that the controls mute.
+
+
             speech = self._protect_source_activity(speech_reference, speech, sr)
 
         mixed = (

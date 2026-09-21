@@ -69,8 +69,8 @@ class QualityMetrics:
         *,
         snr_available: bool = True,
     ) -> float:
-        # ``0`` is the wire-compatible unavailable SNR sentinel. Callers must
-        # exclude it rather than awarding the sentinel a positive SNR score.
+
+
         snr_score = min(1.0, max(0.0, (snr_db + 5) / 40)) if snr_available else 0.0
         lufs_score = 1.0 - min(1.0, abs(lufs - QualityMetrics.TARGET_LUFS) / 20)
         clip_pen = 0.3 if clipping else 0.0

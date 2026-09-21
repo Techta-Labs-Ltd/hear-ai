@@ -60,8 +60,8 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE: int = 1800
     DB_POOL_PRE_PING: bool = True
     DB_STATEMENT_TIMEOUT_MS: int = 60000
-    # Synchronous SQLAlchemy is used by a few transport boundaries.  Keep that
-    # work off the event loop and cap it independently from the general executor.
+
+
     ASYNC_DB_MAX_WORKERS: int = 4
     ASYNC_DB_MAX_INFLIGHT: int = 16
 
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     DEMUCS_MODEL_PATH: str = str(MODEL_ROOT / "demucs")
 
     FISH_SPEECH_TTS_ENABLED: bool = True
-    # Fish Speech source is a code dependency; its weights remain under MODEL_CACHE_DIR.
+
     FISH_SPEECH_HOME: str = str(FISH_SPEECH_SOURCE_ROOT)
     FISH_SPEECH_CHECKPOINT_PATH: str = str(MODEL_ROOT / "fish-speech" / "s2-pro")
     FISH_SPEECH_CODEC_PATH: str = str(

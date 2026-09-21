@@ -6,7 +6,6 @@ cd "$ROOT"
 
 if [[ -f "$ROOT/.env" ]]; then
   set -a
-  # shellcheck source=/dev/null
   . "$ROOT/.env"
   set +a
 fi

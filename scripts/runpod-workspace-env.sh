@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Source this file before installing dependencies or starting Hear AI on RunPod.
-# It prepares root-level model and cache directories. Ray provisions any
-# missing model artifacts when the server starts.
 
 set -e
 

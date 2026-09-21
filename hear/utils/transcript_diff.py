@@ -104,15 +104,15 @@ def _snap_to_sentences(
 
     seen: set[tuple[int, int]] = set()
     for start_idx, end_idx in ranges:
-        # Find the sentence this range falls into
+
         new_start = 0
         for b in boundaries:
             if b < start_idx:
-                new_start = b + 1  # start after this boundary
+                new_start = b + 1
         new_end = len(words)
         for b in boundaries:
             if b >= end_idx - 1:
-                new_end = b + 1  # include through this boundary
+                new_end = b + 1
                 break
         if new_end <= new_start:
             new_end = min(new_start + 1, len(words))
@@ -181,8 +181,8 @@ def compute_edit_segments(
             and j1 >= len(edit_tokens_lower) - 2
             and (i2 - i1) > (j2 - j1) * 3
         ):
-            # Trailing: original has much more content than edit at the end.
-            # Only include the edit-side portion for TTS; the rest is a deletion.
+
+
             if tag == "replace":
                 changed_ranges.append((i1, min(i1 + (j2 - j1) + 5, i2)))
                 has_trailing_cut = True
@@ -205,10 +205,10 @@ def compute_edit_segments(
 
     snapped = _snap_to_sentences(changed_ranges, orig_words)
     if len(snapped) > 1 or _sentence_boundaries(orig_words):
-        # Sentence boundaries were found and multiple sentences affected
+
         merged = sorted(snapped)
     else:
-        # Fall back to word-level expansion + merging
+
         expanded = _expand_ranges(changed_ranges, len(orig_tokens), expand)
         merged = _merge_overlapping_ranges(expanded, orig_words, merge_gap)
 
@@ -264,8 +264,8 @@ def compute_edit_segments(
             )
         )
 
-    # Deduplicate: remove superset segments (larger time range containing a smaller one)
-    # when the larger segment's edited text is empty or identical to the smaller's.
+
+
     deduped: list[EditSegment] = []
     for seg in sorted(segments, key=lambda s: s.end_time - s.start_time):
         is_redundant = False
@@ -280,7 +280,7 @@ def compute_edit_segments(
         if not is_redundant:
             deduped.append(seg)
 
-    # Add trailing deletion: original has extra text beyond the edit
+
     if trailing_delete_start is not None and trailing_delete_start < len(orig_words):
         td_start = trailing_delete_start
         td_end = len(orig_words)

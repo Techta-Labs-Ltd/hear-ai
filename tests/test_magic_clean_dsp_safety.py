@@ -106,7 +106,7 @@ def test_silence_edit_protects_both_channels_and_is_stable_after_first_pass():
     sample_rate = 1_000
     waveform = torch.zeros(2, 6_000)
     waveform[0, 1_000:1_800] = 0.2
-    # Speech exists only on the right channel in the second region.
+
     waveform[1, 4_200:5_000] = 0.2
     processor = SilenceProcessor()
 

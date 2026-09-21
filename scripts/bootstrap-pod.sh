@@ -71,10 +71,6 @@ if [[ ! -d "$fish_speech_root/.git" ]]; then
   git clone --depth 1 https://github.com/fishaudio/fish-speech.git "$fish_speech_root"
 fi
 UV_CACHE_DIR=/cache/uv uv pip install --python "$venv_python" --no-deps -e "$fish_speech_root"
-# Fish Speech's published dependency metadata pins protobuf below the version
-# required by Hear's generated gRPC API. Install its runtime modules without
-# allowing that metadata to replace Hear's locked Torch/Transformers/Protobuf
-# stack. The import check below is the gate for a usable Fish deployment.
 fish_runtime_packages=(
   absl-py
   argbind

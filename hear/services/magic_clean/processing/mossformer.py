@@ -26,10 +26,10 @@ class MossFormer2Enhancer:
         self._lock = threading.Lock()
 
     def load(self, model_path: str | Path | None = None):
-        # ClearVoice hardcodes this relative checkpoint directory in its bundled
-        # YAML. Resolve it through a lightweight runtime symlink so scale-to-zero
-        # replicas reuse the persistent workspace model instead of downloading
-        # hundreds of MB into the workspace on every cold start.
+
+
+
+
         model_root = Path(
             model_path
             or os.environ.get(
@@ -134,8 +134,8 @@ class MossFormer2Enhancer:
         if not torch.isfinite(w).all():
             raise ValueError("MossFormer input contains non-finite samples")
 
-        # Every bypass returns this immutable snapshot, never a resampled working
-        # tensor or a partially enhanced channel set.
+
+
         original = w.detach().clone()
         original_shape = tuple(original.shape)
         if self._cv is None:

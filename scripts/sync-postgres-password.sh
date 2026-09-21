@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-# shellcheck source=/dev/null
 source "$ROOT/scripts/postgres-env.sh"
 
 read -r PG_USER PG_PASS < <(

@@ -96,7 +96,6 @@ message PipelineEvent {
   string error = 13;
   google.protobuf.Struct result = 14;
   string backend_id = 15;
-  // Structured terminal data is additive: v1 clients can continue reading error.
   google.protobuf.Struct error_report = 16;
 }
 

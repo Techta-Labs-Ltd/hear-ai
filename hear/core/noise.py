@@ -80,8 +80,8 @@ class NoiseReducer:
         """
         strength = float(strength)
         if strength <= 0.0:
-            # This is an explicit bypass contract, not merely an approximately
-            # transparent STFT round-trip.
+
+
             return w
 
         try:
@@ -176,8 +176,8 @@ class NoiseReducer:
             raise RuntimeError("spectral reconstruction left uncovered samples")
         cleaned = reconstructed[core] / core_weights
 
-        # Magnitude subtraction is not intended to amplify the signal. Bound
-        # any numerical overlap/add overshoot without ever boosting the result.
+
+
         input_peak = float(np.max(np.abs(signal)))
         output_peak = float(np.max(np.abs(cleaned)))
         if input_peak == 0.0:
