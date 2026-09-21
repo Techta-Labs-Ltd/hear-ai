@@ -1,4 +1,5 @@
 import gc
+import inspect
 import io
 import logging
 import time
@@ -60,17 +61,21 @@ class FishSpeechDeployment:
         codec = settings.FISH_SPEECH_CODEC_PATH
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        logger.info("Loading Fish Speech with BNB mode %s...", settings.FISH_SPEECH_BNB_MODE)
+        logger.info("Loading Fish Speech...")
         t0 = time.time()
 
-        llama_queue, self._llama_thread = launch_thread_safe_queue(
-            checkpoint_path=checkpoint,
-            device=device,
-            precision=torch.bfloat16,
-            compile=False,
-            bnb_mode=settings.FISH_SPEECH_BNB_MODE or None,
-            lazy_load=False,
-        )
+        queue_kwargs = {
+            "checkpoint_path": checkpoint,
+            "device": device,
+            "precision": torch.bfloat16,
+            "compile": False,
+        }
+        queue_parameters = inspect.signature(launch_thread_safe_queue).parameters
+        if "bnb_mode" in queue_parameters:
+            queue_kwargs["bnb_mode"] = settings.FISH_SPEECH_BNB_MODE or None
+        if "lazy_load" in queue_parameters:
+            queue_kwargs["lazy_load"] = False
+        llama_queue, self._llama_thread = launch_thread_safe_queue(**queue_kwargs)
         decoder = load_decoder_model(
             config_name="modded_dac_vq",
             checkpoint_path=codec,
