@@ -74,6 +74,25 @@ class AttemptEnvelope(StrictContract):
     magic_clean_profile: MagicCleanProfile | None = None
     options: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("job_type", mode="before")
+    @classmethod
+    def parse_job_type(cls, value):
+        return value if isinstance(value, JobType) else JobType(value)
+
+    @field_validator("operation", mode="before")
+    @classmethod
+    def parse_operation(cls, value):
+        if value is None or isinstance(value, ReconstructionOperation):
+            return value
+        return ReconstructionOperation(value)
+
+    @field_validator("magic_clean_profile", mode="before")
+    @classmethod
+    def parse_magic_clean_profile(cls, value):
+        if value is None or isinstance(value, MagicCleanProfile):
+            return value
+        return MagicCleanProfile(value)
+
     @field_validator("job_id", "run_id", "attempt_id", "track_id", "user_id")
     @classmethod
     def validate_identity(cls, value: str) -> str:
