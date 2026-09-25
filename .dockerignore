@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.env
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+docs
+deploy/cleaner/evidence
+*.pyc
+*.pyo
+*.pyd
+audio
+cache
+models/cache
