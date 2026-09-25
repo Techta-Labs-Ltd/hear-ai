@@ -8,6 +8,21 @@ class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True, allow_inf_nan=False)
 
 
+class AttemptClaimStatus(StrEnum):
+    EXECUTE = "execute"
+    ALREADY_COMPLETED = "already_completed"
+    CANCELLED = "cancelled"
+    STALE = "stale"
+    NOT_CURRENT = "not_current"
+    LEASE_UNAVAILABLE = "lease_unavailable"
+
+
+class AttemptClaimResponse(StrictContract):
+    status: AttemptClaimStatus
+    lease_seconds: int | None = Field(default=None, ge=1)
+    heartbeat_seconds: int | None = Field(default=None, ge=1)
+
+
 class JobType(StrEnum):
     PIPELINE = "pipeline"
     TRANSCRIPTION = "transcription"

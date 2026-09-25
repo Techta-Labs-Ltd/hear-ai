@@ -1,7 +1,7 @@
 import httpx
 
 from hear.contracts.events import ExecutionEvent
-from hear.contracts.jobs import AttemptEnvelope
+from hear.contracts.jobs import AttemptClaimResponse, AttemptEnvelope
 from hear.contracts.outcomes import JobOutcome
 
 
@@ -17,6 +17,22 @@ class BackendReporter:
         self._headers = {
             "Authorization": f"Bearer {envelope.reporting.token.get_secret_value()}",
         }
+
+    async def claim(self) -> AttemptClaimResponse:
+        response = await self._client.post(
+            f"{self._base_url}/internal/ai/attempts/{self._envelope.attempt_id}/claim",
+            json={
+                "job_id": self._envelope.job_id,
+                "run_id": self._envelope.run_id,
+                "attempt_id": self._envelope.attempt_id,
+                "job_type": self._envelope.job_type.value,
+                "track_id": self._envelope.track_id,
+                "source_revision": self._envelope.source.revision,
+            },
+            headers=self._headers,
+        )
+        response.raise_for_status()
+        return AttemptClaimResponse.model_validate(response.json())
 
     async def publish_event(self, event: ExecutionEvent) -> None:
         response = await self._client.post(
