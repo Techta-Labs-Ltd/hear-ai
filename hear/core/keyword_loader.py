@@ -1,6 +1,5 @@
 import threading
 
-from hear.models.database import DatabaseRuntime, HarmKeyword
 
 class HarmKeywordLoader:
     def __init__(self):
@@ -17,6 +16,8 @@ class HarmKeywordLoader:
         self._lock = threading.Lock()
 
     def load(self):
+        from hear.models.database import DatabaseRuntime, HarmKeyword
+
         db = DatabaseRuntime.SessionLocal()
         try:
             harm = [
@@ -27,6 +28,11 @@ class HarmKeywordLoader:
             db.close()
         with self._lock:
             self._harm_keywords = harm
+
+    def load_keywords(self, keywords: list[str]) -> None:
+        normalized = [str(item).strip() for item in keywords if str(item).strip()]
+        with self._lock:
+            self._harm_keywords = normalized
 
     @property
     def harm_keywords(self) -> list[str]:

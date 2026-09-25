@@ -4,23 +4,51 @@ import re
 import threading
 
 from hear.config import settings as app_settings
+from hear.inference.client import LocalInferenceClient
 from hear.services.model_client import ModelClientRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    def __init__(self):
+    def __init__(
+        self,
+        model_client: LocalInferenceClient | None = None,
+        *,
+        enabled: bool | None = None,
+        discovery_max_new_tokens: int | None = None,
+    ) -> None:
         self._lock = threading.Lock()
+        self._model_client = model_client
+        self._enabled = bool(app_settings.QWEN_LLM_ENABLED) if enabled is None else bool(enabled)
+        self._discovery_max_new_tokens = (
+            int(app_settings.DISCOVERY_MAX_NEW_TOKENS)
+            if discovery_max_new_tokens is None
+            else int(discovery_max_new_tokens)
+        )
 
     @property
     def is_available(self) -> bool:
-        return bool(app_settings.QWEN_LLM_ENABLED)
+        if not self._enabled:
+            return False
+        if self._model_client is not None:
+            return self._model_client.llm_available
+        try:
+            ModelClientRegistry.get_model_client()
+        except RuntimeError:
+            return False
+        return True
 
     def _generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
         with self._lock:
+            if self._model_client is not None:
+                return self._model_client.llm_generate_sync(
+                    messages,
+                    max_tokens=max_new_tokens,
+                )
             return ModelClientRegistry.get_model_client().llm_generate_sync(
-                messages, max_tokens=max_new_tokens
+                messages,
+                max_tokens=max_new_tokens,
             )
 
     @staticmethod
@@ -266,7 +294,7 @@ class LLMService:
             },
             {"role": "user", "content": user_content},
         ]
-        max_tokens = max(400, int(app_settings.DISCOVERY_MAX_NEW_TOKENS))
+        max_tokens = max(400, self._discovery_max_new_tokens)
         raw = self._generate(messages, max_new_tokens=max_tokens)
         parsed = self._extract_json(raw)
         if not isinstance(parsed, dict) or not parsed:

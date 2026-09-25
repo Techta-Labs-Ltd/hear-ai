@@ -6,7 +6,7 @@ import re
 from hear.config import settings
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
-from hear.services.llm import LLMServiceProvider
+from hear.services.llm import LLMService, LLMServiceProvider
 from hear.utils.content_context import (
     assistive_tech_narrative,
     filter_controlled_taxonomy_paths,
@@ -111,6 +111,14 @@ class DiscoverySupport:
 
 
 class DiscoveryService:
+    def __init__(self, llm: LLMService | None = None) -> None:
+        self._llm = llm
+
+    def _llm_service(self) -> LLMService:
+        if self._llm is not None:
+            return self._llm
+        return LLMServiceProvider.get_llm_service()
+
     def _trim_speaker_capture(self, name: str) -> str:
         parts: list[str] = []
         for word in (name or "").split():
@@ -525,11 +533,11 @@ class DiscoveryService:
             return None
         hint = DiscoverySupport._categorization_hint(categorization)
         taxonomy_paths = discovery_taxonomy_loader.data.paths
-        if LLMServiceProvider.get_llm_service().is_available:
+        if self._llm_service().is_available:
             for attempt, strict in enumerate((False, True)):
                 try:
                     raw = await asyncio.to_thread(
-                        LLMServiceProvider.get_llm_service().build_discovery_profile,
+                        self._llm_service().build_discovery_profile,
                         transcript,
                         track_name=track_name,
                         duration_seconds=duration_seconds,
@@ -563,7 +571,7 @@ class DiscoveryService:
                     print(f"[DISCOVERY] Qwen profile failed (attempt {attempt + 1}): {exc}")
                     if attempt == 1:
                         break
-        elif not LLMServiceProvider.get_llm_service().is_available:
+        elif not self._llm_service().is_available:
             print(
                 "[DISCOVERY] Qwen not loaded — enable QWEN_LLM_ENABLED=true and GPU; using categorization fallback (limited metadata)"
             )

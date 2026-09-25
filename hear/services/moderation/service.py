@@ -3,7 +3,8 @@ import logging
 import re
 
 from hear.core.keyword_loader import harm_keyword_loader
-from hear.services.llm import LLMServiceProvider
+from hear.inference.client import LocalInferenceClient
+from hear.services.llm import LLMService, LLMServiceProvider
 from hear.services.model_client import ModelClientRegistry
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,24 @@ _HIGH_THRESHOLD = 0.8
 
 
 class ModerationService:
+    def __init__(
+        self,
+        model_client: LocalInferenceClient | None = None,
+        llm: LLMService | None = None,
+    ) -> None:
+        self._model_client = model_client
+        self._llm = llm
+
+    def _models(self):
+        if self._model_client is not None:
+            return self._model_client
+        return ModelClientRegistry.get_model_client()
+
+    def _llm_service(self) -> LLMService:
+        if self._llm is not None:
+            return self._llm
+        return LLMServiceProvider.get_llm_service()
+
     async def moderate(self, text: str) -> dict:
         if not text or not text.strip():
             return {
@@ -73,11 +92,11 @@ class ModerationService:
                 "blocked_words_found": keyword_hits,
             }
         if max_score < _HIGH_THRESHOLD:
-            if LLMServiceProvider.get_llm_service().is_available:
+            if self._llm_service().is_available:
                 try:
                     result = await loop.run_in_executor(
                         None,
-                        lambda: LLMServiceProvider.get_llm_service().moderate(
+                        lambda: self._llm_service().moderate(
                             text,
                             detoxify_scores=scores,
                             harm_keywords=list(built_in_keywords),
@@ -105,11 +124,11 @@ class ModerationService:
                 "blocked_words_found": keyword_hits,
             }
         severity = self._score_to_severity(max_score, local_result)
-        if LLMServiceProvider.get_llm_service().is_available:
+        if self._llm_service().is_available:
             try:
                 result = await loop.run_in_executor(
                     None,
-                    lambda: LLMServiceProvider.get_llm_service().moderate(
+                    lambda: self._llm_service().moderate(
                         text,
                         detoxify_scores=scores,
                         harm_keywords=list(built_in_keywords),
@@ -135,7 +154,7 @@ class ModerationService:
         }
 
     def _classify_local(self, text: str) -> dict:
-        results = ModelClientRegistry.get_model_client().moderate_sync(text[:512])
+        results = self._models().moderate_sync(text[:512])
         scores = {}
         if isinstance(results, dict):
             labels = results.get("labels", [])
@@ -176,7 +195,7 @@ class ModerationService:
 
     def _classify_intent(self, text: str) -> dict:
         try:
-            output = ModelClientRegistry.get_model_client().nli_sync(text[:1024], INTENT_LABELS)
+            output = self._models().nli_sync(text[:1024], INTENT_LABELS)
             label_scores = dict(zip(output["labels"], output["scores"]))
             harmful_score = max(
                 (label_scores.get(lbl, 0) for lbl in HARMFUL_INTENT_LABELS), default=0

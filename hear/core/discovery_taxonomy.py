@@ -3,7 +3,6 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from hear.models.database import DatabaseRuntime, TaxonomyPath
 
 
 @dataclass
@@ -73,6 +72,8 @@ class DiscoveryTaxonomyLoader:
                     elif section == "TAXONOMY":
                         paths.append(line)
         else:
+            from hear.models.database import DatabaseRuntime, TaxonomyPath
+
             db = DatabaseRuntime.SessionLocal()
             try:
                 paths = [
@@ -83,6 +84,15 @@ class DiscoveryTaxonomyLoader:
         lookup = {TaxonomyLabels._norm(p): p for p in paths}
         with self._lock:
             self._data = DiscoveryTaxonomyData(paths=paths, path_lookup=lookup)
+
+    def load_paths(self, paths: list[str]) -> None:
+        normalized = [str(item).strip() for item in paths if str(item).strip()]
+        lookup = {TaxonomyLabels._norm(item): item for item in normalized}
+        with self._lock:
+            self._data = DiscoveryTaxonomyData(
+                paths=normalized,
+                path_lookup=lookup,
+            )
 
     @property
     def data(self) -> DiscoveryTaxonomyData:

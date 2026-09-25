@@ -23,10 +23,13 @@ class PodEntrypoint:
 
     async def run(self) -> None:
         role = WorkerRole(self._environment.get("HEAR_WORKER_ROLE", "transcription"))
-        if role != WorkerRole.TRANSCRIPTION:
-            raise RuntimeError("unsupported_entrypoint_role")
         readiness = self._bootstrap.readiness(role)
-        executor, backend, resources = self._bootstrap.transcription_executor()
+        if role == WorkerRole.TRANSCRIPTION:
+            executor, backend, resources = self._bootstrap.transcription_executor()
+        elif role == WorkerRole.PIPELINE:
+            executor, backend, resources = self._bootstrap.pipeline_executor()
+        else:
+            raise RuntimeError("unsupported_entrypoint_role")
         consumer = RabbitMQConsumer(
             self._required("HEAR_RABBITMQ_URL"),
             role,

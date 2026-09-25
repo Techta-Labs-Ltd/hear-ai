@@ -3,7 +3,6 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from hear.models.database import CategoryLabel, DatabaseRuntime, KeywordRule, TagLabel
 
 
 @dataclass
@@ -54,6 +53,8 @@ class CategoryLoader:
         if path is not None:
             self._load_file(Path(path))
             return
+        from hear.models.database import CategoryLabel, DatabaseRuntime, KeywordRule, TagLabel
+
         db = DatabaseRuntime.SessionLocal()
         try:
             categories = [
@@ -69,6 +70,29 @@ class CategoryLoader:
                 tags=tags,
                 keyword_rules=keyword_rules,
                 all_labels=categories + tags,
+            )
+            self._loaded = True
+
+    def load_snapshot(
+        self,
+        categories: list[str],
+        tags: list[str],
+        keyword_rules: dict[str, str],
+    ) -> None:
+        normalized_categories = [str(item).strip() for item in categories if str(item).strip()]
+        normalized_tags = [str(item).strip() for item in tags if str(item).strip()]
+        normalized_rules = {
+            str(pattern).strip(): str(tag).strip()
+            for pattern, tag in keyword_rules.items()
+            if str(pattern).strip() and str(tag).strip()
+        }
+        with self._lock:
+            self._file_path = None
+            self._data = CategoryData(
+                categories=normalized_categories,
+                tags=normalized_tags,
+                keyword_rules=normalized_rules,
+                all_labels=normalized_categories + normalized_tags,
             )
             self._loaded = True
 
@@ -214,6 +238,8 @@ class CategoryLoader:
                 self._data.all_labels.append(tag)
                 self._save_file()
                 return
+        from hear.models.database import DatabaseRuntime, TagLabel
+
         db = DatabaseRuntime.SessionLocal()
         try:
             if not db.query(TagLabel).filter(TagLabel.name == tag).first():
@@ -240,6 +266,8 @@ class CategoryLoader:
                 self._data.all_labels.append(category)
                 self._save_file()
                 return
+        from hear.models.database import CategoryLabel, DatabaseRuntime
+
         db = DatabaseRuntime.SessionLocal()
         try:
             if not db.query(CategoryLabel).filter(CategoryLabel.name == category).first():

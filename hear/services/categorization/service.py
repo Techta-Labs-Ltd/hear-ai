@@ -5,7 +5,8 @@ from collections import Counter, defaultdict
 
 from hear.core.category_loader import CategoryLabels, category_loader
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
-from hear.services.llm import LLMServiceProvider
+from hear.inference.client import LocalInferenceClient
+from hear.services.llm import LLMService, LLMServiceProvider
 from hear.services.model_client import ModelClientRegistry
 from hear.utils.content_context import (
     assistive_tech_narrative,
@@ -81,6 +82,24 @@ _FORMAT_CATEGORIES = frozenset(
 
 
 class CategorizationService:
+    def __init__(
+        self,
+        model_client: LocalInferenceClient | None = None,
+        llm: LLMService | None = None,
+    ) -> None:
+        self._model_client = model_client
+        self._llm = llm
+
+    def _models(self):
+        if self._model_client is not None:
+            return self._model_client
+        return ModelClientRegistry.get_model_client()
+
+    def _llm_service(self) -> LLMService:
+        if self._llm is not None:
+            return self._llm
+        return LLMServiceProvider.get_llm_service()
+
     _FORMAT_TAGS = frozenset({"#podcast", "#radio", "#broadcast", "#streaming"})
 
     async def categorize(
@@ -121,7 +140,7 @@ class CategorizationService:
             transcript, catalog_cats, layer1["scores"], layer2_cat.get("scores", {})
         )
         nli_top = self._top_nli_categories(layer2_cat.get("scores", {}), limit=6)
-        if LLMServiceProvider.get_llm_service().is_available:
+        if self._llm_service().is_available:
             try:
                 qwen_out = await self._categorize_qwen_primary(
                     transcript,
@@ -206,7 +225,7 @@ class CategorizationService:
                 t_text, catalog_cats, layer1["scores"], zs_scores
             )
             nli_top = self._top_nli_categories(zs_scores, limit=6)
-            if LLMServiceProvider.get_llm_service().is_available:
+            if self._llm_service().is_available:
                 try:
                     qwen_track = await self._categorize_qwen_primary(
                         t_text,
@@ -337,7 +356,7 @@ class CategorizationService:
         taxonomy_paths = list(discovery_taxonomy_loader.data.paths)
         llm_result = await loop.run_in_executor(
             None,
-            lambda: LLMServiceProvider.get_llm_service().categorize(
+            lambda: self._llm_service().categorize(
                 transcript,
                 context_cats[:50],
                 tag_pool[:120],
@@ -685,14 +704,14 @@ class CategorizationService:
     def _zero_shot_labels(self, transcript: str, labels: list[str]) -> dict:
         if not labels:
             return {"scores": {}}
-        output = ModelClientRegistry.get_model_client().nli_sync(
+        output = self._models().nli_sync(
             transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE
         )
         return {"scores": dict(zip(output["labels"], output["scores"]))}
 
     def _get_sentiment(self, transcript: str) -> str:
         try:
-            result = ModelClientRegistry.get_model_client().sentiment_sync(transcript[:512])
+            result = self._models().sentiment_sync(transcript[:512])
         except Exception:
             return "neutral"
         if isinstance(result, list) and result:
