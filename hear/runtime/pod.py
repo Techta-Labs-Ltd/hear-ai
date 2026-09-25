@@ -83,6 +83,7 @@ class PodRuntime:
 
     async def close(self) -> None:
         await self.drain()
+        await self._executor.close()
         await self._backend.close()
         if self._channel is not None and not self._channel.is_closed:
             await self._channel.close()
