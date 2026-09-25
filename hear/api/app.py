@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI, HTTPException
 
 from hear.runtime.config import RuntimeSettings
@@ -17,9 +19,23 @@ class OperationalApi:
         self._router.add_api_route("/drain", self.drain, methods=["POST"])
 
     def build(self) -> FastAPI:
-        app = FastAPI(title="Hear AI Worker", docs_url=None, redoc_url=None)
+        app = FastAPI(
+            title="Hear AI Worker",
+            docs_url=None,
+            redoc_url=None,
+            lifespan=self._lifespan,
+        )
         app.include_router(self._router)
         return app
+
+    @asynccontextmanager
+    async def _lifespan(self, app: FastAPI):
+        del app
+        await self._runtime.start()
+        try:
+            yield
+        finally:
+            await self._runtime.close()
 
     async def health(self) -> dict:
         return {
