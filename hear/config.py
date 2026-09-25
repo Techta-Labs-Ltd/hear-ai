@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     RAY_DASHBOARD_PORT: int = 8282
     HTTP_HOST: str = "0.0.0.0"
     HTTP_PORT: int = 8000
+    HEAR_WORKER_ROLE: str = "pipeline"
+    HEAR_MODEL_MANIFEST_PATH: str = str(PROJECT_ROOT / "hear" / "model_manifest.json")
+    HEAR_MODEL_ROOT: str = str(MODEL_ROOT)
+    HEAR_MODEL_FEATURES: str = ""
     GRPC_PORT: int = 50051
     GRPC_APPLICATION_NAME: str = "hear"
     GATEWAY_REPLICA_COUNT: int = 2
