@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -46,13 +47,15 @@ def envelope(job_type: JobType) -> AttemptEnvelope:
     )
 
 
-@pytest.mark.asyncio
-async def test_executor_streams_monotonic_events():
-    executor = JobExecutor(
-        RoleRegistry().get(WorkerRole.PIPELINE),
-        {JobType.PIPELINE: FakeWorkflow()},
-    )
-    events = [event async for event in executor.stream(envelope(JobType.PIPELINE))]
+def test_executor_streams_monotonic_events():
+    async def run():
+        executor = JobExecutor(
+            RoleRegistry().get(WorkerRole.PIPELINE),
+            {JobType.PIPELINE: FakeWorkflow()},
+        )
+        return [event async for event in executor.stream(envelope(JobType.PIPELINE))]
+
+    events = asyncio.run(run())
     assert [event.sequence for event in events] == [1, 2, 3]
     assert [event.event for event in events] == [
         ExecutionEventType.STARTED,
@@ -61,11 +64,13 @@ async def test_executor_streams_monotonic_events():
     ]
 
 
-@pytest.mark.asyncio
-async def test_executor_rejects_wrong_role():
-    executor = JobExecutor(
-        RoleRegistry().get(WorkerRole.TRANSCRIPTION),
-        {JobType.TRANSCRIPTION: FakeWorkflow()},
-    )
+def test_executor_rejects_wrong_role():
+    async def run():
+        executor = JobExecutor(
+            RoleRegistry().get(WorkerRole.TRANSCRIPTION),
+            {JobType.TRANSCRIPTION: FakeWorkflow()},
+        )
+        return [event async for event in executor.stream(envelope(JobType.PIPELINE))]
+
     with pytest.raises(RuntimeError, match="worker_capability_mismatch"):
-        _ = [event async for event in executor.stream(envelope(JobType.PIPELINE))]
+        asyncio.run(run())
