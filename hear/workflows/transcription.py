@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 
 from hear.contracts.events import ExecutionEvent
 from hear.contracts.jobs import AttemptEnvelope
@@ -15,7 +16,7 @@ class TranscriptionWorkflow:
         self._engine = engine
         self._service = TranscriptionService(engine)
 
-    async def stream(self, request: AttemptEnvelope):
+    async def stream(self, request: AttemptEnvelope) -> AsyncIterator[ExecutionEvent]:
         sequence = 1
         yield self._event(request, sequence, "started", "preparing", 0)
         sequence += 1
@@ -49,6 +50,9 @@ class TranscriptionWorkflow:
             )
         finally:
             TempWorkspace.cleanup_job_temp(None, request.job_id, request.run_id)
+
+    async def close(self) -> None:
+        await self._engine.close()
 
     @staticmethod
     def _event(
