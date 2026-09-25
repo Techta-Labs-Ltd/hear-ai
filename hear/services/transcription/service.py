@@ -1,13 +1,13 @@
 import re
 from functools import partial
 from math import gcd
+from typing import Protocol
 
 import soundfile as sf
 from scipy.signal import resample_poly
 
 from hear.config import settings
 from hear.core.blocking import AsyncCompletion
-from hear.services.model_client import RayModelClient
 from hear.utils.transcription_chunks import (
     adaptive_batch_size,
     append_shifted_result,
@@ -20,6 +20,21 @@ _HALLUCINATION_ONLY = {
     "thank you for watching",
     "please subscribe",
 }
+
+
+class TranscriptionModel(Protocol):
+    async def transcribe(self, audio_bytes: bytes, batch_size: int) -> dict: ...
+
+    async def transcribe_window(
+        self,
+        samples,
+        batch_size: int,
+        language: str,
+    ) -> dict: ...
+
+
+class TranscriptionProgressSink(Protocol):
+    async def publish(self, progress: float) -> None: ...
 
 
 class TranscriptionResultPolicy:
@@ -56,7 +71,7 @@ class TranscriptionResultPolicy:
 class TranscriptionService:
     def __init__(
         self,
-        model_client: RayModelClient,
+        model_client: TranscriptionModel,
         chunk_seconds: int = 60,
         batch_size: int = 36,
         long_audio_batch_size: int = 4,
@@ -85,6 +100,7 @@ class TranscriptionService:
         track_id: str | None = None,
         short_utterance: bool = False,
         language: str | None = None,
+        progress: TranscriptionProgressSink | None = None,
     ) -> dict:
         with sf.SoundFile(path) as source:
             duration = source.frames / source.samplerate
@@ -104,6 +120,8 @@ class TranscriptionService:
                 if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
                     raise RuntimeError("invalid_transcription_window_result")
                 append_shifted_result(combined, result, offset_seconds=offset)
+                if progress is not None:
+                    await progress.publish(source.tell() / source.frames * 100.0)
         result = self._process_result(
             finalize_combined_result(combined), language=language, short_utterance=short_utterance
         )
