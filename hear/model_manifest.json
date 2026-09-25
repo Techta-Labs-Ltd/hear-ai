@@ -1,0 +1,69 @@
+{
+  "models": [
+    {
+      "name": "qwen3-asr-1.7b",
+      "repo_id": "Qwen/Qwen3-ASR-1.7B",
+      "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+      "relative_path": "qwen3-asr-1.7b",
+      "roles": ["pipeline", "transcription"],
+      "required_files": ["config.json", "model.safetensors.index.json", "preprocessor_config.json", "tokenizer_config.json"]
+    },
+    {
+      "name": "qwen3-forced-aligner",
+      "repo_id": "Qwen/Qwen3-ForcedAligner-0.6B",
+      "revision": "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+      "relative_path": "qwen3-forced-aligner",
+      "roles": ["pipeline", "transcription"],
+      "required_files": ["config.json", "model.safetensors", "preprocessor_config.json", "tokenizer_config.json"]
+    },
+    {
+      "name": "toxic-bert",
+      "repo_id": "unitary/toxic-bert",
+      "revision": "4d6c22e74ba2fdd26bc4f7238f50766b045a0d94",
+      "relative_path": "toxic-bert",
+      "roles": ["pipeline"],
+      "required_files": ["config.json", "model.safetensors", "tokenizer_config.json"]
+    },
+    {
+      "name": "twitter-roberta-sentiment",
+      "repo_id": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+      "revision": "3216a57f2a0d9c45a2e6c20157c20c49fb4bf9c7",
+      "relative_path": "twitter-roberta-sentiment",
+      "roles": ["pipeline"],
+      "required_files": ["config.json"]
+    },
+    {
+      "name": "nli-distilroberta",
+      "repo_id": "cross-encoder/nli-distilroberta-base",
+      "revision": "b14d131f9d32668a5e6a982729b57ff6ed5dfcbd",
+      "relative_path": "nli-distilroberta",
+      "roles": ["pipeline"],
+      "required_files": ["config.json", "model.safetensors", "tokenizer_config.json"]
+    },
+    {
+      "name": "qwen2.5-7b-instruct",
+      "repo_id": "Qwen/Qwen2.5-7B-Instruct",
+      "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+      "relative_path": "qwen2.5-7b-instruct",
+      "roles": ["pipeline"],
+      "required_files": ["config.json", "model.safetensors.index.json", "tokenizer.json", "tokenizer_config.json"],
+      "feature": "qwen_llm"
+    },
+    {
+      "name": "fish-speech-s2-pro",
+      "repo_id": "fishaudio/s2-pro",
+      "revision": "1de9996b6be38b745688de084d87a5633f714e4e",
+      "relative_path": "fish-speech/s2-pro",
+      "roles": ["reconstruction"],
+      "required_files": ["codec.pth", "config.json", "model.safetensors.index.json", "tokenizer.json", "tokenizer_config.json"]
+    },
+    {
+      "name": "mossformer2-se-48k",
+      "repo_id": "alibabasglab/MossFormer2_SE_48K",
+      "revision": "eff8c97925c8bec812af707814b3e5d777fd4503",
+      "relative_path": "mossformer2-se-48k",
+      "roles": ["magic_clean_stem_mix"],
+      "required_files": ["last_best_checkpoint"]
+    }
+  ]
+}
