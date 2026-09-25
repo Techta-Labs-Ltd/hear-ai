@@ -13,7 +13,7 @@ COPY . .
 RUN uv sync --frozen
 RUN uv run --no-sync python -m hear.tools.dependency_patches
 RUN uv run --no-sync python -m hear.tools.dependency_patches --check
-RUN uv run --no-sync python -m pytest tests/test_dependency_patches.py tests/test_four_job_contracts.py tests/test_new_fastapi_health.py -q
+RUN uv run --no-sync python -m pytest tests/test_dependency_patches.py tests/test_four_job_contracts.py tests/test_new_fastapi_health.py tests/test_model_asset_manifest.py -q
 
 FROM ${BASE_IMAGE} AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
@@ -31,6 +31,7 @@ COPY . .
 RUN uv sync --frozen --no-dev
 RUN uv run --no-sync python -m hear.tools.dependency_patches
 RUN uv run --no-sync python -m hear.tools.dependency_patches --check
+RUN rm -rf tests docs deploy/cleaner/evidence
 
 FROM runtime AS pipeline
 ENV HEAR_WORKER_ROLE=pipeline
