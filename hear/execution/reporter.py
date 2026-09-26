@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 
 from hear.contracts.events import ExecutionEvent
-from hear.contracts.jobs import AttemptEnvelope, ClaimDecision, WorkerIdentity
+from hear.contracts.jobs import AttemptClaim, AttemptEnvelope, WorkerIdentity
 from hear.contracts.outcomes import ExecutionOutcome
 
 
@@ -26,14 +26,14 @@ class BackendAttemptClient:
     def _headers(envelope: AttemptEnvelope) -> dict[str, str]:
         return {"X-AI-Attempt-Grant": envelope.reporting_grant}
 
-    async def claim(self, envelope: AttemptEnvelope) -> ClaimDecision:
+    async def claim(self, envelope: AttemptEnvelope) -> AttemptClaim:
         response = await self._client.post(
             self._url(envelope, "claim"),
             headers=self._headers(envelope),
             json=self._worker.model_dump(mode="json"),
         )
         response.raise_for_status()
-        return ClaimDecision(response.json()["decision"])
+        return AttemptClaim.model_validate(response.json())
 
     async def heartbeat(self, envelope: AttemptEnvelope, sequence: int) -> None:
         response = await self._client.post(

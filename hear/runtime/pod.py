@@ -15,6 +15,7 @@ class PodRuntime:
         self._started = False
 
     async def start(self) -> None:
+        self._readiness.set_draining(False)
         self._readiness.initialize()
         if not self._readiness.is_ready():
             raise RuntimeError("runtime_not_ready")

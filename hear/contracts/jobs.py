@@ -37,6 +37,20 @@ class ClaimDecision(StrEnum):
     LEASE_UNAVAILABLE = "lease_unavailable"
 
 
+class AttemptClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    decision: ClaimDecision
+    lease_seconds: float = Field(default=60.0, gt=1, le=3600)
+    heartbeat_seconds: float = Field(default=15.0, gt=0, le=60)
+
+    @model_validator(mode="after")
+    def validate_intervals(self):
+        if self.heartbeat_seconds >= self.lease_seconds:
+            raise ValueError("heartbeat must be shorter than lease")
+        return self
+
+
 class MagicCleanProfile(StrEnum):
     NATURAL = "natural"
     VOICE_FOCUS = "voice_focus"

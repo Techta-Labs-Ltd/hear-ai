@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 
@@ -7,6 +8,7 @@ from hear.contracts.events import ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope, ClaimDecision, WorkerIdentity
 from hear.contracts.outcomes import ExecutionOutcome
 from hear.execution.executor import JobExecutor
+from hear.execution.lease import AttemptLease, AttemptLeaseLost
 from hear.execution.reporter import BackendAttemptClient
 from hear.queue.topology import RabbitMQTopology
 from hear.runtime.roles import WorkerCapabilityRegistry, WorkerRole
@@ -38,6 +40,9 @@ class RabbitMQConsumer:
         self._channel = None
         self._consumer_tag = None
         self._queue = None
+        self._active = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
 
     def _aio_pika(self):
         if self._provider is None:
@@ -66,9 +71,14 @@ class RabbitMQConsumer:
         await queue.bind(exchange, routing_key=binding.routing_key)
         self._consumer_tag = await queue.consume(self._on_message, no_ack=False)
 
-    async def close(self) -> None:
+    async def drain(self) -> None:
         if self._queue is not None and self._consumer_tag is not None:
             await self._queue.cancel(self._consumer_tag)
+            self._consumer_tag = None
+        await self._idle.wait()
+
+    async def close(self) -> None:
+        await self.drain()
         if self._channel is not None:
             await self._channel.close()
         if self._connection is not None:
@@ -76,6 +86,16 @@ class RabbitMQConsumer:
         await self._backend.close()
 
     async def _on_message(self, message) -> None:
+        self._active += 1
+        self._idle.clear()
+        try:
+            await self._handle_message(message)
+        finally:
+            self._active -= 1
+            if self._active == 0:
+                self._idle.set()
+
+    async def _handle_message(self, message) -> None:
         try:
             envelope = AttemptEnvelope.model_validate(json.loads(message.body))
         except Exception:
@@ -85,20 +105,35 @@ class RabbitMQConsumer:
             await message.reject(requeue=False)
             return
         try:
-            decision = await self._backend.claim(envelope)
+            claim = await self._backend.claim(envelope)
         except Exception:
             await message.nack(requeue=True)
             return
         await message.ack()
-        if decision != ClaimDecision.EXECUTE:
+        if claim.decision != ClaimDecision.EXECUTE:
             return
+        lease = AttemptLease(self._backend, envelope, claim)
+        lease.start()
+        iterator = self._executor.stream(envelope).__aiter__()
         try:
-            async for event in self._executor.stream(envelope):
+            while True:
+                try:
+                    event = await lease.next_event(iterator)
+                except StopAsyncIteration:
+                    break
                 if event.event == ExecutionEventType.OUTCOME:
                     outcome = ExecutionOutcome.model_validate(event.data.get("outcome"))
-                    await self._backend.outcome(envelope, outcome)
+                    try:
+                        await self._backend.outcome(envelope, outcome)
+                    except Exception:
+                        return
                 else:
-                    await self._backend.event(envelope, event)
+                    try:
+                        await self._backend.event(envelope, event)
+                    except Exception:
+                        pass
+        except AttemptLeaseLost:
+            return
         except Exception:
             outcome = ExecutionOutcome(
                 job_id=envelope.job_id,
@@ -112,4 +147,9 @@ class RabbitMQConsumer:
             try:
                 await self._backend.outcome(envelope, outcome)
             except Exception:
-                return
+                pass
+        finally:
+            await lease.close()
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                await close()

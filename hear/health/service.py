@@ -26,10 +26,14 @@ class RuntimeReadiness:
         self._patch_verified = not self._patch_required
         self._patch_error: str | None = None
         self._initialized = False
+        self._draining = False
         self._checks: dict[str, Any] = {}
 
     def add_check(self, name: str, check: Any) -> None:
         self._checks[name] = check
+
+    def set_draining(self, draining: bool) -> None:
+        self._draining = draining
 
     def initialize(self) -> None:
         if self._patch_required:
@@ -59,12 +63,14 @@ class RuntimeReadiness:
                 check_errors[name] = str(exc)
         ready = (
             self._initialized
+            and not self._draining
             and self._patch_verified
             and not missing_models
             and all(check_results.values())
         )
+        status = "draining" if self._draining else ("ready" if ready else "loading")
         return {
-            "status": "ready" if ready else "loading",
+            "status": status,
             "role": self._role.value,
             "job_types": [item.value for item in capability.job_types],
             "magic_clean_profile": (

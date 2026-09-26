@@ -24,20 +24,7 @@ class PodEntrypoint:
     async def run(self) -> None:
         role = WorkerRole(self._environment.get("HEAR_WORKER_ROLE", "transcription"))
         readiness = self._bootstrap.readiness(role)
-        if role == WorkerRole.TRANSCRIPTION:
-            executor, backend, resources = self._bootstrap.transcription_executor()
-        elif role == WorkerRole.PIPELINE:
-            executor, backend, resources = self._bootstrap.pipeline_executor()
-        elif role == WorkerRole.RECONSTRUCTION:
-            executor, backend, resources = self._bootstrap.reconstruction_executor()
-        elif role in {
-            WorkerRole.MAGIC_CLEAN_NATURAL,
-            WorkerRole.MAGIC_CLEAN_VOICE_FOCUS,
-            WorkerRole.MAGIC_CLEAN_MUSIC_ATMOSPHERE,
-        }:
-            executor, backend, resources = self._bootstrap.magic_clean_executor(role)
-        else:
-            raise RuntimeError("unsupported_entrypoint_role")
+        executor, backend, resources = self._bootstrap.executor_for(role)
         consumer = RabbitMQConsumer(
             self._required("HEAR_RABBITMQ_URL"),
             role,
@@ -48,7 +35,7 @@ class PodEntrypoint:
         runtime = PodRuntime(readiness, consumer)
         server = uvicorn.Server(
             uvicorn.Config(
-                RuntimeApi(readiness).app,
+                RuntimeApi(readiness, drain=runtime.drain).app,
                 host=self._environment.get("HTTP_HOST", "0.0.0.0"),
                 port=int(self._environment.get("HTTP_PORT", "8000")),
                 log_level=self._environment.get("LOG_LEVEL", "info").lower(),

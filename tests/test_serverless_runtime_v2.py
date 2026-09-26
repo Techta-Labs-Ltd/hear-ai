@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
-from hear.contracts.jobs import ClaimDecision, JobType
+from hear.contracts.jobs import AttemptClaim, ClaimDecision, JobType
 from hear.execution.executor import JobExecutor
 from hear.runtime.roles import WorkerRole
 from hear.runtime.serverless import ServerlessRuntime
@@ -11,7 +11,10 @@ from hear.runtime.serverless import ServerlessRuntime
 
 class FakeBackend:
     async def claim(self, envelope):
-        return ClaimDecision.EXECUTE
+        return AttemptClaim(decision=ClaimDecision.EXECUTE)
+
+    async def heartbeat(self, envelope, sequence):
+        return None
 
 
 class FakeWorkflow:

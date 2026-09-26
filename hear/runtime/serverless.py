@@ -5,6 +5,7 @@ import importlib
 from hear.contracts.events import ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope, ClaimDecision
 from hear.execution.executor import JobExecutor
+from hear.execution.lease import AttemptLease
 from hear.execution.reporter import BackendAttemptClient
 from hear.runtime.roles import WorkerCapabilityRegistry, WorkerRole
 
@@ -37,31 +38,44 @@ class ServerlessRuntime:
                 "attempt_id": envelope.attempt_id,
             }
             return
-        decision = await self._backend.claim(envelope)
-        if decision != ClaimDecision.EXECUTE:
+        claim = await self._backend.claim(envelope)
+        if claim.decision != ClaimDecision.EXECUTE:
             yield {
                 "event": "claim_rejected",
-                "decision": decision.value,
+                "decision": claim.decision.value,
                 "job_id": envelope.job_id,
                 "attempt_id": envelope.attempt_id,
             }
             return
         provider = self._runpod()
-        async for event in self._executor.stream(envelope):
-            if event.event in {
-                ExecutionEventType.STAGE,
-                ExecutionEventType.PROGRESS,
-                ExecutionEventType.ARTIFACT_PREPARED,
-                ExecutionEventType.OUTCOME,
-            }:
-                provider.serverless.progress_update(
-                    job,
-                    (
-                        f"{event.stage or event.event.value}:"
-                        f"{event.progress_pct if event.progress_pct is not None else ''}"
-                    ),
-                )
-            yield event.model_dump(mode="json")
+        lease = AttemptLease(self._backend, envelope, claim)
+        lease.start()
+        iterator = self._executor.stream(envelope).__aiter__()
+        try:
+            while True:
+                try:
+                    event = await lease.next_event(iterator)
+                except StopAsyncIteration:
+                    break
+                if event.event in {
+                    ExecutionEventType.STAGE,
+                    ExecutionEventType.PROGRESS,
+                    ExecutionEventType.ARTIFACT_PREPARED,
+                    ExecutionEventType.OUTCOME,
+                }:
+                    provider.serverless.progress_update(
+                        job,
+                        (
+                            f"{event.stage or event.event.value}:"
+                            f"{event.progress_pct if event.progress_pct is not None else ''}"
+                        ),
+                    )
+                yield event.model_dump(mode="json")
+        finally:
+            await lease.close()
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                await close()
 
     def start(self) -> None:
         self._runpod().serverless.start(
