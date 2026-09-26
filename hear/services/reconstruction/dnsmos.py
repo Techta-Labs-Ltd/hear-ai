@@ -18,12 +18,15 @@ class DNSMOSScorer:
     WINDOW_SAMPLES = 144160
     HOP_SECONDS = 4.5
 
-    def __init__(self):
+    def __init__(self, model_path: Path | None = None):
         self._session = None
         self._lock = threading.Lock()
+        self._model_path = model_path
 
     def load(self) -> bool:
-        model_path = Path(settings.DNSMOS_MODEL_PATH)
+        if self._session is not None:
+            return True
+        model_path = self._model_path or Path(settings.DNSMOS_MODEL_PATH)
         if not model_path.exists():
             logger.warning("DNSMOS model not found at %s", model_path)
             return False

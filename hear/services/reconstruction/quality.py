@@ -28,12 +28,10 @@ class RegenerationQualityAssessor:
     MAX_DURATION_DELTA_MS = 500
     CLIPPING_THRESHOLD = 0.99
 
-    def __init__(self):
-        self._scorer = None
+    def __init__(self, scorer: DNSMOSScorer | None = None):
+        self._scorer = scorer or DNSMOSScorer()
 
     def _ensure_scorer(self) -> bool:
-        if self._scorer is None:
-            self._scorer = DNSMOSScorer()
         return self._scorer.load()
 
     def assess(

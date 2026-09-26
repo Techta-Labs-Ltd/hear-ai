@@ -247,9 +247,14 @@ class RuntimeBootstrap:
         )
         pipeline = PipelineWorkflow(
             transcriber,
-            ModerationService(model_client, llm),
-            CategorizationService(model_client, llm),
-            DiscoveryService(llm),
+            ModerationService(model_client, llm, catalog.harm_keywords),
+            CategorizationService(
+                model_client,
+                llm,
+                catalog.category_loader,
+                catalog.taxonomy,
+            ),
+            DiscoveryService(llm, catalog.taxonomy),
             audio,
             storage_factory,
             audio_native,
@@ -276,6 +281,7 @@ class RuntimeBootstrap:
 
     def reconstruction_executor(self) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
         from hear.inference.client import LocalInferenceClient
+        from hear.services.reconstruction.dnsmos import DNSMOSScorer
         from hear.services.reconstruction.synthesizer import SpeechSynthesizer
         from hear.workflows.reconstruction import ReconstructionWorkflow
 
@@ -303,8 +309,13 @@ class RuntimeBootstrap:
         readiness = self.readiness(WorkerRole.RECONSTRUCTION)
         readiness.add_check("fish_speech", lambda: self._engine_healthy(fish))
         model_client = LocalInferenceClient(speech_generation=fish)
-        synthesizer = SpeechSynthesizer(model_client)
+        dnsmos = DNSMOSScorer(self._model_root / "dnsmos" / "sig_bak_ovr.onnx")
+        synthesizer = SpeechSynthesizer(
+            model_client,
+            dnsmos_scorer=dnsmos,
+        )
         synthesizer.load()
+        readiness.add_check("dnsmos", dnsmos.load)
         audio = AudioIO(
             client,
             audio_native,

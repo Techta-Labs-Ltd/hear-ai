@@ -85,9 +85,13 @@ class CategorizationService:
         self,
         model_client: LocalInferenceClient | None = None,
         llm: LLMService | None = None,
+        categories=None,
+        taxonomy=None,
     ) -> None:
         self._model_client = model_client
         self._llm = llm
+        self._categories = categories or category_loader
+        self._taxonomy = taxonomy or discovery_taxonomy_loader
 
     def _models(self) -> LocalInferenceClient:
         if self._model_client is None:
@@ -116,7 +120,7 @@ class CategorizationService:
                 "confidence_scores": {},
                 "sentiment": "neutral",
             }
-        data = category_loader.data
+        data = self._categories.data
         catalog_cats, catalog_tags = self._expanded_catalog_labels(data)
         loop = asyncio.get_event_loop()
         active_tracks = {k: v for k, v in (per_track_transcripts or {}).items() if v and v.strip()}
@@ -326,7 +330,7 @@ class CategorizationService:
         tags: list[str] = []
         seen_c: set[str] = set()
         seen_t: set[str] = set()
-        for c in category_loader.flat_catalog_categories():
+        for c in self._categories.flat_catalog_categories():
             key = c.strip().lower()
             if c.strip() and key not in seen_c:
                 seen_c.add(key)
@@ -352,7 +356,7 @@ class CategorizationService:
         loop,
         max_categories: int = 3,
     ) -> dict | None:
-        taxonomy_paths = list(discovery_taxonomy_loader.data.paths)
+        taxonomy_paths = list(self._taxonomy.data.paths)
         llm_result = await loop.run_in_executor(
             None,
             lambda: self._llm_service().categorize(

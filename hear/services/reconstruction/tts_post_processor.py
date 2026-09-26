@@ -492,9 +492,13 @@ class TTSPostProcessor:
         return result
 
     @staticmethod
-    def _score_dnsmos(waveform: torch.Tensor, sr: int) -> float:
+    def _score_dnsmos(
+        waveform: torch.Tensor,
+        sr: int,
+        scorer: DNSMOSScorer | None = None,
+    ) -> float:
         try:
-            scorer = DNSMOSScorer()
+            scorer = scorer or DNSMOSScorer()
             if not scorer.load():
                 return 0.0
             audio_16k = (
@@ -513,6 +517,7 @@ class TTSPostProcessor:
         sr: int,
         *,
         match_reference_pitch: bool = True,
+        scorer: DNSMOSScorer | None = None,
     ) -> torch.Tensor:
         """Run the full TTS post-processing pipeline with quality gating.
 
@@ -539,7 +544,7 @@ class TTSPostProcessor:
         tts_peak = tts_waveform.abs().max().item()
         ref_peak = ref_waveform.abs().max().item()
 
-        raw_dnsmos = TTSPostProcessor._score_dnsmos(tts_waveform, sr)
+        raw_dnsmos = TTSPostProcessor._score_dnsmos(tts_waveform, sr, scorer)
 
         result = TTSPostProcessor._trim_digital_silence(tts_waveform, sr)
         if match_reference_pitch:
@@ -569,7 +574,7 @@ class TTSPostProcessor:
             )
             result = tts_waveform
 
-        final_dnsmos = TTSPostProcessor._score_dnsmos(result, sr)
+        final_dnsmos = TTSPostProcessor._score_dnsmos(result, sr, scorer)
         if raw_dnsmos > 0.0 and final_dnsmos > 0.0:
             quality_floor = max(
                 TTSPostProcessor.MIN_ACCEPTABLE_DNSMOS,

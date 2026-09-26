@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from hear.core.category_loader import category_loader
-from hear.core.discovery_taxonomy import discovery_taxonomy_loader
-from hear.core.keyword_loader import harm_keyword_loader
+from hear.core.category_loader import CategoryLoader
+from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
+from hear.core.keyword_loader import HarmKeywordLoader
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +16,25 @@ class PipelineCatalogSnapshot:
     keyword_rules: dict[str, str]
     taxonomy_paths: tuple[str, ...]
     harm_keywords: tuple[str, ...]
+
+
+class PipelineCatalog:
+    def __init__(self, snapshot: PipelineCatalogSnapshot) -> None:
+        self.snapshot = snapshot
+        self.category_loader = CategoryLoader()
+        self.category_loader.load_snapshot(
+            list(snapshot.categories),
+            list(snapshot.tags),
+            dict(snapshot.keyword_rules),
+        )
+        self.taxonomy = DiscoveryTaxonomyLoader()
+        self.taxonomy.load_paths(list(snapshot.taxonomy_paths))
+        self.harm_keywords = HarmKeywordLoader()
+        self.harm_keywords.load_keywords(list(snapshot.harm_keywords))
+
+    @property
+    def categories(self) -> tuple[str, ...]:
+        return self.snapshot.categories
 
 
 class PipelineCatalogClient:
@@ -30,7 +49,7 @@ class PipelineCatalogClient:
         self._headers = {"X-Service-Key": service_key}
         self._timeout = timeout_seconds
 
-    def fetch(self) -> PipelineCatalogSnapshot:
+    def fetch(self) -> PipelineCatalog:
         with httpx.Client(timeout=self._timeout) as client:
             response = client.get(self._url, headers=self._headers)
             response.raise_for_status()
@@ -49,15 +68,4 @@ class PipelineCatalogClient:
                 str(item) for item in payload.get("harm_keywords") or []
             ),
         )
-        self.apply(snapshot)
-        return snapshot
-
-    @staticmethod
-    def apply(snapshot: PipelineCatalogSnapshot) -> None:
-        category_loader.load_snapshot(
-            list(snapshot.categories),
-            list(snapshot.tags),
-            dict(snapshot.keyword_rules),
-        )
-        discovery_taxonomy_loader.load_paths(list(snapshot.taxonomy_paths))
-        harm_keyword_loader.load_keywords(list(snapshot.harm_keywords))
+        return PipelineCatalog(snapshot)

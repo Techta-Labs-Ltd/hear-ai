@@ -111,8 +111,9 @@ class DiscoverySupport:
 
 
 class DiscoveryService:
-    def __init__(self, llm: LLMService | None = None) -> None:
+    def __init__(self, llm: LLMService | None = None, taxonomy=None) -> None:
         self._llm = llm or LLMService(enabled=False)
+        self._taxonomy = taxonomy or discovery_taxonomy_loader
 
     def _llm_service(self) -> LLMService:
         return self._llm
@@ -149,7 +150,7 @@ class DiscoveryService:
         low = DiscoverySupport._norm_label(s)
         if low in _NON_PERSON_SPEAKER_NAMES:
             return False
-        if low in discovery_taxonomy_loader.taxonomy_label_terms():
+        if low in self._taxonomy.taxonomy_label_terms():
             return False
         if _NON_PERSON_SPEAKER.search(s):
             return False
@@ -329,7 +330,7 @@ class DiscoveryService:
         seen: set[str] = set()
 
         def _add(path: str) -> None:
-            canonical = discovery_taxonomy_loader.canonicalize_path(path)
+            canonical = self._taxonomy.canonicalize_path(path)
             if not canonical:
                 return
             low = canonical.lower()
@@ -346,7 +347,7 @@ class DiscoveryService:
         if profile.main_topic:
             topics.append(profile.main_topic)
         topics.extend(profile.secondary_topics or [])
-        for matched in discovery_taxonomy_loader.match_paths_for_topics(topics):
+        for matched in self._taxonomy.match_paths_for_topics(topics):
             _add(matched)
         return filter_controlled_taxonomy_paths(transcript, paths)[:15]
 
@@ -530,7 +531,7 @@ class DiscoveryService:
         if not (transcript or "").strip():
             return None
         hint = DiscoverySupport._categorization_hint(categorization)
-        taxonomy_paths = discovery_taxonomy_loader.data.paths
+        taxonomy_paths = self._taxonomy.data.paths
         if self._llm_service().is_available:
             for attempt, strict in enumerate((False, True)):
                 try:

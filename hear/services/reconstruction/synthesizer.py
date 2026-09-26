@@ -18,6 +18,7 @@ import torchaudio.functional as F_audio
 from hear.config import settings
 from hear.core.hear_temp import TempWorkspace
 from hear.core.noise import NoiseReducer
+from hear.services.reconstruction.dnsmos import DNSMOSScorer
 from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
 from hear.services.transcription.service import TranscriptionService
 from hear.utils.audio import save_as_mp3
@@ -94,15 +95,18 @@ class SpeechSynthesizer:
         self,
         model_client: ReconstructionModelClient,
         transcriber: TranscriptionService | None = None,
+        dnsmos_scorer: DNSMOSScorer | None = None,
     ) -> None:
         self._model_client = model_client
         self._transcriber = transcriber
+        self._dnsmos = dnsmos_scorer or DNSMOSScorer()
         self._loaded = False
         self._fishspeech_available = False
         self._noise = NoiseReducer()
 
     def load(self):
         self._fishspeech_available = settings.FISH_SPEECH_TTS_ENABLED
+        self._dnsmos.load()
         if self._fishspeech_available:
             print("[STARTUP] Fish Speech client ready via HTTP API")
         else:
@@ -266,6 +270,7 @@ class SpeechSynthesizer:
             ref_segment,
             self.TARGET_SR,
             match_reference_pitch=same_speaker,
+            scorer=self._dnsmos,
         )
         pacing_reference, pacing_text = self._pacing_reference(
             original_waveform,
@@ -416,6 +421,7 @@ class SpeechSynthesizer:
                 ref_segment,
                 self.TARGET_SR,
                 match_reference_pitch=same_speaker,
+                scorer=self._dnsmos,
             )
             pacing_reference, pacing_text = self._pacing_reference(
                 reference_waveform,
@@ -565,6 +571,7 @@ class SpeechSynthesizer:
                     ref_segment,
                     self.TARGET_SR,
                     match_reference_pitch=same_speaker,
+                    scorer=self._dnsmos,
                 )
                 pacing_reference, pacing_text = self._pacing_reference(
                     original_waveform,
@@ -683,6 +690,7 @@ class SpeechSynthesizer:
                     ref_segment,
                     self.TARGET_SR,
                     match_reference_pitch=same_speaker,
+                    scorer=self._dnsmos,
                 )
                 pacing_reference, pacing_text = self._pacing_reference(
                     original_waveform,
@@ -885,7 +893,7 @@ class SpeechSynthesizer:
             ref_end = min(original_waveform.shape[1], end_sample + ref_radius)
             ref_segment = original_waveform[:, ref_start:ref_end]
         rebuilt_waveform = await asyncio.to_thread(
-            TTSPostProcessor.process, rebuilt_waveform, ref_segment, self.TARGET_SR
+            TTSPostProcessor.process, rebuilt_waveform, ref_segment, self.TARGET_SR, scorer=self._dnsmos
         )
         rebuilt_waveform = self._time_stretch_to_match(
             rebuilt_waveform,
