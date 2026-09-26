@@ -6,10 +6,14 @@
 
  import numpy as np
  import torch
-@@ -11,6 +12,33 @@
+@@ -7,9 +8,35 @@
+ from whisperx.log_utils import get_logger
+ from whisperx.schema import ProgressCallback, SingleSegment, TranscriptionResult
+ from whisperx.utils import LANGUAGES, TO_LANGUAGE_CODE
+-from whisperx.vads import Pyannote, Silero, Vad
 
  logger = get_logger(__name__)
-
++
 +PUNCTUATION_RE = re.compile(r"[^\w']+")
 +
 +
@@ -36,11 +40,10 @@
 +        result.append(words[wi])
 +        wi += 1
 +    return result
-+
+
  DEFAULT_QWEN_ASR_MODEL = "Qwen/Qwen3-ASR-1.7B"
 
- WHISPER_TO_QWEN_LANGUAGE = {
-@@ -146,10 +174,12 @@
+@@ -146,10 +173,12 @@
      qwen_device_map: Optional[str],
      local_files_only: bool,
      use_auth_token: Optional[Union[str, bool]],
@@ -54,7 +57,7 @@
      if qwen_device_map:
          trimmed = qwen_device_map.strip()
          lowered = trimmed.lower()
-@@ -159,6 +189,10 @@
+@@ -159,6 +188,10 @@
          kwargs["local_files_only"] = True
      if isinstance(use_auth_token, str) and use_auth_token:
          kwargs["token"] = use_auth_token
@@ -65,7 +68,7 @@
      return kwargs
 
 
-@@ -169,11 +203,13 @@
+@@ -169,15 +202,18 @@
          vad,
          vad_params: dict,
          language: Optional[str] = None,
@@ -79,6 +82,11 @@
 
      def _get_vad_preprocess(self):
          if hasattr(self.vad_model, "preprocess_audio") and hasattr(self.vad_model, "merge_chunks"):
+             return self.vad_model.preprocess_audio, self.vad_model.merge_chunks
++        from whisperx.vads.pyannote import Pyannote
+         return Pyannote.preprocess_audio, Pyannote.merge_chunks
+
+     def transcribe(
 @@ -200,13 +236,17 @@
          if isinstance(audio, str):
              audio = load_audio(audio)
@@ -185,6 +193,15 @@
 
 
  def load_model(
+@@ -283,7 +354,7 @@
+     compute_type="default",
+     asr_options: Optional[dict] = None,
+     language: Optional[str] = None,
+-    vad_model: Optional[Vad] = None,
++    vad_model: Optional[Any] = None,
+     vad_method: Optional[str] = "pyannote",
+     vad_options: Optional[dict] = None,
+     model=None,
 @@ -294,6 +365,9 @@
      use_auth_token: Optional[Union[str, bool]] = None,
      qwen_dtype: str = "float16",
@@ -201,13 +218,13 @@
              use_auth_token=use_auth_token,
 +            max_inference_batch_size=max_inference_batch_size,
 +            max_new_tokens=max_new_tokens,
-+        )
+         )
+-        qwen_model = Qwen3ASRModel.from_pretrained(model_name, **qwen_kwargs)
 +        qwen_model = Qwen3ASRModel.from_pretrained(
 +            model_name,
 +            forced_aligner=qwen_forced_aligner,
 +            **qwen_kwargs,
-         )
--        qwen_model = Qwen3ASRModel.from_pretrained(model_name, **qwen_kwargs)
++        )
 
          if not _uses_hf_device_map(qwen_device_map):
              explicit_device = _to_explicit_device(device=device, qwen_device_map=qwen_device_map)
@@ -227,7 +244,18 @@
 
      default_vad_options = {
          "chunk_size": 30,
-@@ -355,4 +444,5 @@
+@@ -339,8 +428,10 @@
+
+     if vad_model is None:
+         if vad_method == "silero":
++            from whisperx.vads.silero import Silero
+             vad_model = Silero(**default_vad_options)
+         elif vad_method == "pyannote":
++            from whisperx.vads.pyannote import Pyannote
+             explicit_device = _to_explicit_device(device=device, qwen_device_map=qwen_device_map)
+             if explicit_device.lower() == "mps":
+                 device_vad = "cpu"
+@@ -355,4 +446,5 @@
          vad=vad_model,
          vad_params=default_vad_options,
          language=language,

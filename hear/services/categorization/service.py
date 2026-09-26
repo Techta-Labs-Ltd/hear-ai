@@ -3,8 +3,8 @@ import logging
 import re
 from collections import Counter, defaultdict
 
-from hear.core.category_loader import CategoryLabels, CategoryLoader, category_loader
-from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader, discovery_taxonomy_loader
+from hear.core.category_loader import CategoryLabels, category_loader
+from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.inference.client import LocalInferenceClient
 from hear.services.llm import LLMService
 from hear.utils.content_context import (

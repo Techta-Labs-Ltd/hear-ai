@@ -5,7 +5,7 @@
     "patch": "whisperx-asr-qwen.patch",
     "revision": "68a6634d1b9dfbc3ec4ca3ba800d998fc682b56b",
     "before_sha256": "50b826f76b3c80d1965d103d8d344ef5d3f4275d022a03c0af1e55ffe7c81fe1",
-    "after_sha256": "09cc3530cf52d6131ec9783ae4eb5c5ee2e044a06abce7e236a518c813088d3b",
-    "patch_sha256": "4489c9391cb5096e336aa1b9525d4567054bb8fddd2ebfdcce6ebd5acb463f47"
+    "after_sha256": "c437bbabf71536e37c3a36df49e40d7eade22c6d940897f8cb1bcba992efaad8",
+    "patch_sha256": "19985817938122e32684ee98034a1cb7d1068ee8c9ed2b97e061da86bec9339d"
   }
 ]

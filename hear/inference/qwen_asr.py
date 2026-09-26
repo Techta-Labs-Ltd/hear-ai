@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,6 @@ import torch
 import whisperx
 from silero_vad import get_speech_timestamps, load_silero_vad
 from whisperx.asr_qwen import load_model as load_qwen_asr_model
-from whisperx.diarize import Segment as SegmentX
-from whisperx.vads.vad import Vad
 
 from hear.execution.native import NativeExecutor
 from hear.utils.transcription_chunks import (
@@ -23,9 +22,19 @@ from hear.utils.transcription_chunks import (
 )
 
 
-class LocalSileroVad(Vad):
+@dataclass(frozen=True, slots=True)
+class SpeechSegment:
+    start: float
+    end: float
+    speaker: str = "UNKNOWN"
+
+
+class LocalSileroVad:
     def __init__(self, vad_onset: float, chunk_size: int) -> None:
-        super().__init__(vad_onset)
+        if not 0 < vad_onset < 1:
+            raise ValueError("invalid_vad_onset")
+        if chunk_size <= 0:
+            raise ValueError("invalid_vad_chunk_size")
         self._vad_onset = vad_onset
         self._chunk_size = chunk_size
         self._model = load_silero_vad(onnx=False)
@@ -36,7 +45,35 @@ class LocalSileroVad(Vad):
 
     @staticmethod
     def merge_chunks(segments, chunk_size, onset, offset):
-        return Vad.merge_chunks(segments, chunk_size, onset, offset)
+        if chunk_size <= 0:
+            raise ValueError("invalid_vad_chunk_size")
+        if not segments:
+            return []
+        current_start = segments[0].start
+        current_end = 0.0
+        indexes: list[tuple[float, float]] = []
+        merged: list[dict] = []
+        for segment in segments:
+            if segment.end - current_start > chunk_size and current_end - current_start > 0:
+                merged.append(
+                    {
+                        "start": current_start,
+                        "end": current_end,
+                        "segments": indexes,
+                    }
+                )
+                current_start = segment.start
+                indexes = []
+            current_end = segment.end
+            indexes.append((segment.start, segment.end))
+        merged.append(
+            {
+                "start": current_start,
+                "end": current_end,
+                "segments": indexes,
+            }
+        )
+        return merged
 
     def __call__(self, audio, **kwargs):
         if int(audio["sample_rate"]) != 16000:
@@ -53,10 +90,9 @@ class LocalSileroVad(Vad):
             max_speech_duration_s=float(self._chunk_size),
         )
         return [
-            SegmentX(
+            SpeechSegment(
                 float(item["start"]) / 16000.0,
                 float(item["end"]) / 16000.0,
-                "UNKNOWN",
             )
             for item in timestamps
         ]

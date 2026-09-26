@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 
-from hear.core.keyword_loader import HarmKeywordLoader, harm_keyword_loader
+from hear.core.keyword_loader import harm_keyword_loader
 from hear.inference.client import LocalInferenceClient
 from hear.services.llm import LLMService
 

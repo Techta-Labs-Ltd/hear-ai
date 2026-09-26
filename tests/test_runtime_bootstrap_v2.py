@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 
 from hear.bootstrap import RuntimeBootstrap
@@ -24,6 +27,13 @@ class TestRuntimeBootstrap:
 
 
     def test_bootstrap_import_does_not_load_qwen_module(self):
-        import sys
-
-        assert "hear.inference.qwen_asr" not in sys.modules
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import hear.bootstrap; "
+                "raise SystemExit(1 if 'hear.inference.qwen_asr' in sys.modules else 0)",
+            ],
+            check=False,
+        )
+        assert result.returncode == 0
