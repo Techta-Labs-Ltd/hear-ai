@@ -4,7 +4,7 @@ import asyncio
 import re
 
 from hear.config import settings
-from hear.core.discovery_taxonomy import discovery_taxonomy_loader
+from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader, discovery_taxonomy_loader
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
 from hear.services.llm import LLMService
 from hear.utils.content_context import (

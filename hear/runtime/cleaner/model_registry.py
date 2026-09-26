@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from hear.services.magic_clean.contracts import (
     CleanExecutionError,
@@ -20,6 +21,7 @@ class CertifiedRuntime:
     max_input_bytes: int
     sample_rates: tuple[int, ...]
     channel_counts: tuple[int, ...]
+    lane: Literal["cpu", "gpu"]
 
     def __post_init__(self):
         if len(self.evidence_sha256) != 64 or any(

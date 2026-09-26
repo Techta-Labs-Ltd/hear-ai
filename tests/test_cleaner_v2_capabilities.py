@@ -13,7 +13,7 @@ ticket = ticket_fixture
 @pytest.fixture
 def certified(ticket):
     plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
-    return plan, CertifiedRuntime(plan.runtime, "c" * 64, 96000, 1000000, (16000, 48000), (1, 2))
+    return plan, CertifiedRuntime(plan.runtime, "c" * 64, 96000, 1000000, (16000, 48000), (1, 2), "gpu")
 
 
 def test_empty_registry_reports_all_profiles_unavailable():

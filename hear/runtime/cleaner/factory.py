@@ -73,14 +73,12 @@ class CleanerWorkerFactory:
         """Assemble without downloading/loading models, probing or contacting storage.
 
         The lock directory must already exist on a shared local mount. Never invent
-        certifications here: unavailable/uncertified profiles remain absent. The CPU
-        noise-profile lane is separate from the serialized DF3/SAM GPU lane.
+        certifications here: unavailable/uncertified profiles remain absent.
         """
         if lane not in ("cpu", "gpu"):
             raise ValueError("invalid cleaner lane")
         for runtime in runtimes:
-            expected_lane = "cpu" if runtime.identity.engine == "noise_profile" else "gpu"
-            if expected_lane != lane:
+            if runtime.lane != lane:
                 raise ValueError("certified runtime belongs to a different worker lane")
         registry = EngineRegistry(runtimes, loaders, readiness)
         lease = WorkerLease(lock_directory, lane)

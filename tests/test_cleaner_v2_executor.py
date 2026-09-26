@@ -195,7 +195,7 @@ def execution(tmp_path, ticket):
     ticket["deadline"] = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
     parsed = AttemptTicket.model_validate_json(json.dumps(ticket))
     engine = FakeEngine(parsed.plan.runtime)
-    certified = CertifiedRuntime(parsed.plan.runtime, "c" * 64, 48000, len(data), (48000,), (2,))
+    certified = CertifiedRuntime(parsed.plan.runtime, "c" * 64, 48000, len(data), (48000,), (2,), "gpu")
     store = MemoryStore()
     worker = CleanerWorkerFactory.build(
         lock_directory=tmp_path,

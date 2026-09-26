@@ -38,8 +38,6 @@ def binding(tmp_path):
             longform_policy_sha256="2" * 64,
         ),
         attenuation_limit_db=None,
-        noise_reduction_db=None,
-        noise_reference=None,
         prompt_sha256=prompt.prompt_sha256,
         channel_policy="mono",
         mono_acknowledged=True,

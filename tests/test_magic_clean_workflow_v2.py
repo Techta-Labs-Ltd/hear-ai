@@ -107,8 +107,6 @@ def envelope():
                 "longform_policy_sha256": "a" * 64,
             },
             "attenuation_limit_db": 18,
-            "noise_reduction_db": None,
-            "noise_reference": None,
             "prompt_sha256": None,
             "channel_policy": "preserve",
             "mono_acknowledged": False,

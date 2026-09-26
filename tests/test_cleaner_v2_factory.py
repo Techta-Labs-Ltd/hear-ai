@@ -18,7 +18,7 @@ def configuration(tmp_path, ticket):
     return {
         "lock_directory": tmp_path,
         "lane": "gpu",
-        "runtimes": (CertifiedRuntime(runtime, "c" * 64, 48000, 1000000, (48000,), (2,)),),
+        "runtimes": (CertifiedRuntime(runtime, "c" * 64, 48000, 1000000, (48000,), (2,), "gpu"),),
         "loaders": {"deepfilternet3": lambda: pytest.fail("must not allocate a model")},
         "readiness": {"deepfilternet3": lambda _: True},
         "store": MemoryStore(),
@@ -62,10 +62,21 @@ def test_close_refuses_active_attempt_and_can_retry_after_completion(configurati
 
 
 def test_mixed_lane_configuration_rejected_before_ownership(configuration):
-    configuration["lane"] = "cpu"
+    runtime = configuration["runtimes"][0]
+    configuration["runtimes"] = (
+        CertifiedRuntime(
+            runtime.identity,
+            runtime.evidence_sha256,
+            runtime.max_frames,
+            runtime.max_input_bytes,
+            runtime.sample_rates,
+            runtime.channel_counts,
+            "cpu",
+        ),
+    )
     with pytest.raises(ValueError, match="different worker lane"):
         CleanerWorkerFactory.build(**configuration)
-    assert not (configuration["lock_directory"] / "cleaner-cpu.lock").exists()
+    assert not (configuration["lock_directory"] / "cleaner-gpu.lock").exists()
 
 
 def test_assembly_failure_releases_ownership(configuration, monkeypatch):

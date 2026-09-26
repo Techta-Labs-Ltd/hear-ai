@@ -154,7 +154,7 @@ class CleanExecutor:
     ) -> PublishedBundle:
         context.authorizer.verify(context.ticket)
         context.check()
-        lane = "cpu" if plan.runtime.engine == "noise_profile" else "gpu"
+        lane = self.worker_lease.lane
         if plan != context.ticket.plan:
             raise CleanExecutionError(
                 ErrorCode.ARTIFACT_CONFLICT, "plan differs from authorized attempt"
@@ -231,7 +231,7 @@ class CleanExecutor:
         if plan.runtime.engine == "sam_audio_small":
             SamSeparationPipeline.preflight(inspected.frames, inspected.sample_rate, guard)
         context.check()
-        self.worker_lease.assert_owned("cpu" if plan.runtime.engine == "noise_profile" else "gpu")
+        self.worker_lease.assert_owned(self.worker_lease.lane)
         with context.timings.measure("loading"):
             engine = self.registry.load(
                 plan,

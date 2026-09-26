@@ -145,7 +145,7 @@ class MagicCleanRuntimeFactory:
         policy = ContextualPolicy(cert.block_frames, cert.context_frames)
         factory = PinnedDeepFilterFactory(assets)
         identity = factory.identity(policy.digest)
-        runtime = self._runtime(cert.limits, identity)
+        runtime = self._runtime(cert.limits, identity, "gpu" if cert.device == "cuda:0" else "cpu")
 
         def loader():
             return DeepFilterEngine(identity, factory, policy)
@@ -174,7 +174,7 @@ class MagicCleanRuntimeFactory:
         speech = self._speech(cert.speech)
         analyser = SpeechAwareNoiseReferenceAnalyser(speech)
         identity = NoiseProfileEngine.describe(analyser)
-        runtime = self._runtime(cert.limits, identity)
+        runtime = self._runtime(cert.limits, identity, "cpu")
 
         def loader():
             return NoiseProfileEngine(identity, analyser)
@@ -271,7 +271,11 @@ class MagicCleanRuntimeFactory:
             )
 
     @staticmethod
-    def _runtime(limits: RuntimeLimits, identity) -> CertifiedRuntime:
+    def _runtime(
+        limits: RuntimeLimits,
+        identity,
+        lane: Literal["cpu", "gpu"],
+    ) -> CertifiedRuntime:
         return CertifiedRuntime(
             identity,
             limits.evidence_sha256,
@@ -279,6 +283,7 @@ class MagicCleanRuntimeFactory:
             limits.max_input_bytes,
             limits.sample_rates,
             limits.channels,
+            lane,
         )
 
     @staticmethod

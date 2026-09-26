@@ -97,8 +97,8 @@ class CleanPlan(Contract):
     catalogue_sha256: Digest
     runtime: RuntimeIdentity
     attenuation_limit_db: Literal[12, 18, 24] | None
-    noise_reduction_db: Literal[3, 6] | None
-    noise_reference: NoiseReference | None
+    noise_reduction_db: Literal[3, 6] | None = None
+    noise_reference: NoiseReference | None = None
     prompt_sha256: Digest | None
     channel_policy: Literal["preserve", "mono", "validated_dual_mono"]
     mono_acknowledged: bool

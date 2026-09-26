@@ -44,8 +44,6 @@ def ticket():
                 "longform_policy_sha256": digest,
             },
             "attenuation_limit_db": 18,
-            "noise_reduction_db": None,
-            "noise_reference": None,
             "prompt_sha256": None,
             "channel_policy": "preserve",
             "mono_acknowledged": False,
@@ -142,7 +140,7 @@ def test_uncertified_engine_never_loads(ticket):
 
 def test_runtime_mismatch_and_oversized_input_rejected_before_loading(ticket):
     plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
-    certification = CertifiedRuntime(plan.runtime, "c" * 64, 48000, 100, (48000,), (1, 2))
+    certification = CertifiedRuntime(plan.runtime, "c" * 64, 48000, 100, (48000,), (1, 2), "gpu")
 
     def loader():
         pytest.fail("rejected request must never allocate a model")
