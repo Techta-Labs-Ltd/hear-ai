@@ -157,7 +157,7 @@ class AudioMasteringService:
             gain = min(6.0, target - measured.integrated_lufs)
         if measured.true_peak_dbtp is not None:
             gain = min(gain, -1.2 - measured.true_peak_dbtp)
-        created = []
+        created: list[Path] = []
         try:
             for correction in range(self.MAX_CORRECTIONS + 1):
                 master = guard.workspace / f"master-{correction}.flac"

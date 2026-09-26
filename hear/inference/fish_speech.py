@@ -118,6 +118,10 @@ class FishSpeechEngine:
         sf.write(buffer, audio, sample_rate, format="WAV")
         return buffer.getvalue()
 
+    def check_health(self) -> None:
+        if not torch.cuda.is_available() or not hasattr(self, "_engine"):
+            raise RuntimeError("fish_speech_unavailable")
+
     async def close(self) -> None:
         if hasattr(self, "_engine"):
             del self._engine

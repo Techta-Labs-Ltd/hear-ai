@@ -7,6 +7,7 @@ import os
 import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 
@@ -105,7 +106,10 @@ class SamPromptCache:
         if not isinstance(entries, tuple) or not 1 <= len(entries) <= self.MAX_ENTRIES:
             raise ValueError("invalid SAM prompt cache size")
         torch = importlib.import_module("torch")
-        self._entries = {}
+        self._entries: dict[
+            tuple[str, str, str],
+            tuple[SamPromptIdentity, Any, Any],
+        ] = {}
         for identity, embedding, mask in entries:
             if not isinstance(identity, SamPromptIdentity):
                 raise ValueError("SAM prompt identity required")

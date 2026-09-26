@@ -6,8 +6,7 @@ from collections import Counter, defaultdict
 from hear.core.category_loader import CategoryLabels, category_loader
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.inference.client import LocalInferenceClient
-from hear.services.llm import LLMService, LLMServiceProvider
-from hear.services.model_client import ModelClientRegistry
+from hear.services.llm import LLMService
 from hear.utils.content_context import (
     assistive_tech_narrative,
     filter_freeform_tag_labels,
@@ -90,15 +89,15 @@ class CategorizationService:
         self._model_client = model_client
         self._llm = llm
 
-    def _models(self):
-        if self._model_client is not None:
-            return self._model_client
-        return ModelClientRegistry.get_model_client()
+    def _models(self) -> LocalInferenceClient:
+        if self._model_client is None:
+            raise RuntimeError("small_models_not_configured")
+        return self._model_client
 
     def _llm_service(self) -> LLMService:
-        if self._llm is not None:
-            return self._llm
-        return LLMServiceProvider.get_llm_service()
+        if self._llm is None:
+            return LLMService(enabled=False)
+        return self._llm
 
     _FORMAT_TAGS = frozenset({"#podcast", "#radio", "#broadcast", "#streaming"})
 
@@ -687,7 +686,7 @@ class CategorizationService:
             if matches > 0:
                 scores[tag] = min(1.0, matches * 0.15 + 0.4)
         if segments:
-            seg_counter = Counter()
+            seg_counter: Counter[str] = Counter()
             for seg in segments:
                 seg_text = seg.get("text", "").lower()
                 for pattern, tag in keyword_rules.items():
@@ -707,7 +706,7 @@ class CategorizationService:
         output = self._models().nli_sync(
             transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE
         )
-        return {"scores": dict(zip(output["labels"], output["scores"]))}
+        return {"scores": dict(zip(output["labels"], output["scores"], strict=False))}
 
     def _get_sentiment(self, transcript: str) -> str:
         try:

@@ -145,7 +145,12 @@ class CleanExecutor:
         return destination
 
     def execute(
-        self, plan: CleanPlan, context: ExecutionContext, *, stager: S3SourceStager | None = None
+        self,
+        plan: CleanPlan,
+        context: ExecutionContext,
+        *,
+        stager: S3SourceStager | None = None,
+        artifacts: ArtifactWriter | None = None,
     ) -> PublishedBundle:
         context.authorizer.verify(context.ticket)
         context.check()
@@ -156,10 +161,19 @@ class CleanExecutor:
             )
         with self.worker_lease.attempt(lane):
             context.timings.reset()
-            return self._execute_admitted(plan, context, stager)
+            return self._execute_admitted(
+                plan,
+                context,
+                stager,
+                artifacts or self.artifacts,
+            )
 
     def _execute_admitted(
-        self, plan: CleanPlan, context: ExecutionContext, stager: S3SourceStager | None
+        self,
+        plan: CleanPlan,
+        context: ExecutionContext,
+        stager: S3SourceStager | None,
+        artifacts: ArtifactWriter,
     ) -> PublishedBundle:
         try:
             if stager is not None:
@@ -167,7 +181,7 @@ class CleanExecutor:
                 with context.timings.measure("download"):
                     stager.stage(context.ticket, context.source, context.guard)
                 context.check()
-            return self._execute_verified(plan, context)
+            return self._execute_verified(plan, context, artifacts)
         except CleanExecutionError as error:
             if error.worker_restart_required:
                 self.worker_lease.mark_unhealthy()
@@ -185,7 +199,7 @@ class CleanExecutor:
                 context.check()
                 context.authorizer.verify(context.ticket)
                 with context.timings.measure("upload"):
-                    bundle = self.artifacts.publish_failure(
+                    bundle = artifacts.publish_failure(
                         context.ticket, error.code, context.guard
                     )
             except Exception:
@@ -195,7 +209,13 @@ class CleanExecutor:
                 error.code, bundle, worker_restart_required=error.worker_restart_required
             ) from error
 
-    def _execute_verified(self, plan: CleanPlan, context: ExecutionContext) -> PublishedBundle:
+    def _execute_verified(
+        self,
+        plan: CleanPlan,
+        context: ExecutionContext,
+        artifacts: ArtifactWriter | None = None,
+    ) -> PublishedBundle:
+        artifacts = artifacts or self.artifacts
         ticket = context.ticket
         guard = context.guard
         context.progress.transition(ticket, "inspecting")
@@ -272,7 +292,7 @@ class CleanExecutor:
         context.authorizer.verify(ticket)
         context.progress.transition(ticket, "uploading")
         with context.timings.measure("upload"):
-            return self.artifacts.publish(
+            return artifacts.publish(
                 ticket,
                 (
                     LocalArtifact("cleaned_master", mastered.master),

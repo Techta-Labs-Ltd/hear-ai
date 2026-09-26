@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import subprocess
-from typing import Optional
 
 import numpy as np
 import soundfile as sf
@@ -15,9 +14,9 @@ async def convert_wav_file_to_mp3(
     wav_path: str,
     bitrate_kbps: int = 96,
     *,
-    job_id: Optional[str] = None,
-    run_id: Optional[str] = None,
-    track_id: Optional[str] = None,
+    job_id: str | None = None,
+    run_id: str | None = None,
+    track_id: str | None = None,
     purpose: str = "mp3",
 ) -> str:
     mp3_path = wav_path + f"_{purpose}.mp3"
@@ -25,8 +24,10 @@ async def convert_wav_file_to_mp3(
     await loop.run_in_executor(None, _convert_sync, wav_path, mp3_path, bitrate_kbps)
     source = probe_audio(wav_path)
     output = probe_audio(mp3_path)
-    duration_delta = abs(output["duration_seconds"] - source["duration_seconds"])
-    tolerance = max(1.0, source["duration_seconds"] * 0.001)
+    output_duration = float(output["duration_seconds"])
+    source_duration = float(source["duration_seconds"])
+    duration_delta = abs(output_duration - source_duration)
+    tolerance = max(1.0, source_duration * 0.001)
     if duration_delta > tolerance:
         try:
             os.unlink(mp3_path)
@@ -90,9 +91,9 @@ def save_as_mp3(
     audio,
     sample_rate: int,
     *,
-    job_id: Optional[str] = None,
-    run_id: Optional[str] = None,
-    track_id: Optional[str] = None,
+    job_id: str | None = None,
+    run_id: str | None = None,
+    track_id: str | None = None,
     purpose: str = "mp3",
     bitrate_kbps: int = 96,
 ) -> str:

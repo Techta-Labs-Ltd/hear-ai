@@ -35,7 +35,6 @@ class RabbitMQTopology:
                 "magic_clean.music_atmosphere",
                 "magic_clean.music_atmosphere",
             ),
-            WorkerRole.MAGIC_CLEAN_STEM_MIX: ("magic_clean.stem_mix", "magic_clean.stem_mix"),
         }
         queue_suffix, routing_key = suffixes[role]
         return QueueBinding(

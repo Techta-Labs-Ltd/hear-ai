@@ -5,7 +5,6 @@ import threading
 
 from hear.config import settings as app_settings
 from hear.inference.client import LocalInferenceClient
-from hear.services.model_client import ModelClientRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class LLMService:
     ) -> None:
         self._lock = threading.Lock()
         self._model_client = model_client
-        self._enabled = bool(app_settings.QWEN_LLM_ENABLED) if enabled is None else bool(enabled)
+        self._enabled = False if enabled is None else bool(enabled)
         self._discovery_max_new_tokens = (
             int(app_settings.DISCOVERY_MAX_NEW_TOKENS)
             if discovery_max_new_tokens is None
@@ -29,24 +28,17 @@ class LLMService:
 
     @property
     def is_available(self) -> bool:
-        if not self._enabled:
-            return False
-        if self._model_client is not None:
-            return self._model_client.llm_available
-        try:
-            ModelClientRegistry.get_model_client()
-        except RuntimeError:
-            return False
-        return True
+        return (
+            self._enabled
+            and self._model_client is not None
+            and self._model_client.llm_available
+        )
 
     def _generate(self, messages: list[dict], max_new_tokens: int = 256) -> str:
+        if self._model_client is None:
+            raise RuntimeError("text_generation_disabled")
         with self._lock:
-            if self._model_client is not None:
-                return self._model_client.llm_generate_sync(
-                    messages,
-                    max_tokens=max_new_tokens,
-                )
-            return ModelClientRegistry.get_model_client().llm_generate_sync(
+            return self._model_client.llm_generate_sync(
                 messages,
                 max_tokens=max_new_tokens,
             )
@@ -316,13 +308,3 @@ class LLMService:
         if not str(parsed.get("embedding_source_text") or "").strip():
             parsed["embedding_source_text"] = ss
         return parsed
-
-
-class LLMServiceProvider:
-    _service = None
-
-    @classmethod
-    def get_llm_service(cls):
-        if cls._service is None:
-            cls._service = LLMService()
-        return cls._service

@@ -8,7 +8,7 @@ from hear.contracts.jobs import AttemptEnvelope, JobType
 
 
 class ExecutionWorkflow(Protocol):
-    async def stream(self, envelope: AttemptEnvelope) -> AsyncIterator[ExecutionEvent]: ...
+    def stream(self, envelope: AttemptEnvelope) -> AsyncIterator[ExecutionEvent]: ...
 
 
 class JobExecutor:

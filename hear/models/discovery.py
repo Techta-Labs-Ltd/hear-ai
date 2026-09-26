@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -84,7 +84,7 @@ class DiscoverySerialization:
         if isinstance(profile, dict):
             profile = ContentDiscoveryProfile.model_validate(profile)
         dur = duration_seconds if duration_seconds is not None else profile.duration_seconds
-        ts = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = created_at or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         pub = (published_at or profile.published_at or "").strip() or None
         latest = (profile.latest_at or "").strip() or pub or ts
         trend_raw = trending_score if trending_score is not None else profile.trending_score

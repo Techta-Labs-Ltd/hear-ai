@@ -24,11 +24,86 @@ serverless = [
     "runpod>=1.12,<2",
 ]
 transcription = [
+    "accelerate>=0.34,<2",
     "qwen-asr>=0.0.6",
-    "torch>=2.8,<2.9",
-    "torchaudio>=2.8,<2.9",
-    "transformers>=4.48,<5",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    "transformers==4.57.6",
     "whisperx @ git+https://github.com/Ahelsamahy/whisperX.git@68a6634d1b9dfbc3ec4ca3ba800d998fc682b56b",
+]
+pipeline = [
+    "accelerate>=0.34,<2",
+    "qwen-asr>=0.0.6",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    "transformers==4.57.6",
+    "whisperx @ git+https://github.com/Ahelsamahy/whisperX.git@68a6634d1b9dfbc3ec4ca3ba800d998fc682b56b",
+]
+pipeline-llm = [
+    "vllm>=0.11,<1",
+]
+reconstruction = [
+    "absl-py",
+    "argbind",
+    "cachetools",
+    "datasets==2.18.0",
+    "descript-audio-codec",
+    "descript-audiotools",
+    "docstring-parser",
+    "einx[torch]==0.2.2",
+    "ffmpy",
+    "flatten-dict",
+    "hydra-core>=1.3.2",
+    "importlib-resources",
+    "ipython",
+    "julius",
+    "kui>=1.6.0",
+    "librosa>=0.10.1,<1",
+    "lightning>=2.1.0",
+    "lightning-utilities",
+    "loguru>=0.6.0",
+    "loralib>=0.1.2",
+    "markdown2",
+    "modelscope==1.17.1",
+    "natsort>=8.4.0",
+    "onnxruntime>=1.20,<2",
+    "opencc-python-reimplemented==0.1.7",
+    "ormsgpack",
+    "pyaudio",
+    "pydub",
+    "pyloudnorm>=0.1.1,<1",
+    "pyrootutils>=1.0.4",
+    "pystoi",
+    "randomname",
+    "resampy>=0.4.3",
+    "rich>=13.5.3",
+    "safetensors",
+    "silero-vad",
+    "tensorboard>=2.14.1",
+    "tensorboard-data-server",
+    "tiktoken>=0.8.0",
+    "torch==2.8.0",
+    "torch-stoi",
+    "torchaudio==2.8.0",
+    "torchmetrics",
+    "transformers<=4.57.3",
+    "wandb>=0.19.0",
+    "werkzeug",
+    "zstandard>=0.22.0",
+]
+magic-clean-natural = [
+    "deepfilternet==0.5.6",
+    "deepfilterlib==0.5.6",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+]
+magic-clean-voice-focus = [
+    "einops==0.8.2",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+]
+magic-clean-music-atmosphere = [
+    "onnxruntime>=1.20,<2",
 ]
 dev = [
     "pytest>=8.3,<10",
@@ -37,9 +112,28 @@ dev = [
 
 [tool.uv]
 package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+conflicts = [
+    [{ group = "transcription" }, { group = "reconstruction" }],
+    [{ group = "pipeline" }, { group = "reconstruction" }],
+    [{ group = "pipeline-llm" }, { group = "reconstruction" }],
+    [{ group = "transcription" }, { group = "magic-clean-natural" }],
+    [{ group = "transcription" }, { group = "magic-clean-voice-focus" }],
+    [{ group = "transcription" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "pipeline" }, { group = "magic-clean-natural" }],
+    [{ group = "pipeline" }, { group = "magic-clean-voice-focus" }],
+    [{ group = "pipeline" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "reconstruction" }, { group = "magic-clean-natural" }],
+    [{ group = "reconstruction" }, { group = "magic-clean-voice-focus" }],
+    [{ group = "reconstruction" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "magic-clean-natural" }, { group = "magic-clean-voice-focus" }],
+    [{ group = "magic-clean-natural" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "magic-clean-voice-focus" }, { group = "magic-clean-music-atmosphere" }],
+]
 override-dependencies = [
     "numpy>=1.24.3,<2",
     "packaging>=24.2",
+    "protobuf>=6.31.1,<7",
 ]
 
 [tool.uv.sources]
@@ -66,3 +160,5 @@ explicit = true
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+[tool.ruff.lint]
+ignore = ["E501"]

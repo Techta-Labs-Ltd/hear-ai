@@ -35,6 +35,10 @@ class B2Storage:
             use_threads=True,
         )
 
+    @property
+    def bucket_name(self) -> str:
+        return self._context.bucket_name
+
     def key(self, *parts: str) -> str:
         clean: list[str] = []
         for raw in parts:

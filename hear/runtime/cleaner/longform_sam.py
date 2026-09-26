@@ -138,7 +138,9 @@ class WindowedMidpointSolver:
             raise
         finally:
             for mapping in reversed(maps):
-                mapping._mmap.close()
+                mmap_handle = getattr(mapping, "_mmap", None)
+                if mmap_handle is not None:
+                    mmap_handle.close()
 
     def _evaluate(self, state, derivative, weights, field, time, guard):
         frames = len(state)

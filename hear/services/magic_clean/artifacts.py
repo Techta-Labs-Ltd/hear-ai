@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Literal, Protocol, cast
 
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.services.magic_clean.contracts import (
@@ -150,7 +150,10 @@ class ArtifactWriter:
                     source,
                     size_bytes=size,
                     sha256=digest,
-                    content_type=media_type,
+                    content_type=cast(
+                        Literal["audio/flac", "audio/mpeg", "application/json"],
+                        media_type,
+                    ),
                     guard=guard,
                 )
                 self.verify_receipt(receipt, key, digest, size)
@@ -160,12 +163,24 @@ class ArtifactWriter:
                     )
             identities.append(
                 ArtifactIdentity(
-                    role=artifact.role,
+                    role=cast(
+                        Literal[
+                            "cleaned_master",
+                            "delivery_audio",
+                            "comparison_source",
+                            "edit_map",
+                            "validation_report",
+                        ],
+                        artifact.role,
+                    ),
                     object_key=key,
                     object_version=receipt.version,
                     sha256=digest,
                     size_bytes=size,
-                    content_type=media_type,
+                    content_type=cast(
+                        Literal["audio/flac", "audio/mpeg", "application/json"],
+                        media_type,
+                    ),
                 )
             )
         if datetime.now(UTC) >= ticket.deadline:

@@ -219,7 +219,13 @@ class NoiseProfileSession:
             )
             window = np.sqrt(np.hanning(self.WINDOW + 1)[:-1])
             noise = self._profile(audio, window, guard)
-            floor = 10 ** (-self.plan.noise_reduction_db / 20)
+            reduction_db = self.plan.noise_reduction_db
+            if reduction_db is None:
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE,
+                    "noise reduction level is unavailable",
+                )
+            floor = 10 ** (-reduction_db / 20)
             overlap = np.zeros((self.WINDOW, audio.channels), dtype=np.float64)
             weights = np.zeros(self.WINDOW, dtype=np.float64)
             previous_gain = np.ones(self.WINDOW // 2 + 1)

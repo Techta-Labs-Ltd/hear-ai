@@ -164,7 +164,6 @@ class TestMatchSpectralEnvelope:
         ref = _composite_sine([(100, 0.8), (1000, 0.2), (5000, 0.1)], duration_s=1.0)
         tts = _composite_sine([(100, 0.1), (1000, 0.2), (5000, 0.1)], duration_s=1.0)
 
-        ref_low = _band_energy(ref, SR, 0, 300)
         tts_low_before = _band_energy(tts, SR, 0, 300)
 
         result = TTSPostProcessor.match_spectral_envelope(tts, ref, SR)
@@ -260,7 +259,6 @@ class TestIntegrationWithSplice:
 
 
         original = _sine(440, 3.0, 0.3)
-        total_samples = original.shape[1]
 
 
         start_sample = int(1.0 * TARGET_SR)

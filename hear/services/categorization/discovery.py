@@ -6,7 +6,7 @@ import re
 from hear.config import settings
 from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
-from hear.services.llm import LLMService, LLMServiceProvider
+from hear.services.llm import LLMService
 from hear.utils.content_context import (
     assistive_tech_narrative,
     filter_controlled_taxonomy_paths,
@@ -112,12 +112,10 @@ class DiscoverySupport:
 
 class DiscoveryService:
     def __init__(self, llm: LLMService | None = None) -> None:
-        self._llm = llm
+        self._llm = llm or LLMService(enabled=False)
 
     def _llm_service(self) -> LLMService:
-        if self._llm is not None:
-            return self._llm
-        return LLMServiceProvider.get_llm_service()
+        return self._llm
 
     def _trim_speaker_capture(self, name: str) -> str:
         parts: list[str] = []

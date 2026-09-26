@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import runpod
+import importlib
 
 from hear.contracts.events import ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope, ClaimDecision
@@ -15,11 +15,18 @@ class ServerlessRuntime:
         role: WorkerRole,
         executor: JobExecutor,
         backend: BackendAttemptClient,
+        provider=None,
     ) -> None:
         self._role = role
         self._capability = WorkerCapabilityRegistry().get(role)
         self._executor = executor
         self._backend = backend
+        self._provider = provider
+
+    def _runpod(self):
+        if self._provider is None:
+            self._provider = importlib.import_module("runpod")
+        return self._provider
 
     async def handler(self, job):
         envelope = AttemptEnvelope.model_validate(job["input"])
@@ -39,6 +46,7 @@ class ServerlessRuntime:
                 "attempt_id": envelope.attempt_id,
             }
             return
+        provider = self._runpod()
         async for event in self._executor.stream(envelope):
             if event.event in {
                 ExecutionEventType.STAGE,
@@ -46,7 +54,7 @@ class ServerlessRuntime:
                 ExecutionEventType.ARTIFACT_PREPARED,
                 ExecutionEventType.OUTCOME,
             }:
-                runpod.serverless.progress_update(
+                provider.serverless.progress_update(
                     job,
                     (
                         f"{event.stage or event.event.value}:"
@@ -56,7 +64,7 @@ class ServerlessRuntime:
             yield event.model_dump(mode="json")
 
     def start(self) -> None:
-        runpod.serverless.start(
+        self._runpod().serverless.start(
             {
                 "handler": self.handler,
                 "return_aggregate_stream": True,

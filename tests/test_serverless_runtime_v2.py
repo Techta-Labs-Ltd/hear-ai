@@ -32,16 +32,22 @@ class FakeWorkflow:
 
 class TestServerlessRuntime:
     @pytest.mark.anyio
-    async def test_handler_yields_canonical_event(self, monkeypatch):
+    async def test_handler_yields_canonical_event(self):
         updates = []
-        monkeypatch.setattr(
-            "hear.runtime.serverless.runpod.serverless.progress_update",
-            lambda job, value: updates.append(value),
-        )
+
+        class Serverless:
+            @staticmethod
+            def progress_update(job, value):
+                updates.append(value)
+
+        class Provider:
+            serverless = Serverless()
+
         runtime = ServerlessRuntime(
             WorkerRole.TRANSCRIPTION,
             JobExecutor({JobType.TRANSCRIPTION: FakeWorkflow()}),
             FakeBackend(),
+            Provider(),
         )
         job = {
             "input": {

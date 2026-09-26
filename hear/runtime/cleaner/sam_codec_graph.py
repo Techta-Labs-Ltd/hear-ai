@@ -1,5 +1,6 @@
 import importlib
 import uuid
+from typing import Any
 
 from hear.runtime.cleaner.sam_features import SamFeatureFile, SamFeatureRunner
 
@@ -12,7 +13,7 @@ class SamCodecGraph:
 
     def run(self, layer, source: SamFeatureFile) -> SamFeatureFile:
         """Return an owned output; preserve borrowed input and clean all intermediates."""
-        created = []
+        created: list[Any] = []
         result = None
         try:
             result = self._execute(layer, source, created)
@@ -40,7 +41,7 @@ class SamCodecGraph:
 
     def encode_mean(self, codec, source: SamFeatureFile) -> SamFeatureFile:
         """Pinned SAM mean-latent route; never sample the DACVAE posterior."""
-        created = []
+        created: list[Any] = []
         result = None
         try:
             padded = SamFeatureRunner.reflect_pad(
@@ -133,7 +134,7 @@ class SamCodecGraph:
         ):
             raise ValueError("decoder requires an explicit binary FP32 message")
         frozen = message.detach().clone()
-        created = []
+        created: list[Any] = []
         result = None
         try:
             main = self._sequence(list(decoder.model), source, created)

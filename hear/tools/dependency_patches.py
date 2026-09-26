@@ -112,7 +112,7 @@ class DependencyPatchManager:
             source = json.loads(package.read_text("direct_url.json") or "{}")
             if source.get("vcs_info", {}).get("commit_id") != spec.revision:
                 raise RuntimeError(f"unsupported_dependency_revision: {spec.package}")
-            target = Path(package.locate_file(spec.target))
+            target = Path(str(package.locate_file(spec.target)))
             result[spec.package] = self.apply_file(
                 target, self.root / "patches" / spec.patch, spec, check
             )

@@ -35,6 +35,8 @@ def discovery_latest_timestamp(item: dict) -> datetime:
 
 def discovery_trending_score(item: dict) -> float:
     raw = item.get("trending_score")
+    if raw is None:
+        return 0.0
     try:
         return float(raw)
     except (TypeError, ValueError):

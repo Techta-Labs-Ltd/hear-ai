@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-
 @dataclass
 class CategoryData:
     categories: list[str] = field(default_factory=list)
@@ -49,29 +48,10 @@ class CategoryLoader:
         self.__dict__.update(state)
         self._lock = threading.RLock()
 
-    def load(self, path: str | Path | None = None):
-        if path is not None:
-            self._load_file(Path(path))
-            return
-        from hear.models.database import CategoryLabel, DatabaseRuntime, KeywordRule, TagLabel
-
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            categories = [
-                row.name for row in db.query(CategoryLabel).order_by(CategoryLabel.name).all()
-            ]
-            tags = [row.name for row in db.query(TagLabel).order_by(TagLabel.name).all()]
-            keyword_rules = {row.pattern: row.tag for row in db.query(KeywordRule).all()}
-        finally:
-            db.close()
-        with self._lock:
-            self._data = CategoryData(
-                categories=categories,
-                tags=tags,
-                keyword_rules=keyword_rules,
-                all_labels=categories + tags,
-            )
-            self._loaded = True
+    def load(self, path: str | Path | None = None) -> None:
+        if path is None:
+            raise RuntimeError("pipeline_catalog_not_loaded")
+        self._load_file(Path(path))
 
     def load_snapshot(
         self,
@@ -148,136 +128,19 @@ class CategoryLoader:
     @property
     def data(self) -> CategoryData:
         if not self._loaded:
-            self.load()
+            raise RuntimeError("pipeline_catalog_not_loaded")
         with self._lock:
             return self._data
 
     def flat_catalog_categories(self) -> list[str]:
-        """Editorial categories for NLI/Qwen — excludes discovery hierarchy paths."""
         if not self._loaded:
-            self.load()
+            raise RuntimeError("pipeline_catalog_not_loaded")
         with self._lock:
             return [
                 c
                 for c in self._data.categories
                 if c.strip() and (not CategoryLabels.is_hierarchical_taxonomy_path(c))
             ]
-
-    def import_discovery_taxonomy(self, taxonomy_paths: list[str]) -> tuple[list[str], list[str]]:
-        if not self._loaded:
-            self.load()
-        added_tags: list[str] = []
-        added_cats: list[str] = []
-        for path in taxonomy_paths or []:
-            cleaned = re.sub("\\s+", " ", (path or "").strip())
-            if not cleaned:
-                continue
-            with self._lock:
-                cat_names = {c.lower() for c in self._data.categories}
-            leaf = cleaned.split(" > ")[-1].strip() if " > " in cleaned else cleaned
-            if leaf and leaf.lower() not in cat_names:
-                self.add_category(leaf)
-                added_cats.append(leaf)
-            tax_tag = CategoryLabels._taxonomy_path_to_tag(cleaned)
-            if tax_tag:
-                with self._lock:
-                    tag_names = {t.lower() for t in self._data.tags}
-                if tax_tag.lower() not in tag_names:
-                    self.add_tag(tax_tag)
-                    added_tags.append(tax_tag)
-        return (added_tags, added_cats)
-
-    def ensure_labels(
-        self, tags: list[str] | None = None, categories: list[str] | None = None
-    ) -> tuple[list[str], list[str]]:
-        """Add any missing tags/categories to the catalog."""
-        if not self._loaded:
-            self.load()
-        new_tags: list[str] = []
-        new_cats: list[str] = []
-        for raw in tags or []:
-            tag = raw if str(raw).startswith("#") else f"#{raw}"
-            tag = f"#{str(tag).lstrip('#').strip().lower().replace(' ', '-')}"
-            tag = re.sub("[^#a-z0-9\\-]", "", tag)
-            if not tag or tag == "#":
-                continue
-            with self._lock:
-                existed = tag.lower() in {t.lower() for t in self._data.tags}
-            if not existed:
-                self.add_tag(tag)
-                new_tags.append(tag)
-        for raw in categories or []:
-            cat = re.sub("\\s+", " ", str(raw or "").strip())
-            if not cat:
-                continue
-            if CategoryLabels.is_hierarchical_taxonomy_path(cat):
-                cat = cat.split(" > ")[-1].strip()
-            if not cat:
-                continue
-            with self._lock:
-                existed = cat.lower() in {c.lower() for c in self._data.categories}
-            if not existed:
-                self.add_category(cat)
-                new_cats.append(cat)
-        return (new_tags, new_cats)
-
-    def add_tag(self, tag: str):
-        if not self._loaded:
-            self.load()
-        if not tag.startswith("#"):
-            tag = f"#{tag}"
-        tag = re.sub("[^#a-z0-9\\-]", "", tag.lower())
-        if tag == "#":
-            return
-        with self._lock:
-            existing = {t.lower() for t in self._data.tags}
-            if tag.lower() in existing:
-                return
-            if self._file_path is not None:
-                self._data.tags.append(tag)
-                self._data.all_labels.append(tag)
-                self._save_file()
-                return
-        from hear.models.database import DatabaseRuntime, TagLabel
-
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            if not db.query(TagLabel).filter(TagLabel.name == tag).first():
-                db.add(TagLabel(name=tag))
-                db.commit()
-        finally:
-            db.close()
-        with self._lock:
-            self._data.tags.append(tag)
-            self._data.all_labels.append(tag)
-
-    def add_category(self, category: str):
-        if not self._loaded:
-            self.load()
-        category = re.sub("\\s+", " ", (category or "").strip())
-        if not category:
-            return
-        with self._lock:
-            existing = {c.lower() for c in self._data.categories}
-            if category.lower() in existing:
-                return
-            if self._file_path is not None:
-                self._data.categories.append(category)
-                self._data.all_labels.append(category)
-                self._save_file()
-                return
-        from hear.models.database import CategoryLabel, DatabaseRuntime
-
-        db = DatabaseRuntime.SessionLocal()
-        try:
-            if not db.query(CategoryLabel).filter(CategoryLabel.name == category).first():
-                db.add(CategoryLabel(name=category))
-                db.commit()
-        finally:
-            db.close()
-        with self._lock:
-            self._data.categories.append(category)
-            self._data.all_labels.append(category)
 
 
 category_loader = CategoryLoader()

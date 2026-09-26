@@ -5,7 +5,7 @@ Perceptual certification and target-speech analysis remain separate gates.
 """
 
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 import soundfile as sf
@@ -42,7 +42,7 @@ class AudioQualityGate:
         expected_source: SourceIdentity | None = None,
     ) -> ValidationSummary:
         warnings = {"wanted_content_requires_review"}
-        intervals = []
+        intervals: list[ContentWarningInterval] = []
         truncated = False
         with sf.SoundFile(source) as original, sf.SoundFile(processed) as output:
             expected_channels = 1 if plan.profile == "voice_focus" else original.channels
@@ -91,7 +91,10 @@ class AudioQualityGate:
                         warnings.add("possible_wanted_content_loss")
                 elif np.max(original_rms) > 1e-4 and np.max(output_rms) < 1e-8:
                     warnings.add("no_speech_target_detected")
-                code = None
+                code: Literal[
+                    "possible_wanted_content_loss",
+                    "no_speech_target_detected",
+                ] | None = None
                 ratio = 1.0
                 if plan.profile != "voice_focus":
                     if np.any(active):

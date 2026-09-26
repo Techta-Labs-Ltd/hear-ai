@@ -41,7 +41,6 @@ class MagicCleanProfile(StrEnum):
     NATURAL = "natural"
     VOICE_FOCUS = "voice_focus"
     MUSIC_ATMOSPHERE = "music_atmosphere"
-    STEM_MIX = "stem_mix"
 
 
 class ArtifactStorage(BaseModel):
@@ -88,7 +87,7 @@ class AttemptEnvelope(BaseModel):
     run_id: str = Field(min_length=1, max_length=128)
     attempt_id: str = Field(min_length=1, max_length=128)
     job_type: JobType
-    operation: str | None = Field(default=None, max_length=64)
+    operation: ReconstructionOperation | None = None
     track_id: str = Field(min_length=1, max_length=128)
     user_id: str = Field(min_length=1, max_length=128)
     source: SourceReference
@@ -102,9 +101,9 @@ class AttemptEnvelope(BaseModel):
     @model_validator(mode="after")
     def validate_operation(self):
         if self.job_type == JobType.RECONSTRUCTION:
-            if self.operation not in {item.value for item in ReconstructionOperation}:
+            if self.operation is None:
                 raise ValueError("invalid reconstruction operation")
-        elif self.operation not in (None, "", "default"):
+        elif self.operation is not None:
             raise ValueError("operation is only supported for reconstruction")
         return self
 

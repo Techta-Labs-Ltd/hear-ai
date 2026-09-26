@@ -9,7 +9,7 @@ import sys
 import types
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
@@ -80,7 +80,7 @@ class SamCoreBuilder:
             sys.modules[prefix] = package
             names.append(prefix)
             cfg = types.ModuleType(prefix + ".config")
-            cfg.Optional = Optional
+            cfg.__dict__["Optional"] = Optional
             cls._definitions(
                 payloads["config.py"], "sam/config.py", {"TransformerConfig"}, cfg.__dict__
             )
@@ -111,11 +111,13 @@ class SamCoreBuilder:
                 core.proj = torch.nn.Linear(768, 1536)
                 core.memory_proj = torch.nn.Linear(768, 1536)
                 core.align_masked_video = modules["align"].AlignModalities(1024, 1536)
-                core.embed_anchors = namespace["EmbedAnchors"](3, 128, 1536)
+                embed_anchors = cast(Any, namespace["EmbedAnchors"])
+                core.embed_anchors = embed_anchors(3, 128, 1536)
             # Nonpersistent frequency buffers are absent from the checkpoint.
             # Recreate them on CPU using the pinned definitions/formula, never empty storage.
             with torch.device("cpu"):
-                core.timestep_emb = namespace["SinusoidalEmbedding"](1536)
+                sinusoidal_embedding = cast(Any, namespace["SinusoidalEmbedding"])
+                core.timestep_emb = sinusoidal_embedding(1536)
                 core.transformer.rope_embeddings.reset_parameters()
                 embedder = core.transformer.t_embedder
                 half = embedder.frequency_embedding_size // 2

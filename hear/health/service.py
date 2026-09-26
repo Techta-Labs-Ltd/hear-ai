@@ -26,6 +26,10 @@ class RuntimeReadiness:
         self._patch_verified = not self._patch_required
         self._patch_error: str | None = None
         self._initialized = False
+        self._checks: dict[str, Any] = {}
+
+    def add_check(self, name: str, check: Any) -> None:
+        self._checks[name] = check
 
     def initialize(self) -> None:
         if self._patch_required:
@@ -45,7 +49,20 @@ class RuntimeReadiness:
             enabled_features=self._enabled_features,
         )
         capability = WorkerCapabilityRegistry().get(self._role)
-        ready = self._initialized and self._patch_verified and not missing_models
+        check_results: dict[str, bool] = {}
+        check_errors: dict[str, str] = {}
+        for name, check in self._checks.items():
+            try:
+                check_results[name] = bool(check())
+            except Exception as exc:
+                check_results[name] = False
+                check_errors[name] = str(exc)
+        ready = (
+            self._initialized
+            and self._patch_verified
+            and not missing_models
+            and all(check_results.values())
+        )
         return {
             "status": "ready" if ready else "loading",
             "role": self._role.value,
@@ -60,6 +77,8 @@ class RuntimeReadiness:
             "patch_error": self._patch_error,
             "missing_models": list(missing_models),
             "features": sorted(self._enabled_features),
+            "checks": check_results,
+            "check_errors": check_errors,
         }
 
     def is_ready(self) -> bool:

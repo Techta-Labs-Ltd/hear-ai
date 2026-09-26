@@ -47,7 +47,9 @@ class EngineRegistry:
         loaders: dict[str, Callable[[], CleanEngine]],
         readiness: dict[str, Callable[[RuntimeIdentity], bool]] | None = None,
     ):
-        self._runtimes = {runtime.identity.engine: runtime for runtime in runtimes}
+        self._runtimes: dict[str, CertifiedRuntime] = {
+            runtime.identity.engine: runtime for runtime in runtimes
+        }
         if len(self._runtimes) != len(runtimes):
             raise ValueError("duplicate certified engine")
         if set(loaders) != set(self._runtimes):

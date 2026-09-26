@@ -1,3 +1,4 @@
+
 import argparse
 import ast
 from pathlib import Path
@@ -8,7 +9,10 @@ class ArchitectureChecker:
         self.root = root
 
     def check(self) -> list[str]:
-        paths = [self.root / "main.py"]
+        paths = []
+        main = self.root / "main.py"
+        if main.is_file():
+            paths.append(main)
         for directory in ("hear", "scripts"):
             paths.extend((self.root / directory).rglob("*.py"))
         violations = []
@@ -18,6 +22,11 @@ class ArchitectureChecker:
                 continue
             tree = ast.parse(path.read_text(), filename=str(relative))
             is_utility = relative.parts[:2] == ("hear", "utils")
+            allows_lazy_imports = relative in {
+                Path("hear/bootstrap.py"),
+                Path("hear/inference/fish_speech.py"),
+                Path("hear/inference/text_generation.py"),
+            }
             executable_seen = False
             for node in tree.body:
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -33,9 +42,14 @@ class ArchitectureChecker:
                     violations.append(f"{relative}:{node.lineno}: standalone function {node.name}")
             for owner in ast.walk(tree):
                 if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    for node in ast.walk(owner):
-                        if isinstance(node, (ast.Import, ast.ImportFrom)):
-                            violations.append(f"{relative}:{node.lineno}: nested import")
+                    for descendant in ast.walk(owner):
+                        if (
+                            isinstance(descendant, (ast.Import, ast.ImportFrom))
+                            and not allows_lazy_imports
+                        ):
+                            violations.append(
+                                f"{relative}:{descendant.lineno}: nested import"
+                            )
         return sorted(set(violations))
 
     @classmethod

@@ -10,7 +10,6 @@ No LLM is used -- pure difflib-based, deterministic and fast.
 import difflib
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 from hear.config import settings
 
@@ -69,7 +68,7 @@ def _sentence_boundaries(words: list[_WordToken]) -> list[int]:
     boundaries: list[int] = []
     for i, w in enumerate(words):
         stripped = w.word.strip()
-        if stripped.endswith((".", "!", "?")) and not stripped.lower() in (
+        if stripped.endswith((".", "!", "?")) and stripped.lower() not in (
             "mr.",
             "mrs.",
             "dr.",
@@ -126,8 +125,8 @@ def compute_edit_segments(
     edited_transcript: str,
     word_segments: list[dict],
     *,
-    expansion_words: Optional[int] = None,
-    merge_gap_seconds: Optional[float] = None,
+    expansion_words: int | None = None,
+    merge_gap_seconds: float | None = None,
 ) -> list[EditSegment]:
     """Compare original and edited transcripts and return minimal edit segments.
 

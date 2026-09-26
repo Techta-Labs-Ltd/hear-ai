@@ -10,7 +10,9 @@ import stat
 import threading
 from pathlib import Path
 from typing import Literal
+
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
+
 
 class WorkerLease:
     def __init__(self, directory: Path, lane: Literal["gpu", "cpu"]):

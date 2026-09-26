@@ -4,8 +4,7 @@ import re
 
 from hear.core.keyword_loader import harm_keyword_loader
 from hear.inference.client import LocalInferenceClient
-from hear.services.llm import LLMService, LLMServiceProvider
-from hear.services.model_client import ModelClientRegistry
+from hear.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
 SEVERITY_NONE = "none"
@@ -39,21 +38,17 @@ _HIGH_THRESHOLD = 0.8
 class ModerationService:
     def __init__(
         self,
-        model_client: LocalInferenceClient | None = None,
+        model_client: LocalInferenceClient,
         llm: LLMService | None = None,
     ) -> None:
         self._model_client = model_client
-        self._llm = llm
+        self._llm = llm or LLMService(enabled=False)
 
-    def _models(self):
-        if self._model_client is not None:
-            return self._model_client
-        return ModelClientRegistry.get_model_client()
+    def _models(self) -> LocalInferenceClient:
+        return self._model_client
 
     def _llm_service(self) -> LLMService:
-        if self._llm is not None:
-            return self._llm
-        return LLMServiceProvider.get_llm_service()
+        return self._llm
 
     async def moderate(self, text: str) -> dict:
         if not text or not text.strip():
@@ -78,7 +73,7 @@ class ModerationService:
                 "flagged_categories": ["Threats / Violence"],
                 "blocked_words_found": built_in_hits,
             }
-        keyword_hits = []
+        keyword_hits: list[str] = []
         local_result = await loop.run_in_executor(None, self._classify_local, text)
         scores: dict[str, float] = local_result.get("scores", {})
         max_score: float = local_result.get("max_score", 0.0)
@@ -159,7 +154,7 @@ class ModerationService:
         if isinstance(results, dict):
             labels = results.get("labels", [])
             scores_list = results.get("scores", [])
-            for label, score in zip(labels, scores_list):
+            for label, score in zip(labels, scores_list, strict=False):
                 scores[label.lower()] = round(score, 4)
         elif isinstance(results, list):
             if results and isinstance(results[0], list):
@@ -196,13 +191,13 @@ class ModerationService:
     def _classify_intent(self, text: str) -> dict:
         try:
             output = self._models().nli_sync(text[:1024], INTENT_LABELS)
-            label_scores = dict(zip(output["labels"], output["scores"]))
+            label_scores = dict(zip(output["labels"], output["scores"], strict=False))
             harmful_score = max(
                 (label_scores.get(lbl, 0) for lbl in HARMFUL_INTENT_LABELS), default=0
             )
             safe_score = label_scores.get("safe, harmless content", 0)
             if harmful_score >= 0.55:
-                top_harmful = max(HARMFUL_INTENT_LABELS, key=lambda l: label_scores.get(l, 0))
+                top_harmful = max(HARMFUL_INTENT_LABELS, key=lambda label: label_scores.get(label, 0))
                 return {
                     "intent": "harmful",
                     "reason": f"NLI classified as: {top_harmful} ({harmful_score:.2f})",
@@ -245,7 +240,7 @@ class ModerationService:
 
     def _get_flagged_categories(self, local_result: dict) -> list[str]:
         categories = []
-        for label, score in local_result.get("high_scores", {}).items():
+        for label, _score in local_result.get("high_scores", {}).items():
             if label in TOXIC_CATEGORIES:
                 categories.append(TOXIC_CATEGORIES[label])
         return categories

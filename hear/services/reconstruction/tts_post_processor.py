@@ -376,8 +376,8 @@ class TTSPostProcessor:
             nonzero = torch.where(abs_sig > threshold)[0]
             if len(nonzero) == 0:
                 return waveform
-            first = nonzero[0].item()
-            last = nonzero[-1].item() + 1
+            first = int(nonzero[0].item())
+            last = int(nonzero[-1].item()) + 1
             pad = int(sr * 0.05)
             first = max(0, first - pad)
             last = min(waveform.shape[1], last + pad)

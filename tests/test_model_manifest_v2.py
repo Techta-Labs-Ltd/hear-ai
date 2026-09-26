@@ -9,12 +9,26 @@ class TestModelManifest:
     def test_manifest_revisions_are_pinned(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))
         assert manifest.models
-        assert all(len(model.revision) == 40 for model in manifest.models)
+        for model in manifest.models:
+            if model.source_type == "huggingface":
+                assert model.revision is not None
+                assert len(model.revision) == 40
+            else:
+                assert model.sha256 is not None
+                assert len(model.sha256) == 64
 
     def test_transcription_loads_only_asr_models(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))
         names = {model.name for model in manifest.models_for(WorkerRole.TRANSCRIPTION)}
         assert names == {"qwen3-asr-1.7b", "qwen3-forced-aligner"}
+
+    def test_reconstruction_has_only_required_model_families(self):
+        manifest = ModelManifest(Path("hear/model_manifest.json"))
+        names = {model.name for model in manifest.models_for(WorkerRole.RECONSTRUCTION)}
+        assert names == {
+            "fish-speech-s2-pro",
+            "dnsmos",
+        }
 
     def test_pipeline_llm_is_opt_in(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))

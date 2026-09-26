@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+
 from hear.api.routers.health import HealthRouter
 from hear.health.service import RuntimeReadiness
 

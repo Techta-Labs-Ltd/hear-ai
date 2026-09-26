@@ -1,9 +1,7 @@
 from __future__ import annotations
 
+import importlib
 import json
-
-import aio_pika
-from aio_pika import ExchangeType, IncomingMessage
 
 from hear.contracts.events import ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope, ClaimDecision, WorkerIdentity
@@ -25,6 +23,7 @@ class RabbitMQConsumer:
         *,
         topology: RabbitMQTopology | None = None,
         prefetch: int = 1,
+        provider=None,
     ) -> None:
         self._connection_url = connection_url
         self._role = role
@@ -34,28 +33,38 @@ class RabbitMQConsumer:
         self._worker = worker
         self._topology = topology or RabbitMQTopology()
         self._prefetch = max(1, prefetch)
-        self._connection: aio_pika.abc.AbstractRobustConnection | None = None
-        self._channel: aio_pika.abc.AbstractChannel | None = None
-        self._consumer_tag: str | None = None
-        self._queue: aio_pika.abc.AbstractQueue | None = None
+        self._provider = provider
+        self._connection = None
+        self._channel = None
+        self._consumer_tag = None
+        self._queue = None
+
+    def _aio_pika(self):
+        if self._provider is None:
+            self._provider = importlib.import_module("aio_pika")
+        return self._provider
 
     async def start(self) -> None:
+        provider = self._aio_pika()
         binding = self._topology.binding(self._role)
-        self._connection = await aio_pika.connect_robust(self._connection_url)
-        self._channel = await self._connection.channel()
-        await self._channel.set_qos(prefetch_count=self._prefetch)
-        exchange = await self._channel.declare_exchange(
+        connection = await provider.connect_robust(self._connection_url)
+        channel = await connection.channel()
+        self._connection = connection
+        self._channel = channel
+        await channel.set_qos(prefetch_count=self._prefetch)
+        exchange = await channel.declare_exchange(
             self._topology.exchange,
-            ExchangeType.DIRECT,
+            provider.ExchangeType.DIRECT,
             durable=True,
         )
-        self._queue = await self._channel.declare_queue(
+        queue = await channel.declare_queue(
             binding.queue,
             durable=True,
             arguments={"x-queue-type": "quorum"},
         )
-        await self._queue.bind(exchange, routing_key=binding.routing_key)
-        self._consumer_tag = await self._queue.consume(self._on_message, no_ack=False)
+        self._queue = queue
+        await queue.bind(exchange, routing_key=binding.routing_key)
+        self._consumer_tag = await queue.consume(self._on_message, no_ack=False)
 
     async def close(self) -> None:
         if self._queue is not None and self._consumer_tag is not None:
@@ -66,7 +75,7 @@ class RabbitMQConsumer:
             await self._connection.close()
         await self._backend.close()
 
-    async def _on_message(self, message: IncomingMessage) -> None:
+    async def _on_message(self, message) -> None:
         try:
             envelope = AttemptEnvelope.model_validate(json.loads(message.body))
         except Exception:
@@ -86,8 +95,7 @@ class RabbitMQConsumer:
         try:
             async for event in self._executor.stream(envelope):
                 if event.event == ExecutionEventType.OUTCOME:
-                    payload = event.data.get("outcome")
-                    outcome = ExecutionOutcome.model_validate(payload)
+                    outcome = ExecutionOutcome.model_validate(event.data.get("outcome"))
                     await self._backend.outcome(envelope, outcome)
                 else:
                     await self._backend.event(envelope, event)

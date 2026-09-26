@@ -12,7 +12,6 @@ class WorkerRole(StrEnum):
     MAGIC_CLEAN_NATURAL = "magic_clean_natural"
     MAGIC_CLEAN_VOICE_FOCUS = "magic_clean_voice_focus"
     MAGIC_CLEAN_MUSIC_ATMOSPHERE = "magic_clean_music_atmosphere"
-    MAGIC_CLEAN_STEM_MIX = "magic_clean_stem_mix"
 
 
 class WorkerCapability(BaseModel):
@@ -61,11 +60,6 @@ class WorkerCapabilityRegistry:
                 role=WorkerRole.MAGIC_CLEAN_MUSIC_ATMOSPHERE,
                 job_types=(JobType.MAGIC_CLEAN,),
                 magic_clean_profile=MagicCleanProfile.MUSIC_ATMOSPHERE,
-            ),
-            WorkerRole.MAGIC_CLEAN_STEM_MIX: WorkerCapability(
-                role=WorkerRole.MAGIC_CLEAN_STEM_MIX,
-                job_types=(JobType.MAGIC_CLEAN,),
-                magic_clean_profile=MagicCleanProfile.STEM_MIX,
             ),
         }
 

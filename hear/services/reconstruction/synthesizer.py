@@ -8,6 +8,7 @@ import tempfile
 import warnings
 import wave
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import numpy as np
 import torch
@@ -17,11 +18,37 @@ import torchaudio.functional as F_audio
 from hear.config import settings
 from hear.core.hear_temp import TempWorkspace
 from hear.core.noise import NoiseReducer
-from hear.core.storage import B2Storage
-from hear.services.model_client import RayModelClient
 from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
 from hear.services.transcription.service import TranscriptionService
 from hear.utils.audio import save_as_mp3
+
+
+class ReconstructionModelClient(Protocol):
+    async def generate_speech(
+        self,
+        *,
+        text: str,
+        max_new_tokens: int = 1024,
+        references: list[dict] | None = None,
+        reference_id: str | None = None,
+        language: str = "en",
+        seed: int | None = None,
+    ) -> bytes: ...
+
+
+class ReconstructionStorage(Protocol):
+    @property
+    def bucket_name(self) -> str: ...
+
+    def key(self, *parts: str) -> str: ...
+
+    def upload_file(
+        self,
+        local_path: str,
+        object_key: str,
+        content_type: str | None = None,
+    ) -> str: ...
+
 
 logger = logging.getLogger(__name__)
 _recon_payload_logger = logging.getLogger("reconstruct_payload")
@@ -63,7 +90,11 @@ class SpeechSynthesizer:
     MAX_SAFE_TEMPO_FACTOR = 1.35
     TTS_SYSTEM_PROMPT = 'You are a text preprocessor for the fish-speech TTS engine. The engine under-weights punctuation, but it DOES respect inline control tokens in square brackets. Rewrite the input text so pauses, emotion, and delivery are expressed through these tokens. The input can be any kind of text: news, stories, dialogue, letters, lists, transcripts.\n\nSUPPORTED TOKENS (use only these, or free-form variants in the same style):\n- Emotion: [excited], [sad], [angry], [surprised], [delight]\n- Volume: [whisper], [low voice], [volume up], [loud], [shouting], [screaming]\n- Pacing: [pause], [short pause], [inhale], [exhale], [sigh]\n- Vocalization: [laugh], [laughing], [chuckle], [chuckling], [tsk], [clearing throat]\n- Tone: [professional broadcast tone], [singing], [with strong accent]\n- Expression: [moaning], [panting], [echo], [pitch up], [pitch down]\n- Free-form allowed, e.g. [speaking slowly and clearly], [sarcastic tone]\n\nRULES:\n1. Split text into short sentences of max 15-20 words, breaking long sentences at clause boundaries. One sentence per line.\n2. Every sentence ends with exactly one terminal mark: "." "?" or "!".\n3. Punctuation mapping:\n   - Paragraph break or topic change -> a line containing only [pause].\n   - Ellipsis "..." -> [pause] then continue as a new sentence.\n   - Exclamation -> keep "!" and prepend a fitting emotion token chosen from context.\n   - Question -> keep "?"; add [pitch up] only if it would otherwise sound flat.\n   - Em dash / semicolon / colon -> split into a new sentence.\n4. Convert stage directions and narration cues into tokens: "(laughs)" -> [laugh], "*sighs*" -> [sigh], "she whispered" -> [whisper] before the whispered text.\n5. Place tokens BEFORE the text they modify. Max two tokens per sentence.\n6. Use tokens sparingly: at most one emotion token per 3-4 sentences unless the text clearly demands more.\n7. Expand numbers, dates, times, currencies, units and abbreviations into spoken UK English words ("£12.50" -> "twelve pounds fifty", "Dr." -> "Doctor", "3rd" -> "third", "14:30" -> "half past two in the afternoon").\n8. Never paraphrase, summarise, add or remove content. Only restructure and annotate.\n9. Output plain text only. One sentence per line. No markdown, no numbering, no commentary, no explanation.'
 
-    def __init__(self, model_client: RayModelClient, transcriber: TranscriptionService):
+    def __init__(
+        self,
+        model_client: ReconstructionModelClient,
+        transcriber: TranscriptionService | None = None,
+    ) -> None:
         self._model_client = model_client
         self._transcriber = transcriber
         self._loaded = False
@@ -176,7 +207,7 @@ class SpeechSynthesizer:
         segment_end: float,
         new_text: str,
         track_id: str,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         same_speaker: bool = True,
         original_text: str | None = None,
         job_id: str | None = None,
@@ -277,7 +308,7 @@ class SpeechSynthesizer:
         original_audio_path: str,
         track_id: str,
         changes: list,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         same_speaker: bool = True,
         voice_reference_audio_path: str | None = None,
         job_id: str | None = None,
@@ -455,7 +486,7 @@ class SpeechSynthesizer:
         original_audio_path: str,
         track_id: str,
         changes: list,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         same_speaker: bool = True,
         voice_reference_path: str | None = None,
         job_id: str | None = None,
@@ -581,7 +612,7 @@ class SpeechSynthesizer:
         original_audio_path: str,
         track_id: str,
         changes: list,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         same_speaker: bool = True,
         job_id: str | None = None,
     ) -> SynthesisResult:
@@ -729,7 +760,7 @@ class SpeechSynthesizer:
         segment_start: float,
         segment_end: float,
         purpose: str,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         job_id: str,
     ) -> SegmentAudioResult:
         out_path = save_as_mp3(waveform, self.TARGET_SR, track_id=track_id, purpose=purpose)
@@ -756,7 +787,7 @@ class SpeechSynthesizer:
         track_id: str,
         segment_start: float,
         segment_end: float,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         job_id: str,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
@@ -803,7 +834,7 @@ class SpeechSynthesizer:
         edited_transcript: str,
         track_id: str,
         job_id: str,
-        storage: B2Storage,
+        storage: ReconstructionStorage,
         original_transcript: str = "",
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
@@ -926,6 +957,8 @@ class SpeechSynthesizer:
                 text_raw = getattr(item, "new_text", getattr(item, "text", None))
                 original_text_raw = getattr(item, "original_text", None)
                 is_deletion = getattr(item, "is_deletion", False)
+            if start_raw is None or end_raw is None:
+                continue
             try:
                 start = float(start_raw)
                 end = float(end_raw)
@@ -1242,7 +1275,29 @@ class SpeechSynthesizer:
         if ref_end <= ref_start:
             logger.warning("No usable voice reference for track=%s", track_id)
             return (None, "", None)
-        reference_path = None
+        reference_path: str | None = None
+        speaking_rate: float | None = None
+        if use_edited_interval and original_text and self._transcriber is None:
+            reference_path = self._export_reference_clip(
+                waveform,
+                ref_start,
+                ref_end,
+                track_id=track_id,
+            )
+            duration_seconds = max(
+                (ref_end - ref_start) / self.TARGET_SR,
+                self.MIN_PACING_TARGET_SECONDS,
+            )
+            candidate_speaking_rate = self._speech_units(original_text) / duration_seconds
+            if (
+                self.MIN_PLAUSIBLE_SPEAKING_RATE
+                <= candidate_speaking_rate
+                <= self.MAX_PLAUSIBLE_SPEAKING_RATE
+            ):
+                speaking_rate = candidate_speaking_rate
+            return reference_path, str(original_text).strip(), speaking_rate
+        if self._transcriber is None:
+            return (None, "", None)
         try:
             if use_edited_interval:
                 pacing_audio = (
@@ -1426,10 +1481,7 @@ class SpeechSynthesizer:
             return tts_waveform
         source_rate = None
         source_measurement = "aligned-asr-span"
-        try:
-            candidate_rate = float(source_speaking_rate)
-        except (TypeError, ValueError):
-            candidate_rate = 0.0
+        candidate_rate = float(source_speaking_rate) if source_speaking_rate is not None else 0.0
         if (
             np.isfinite(candidate_rate)
             and self.MIN_PLAUSIBLE_SPEAKING_RATE

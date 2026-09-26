@@ -87,8 +87,11 @@ class SamFeatureFile:
         self._check_window(start, end)
         if end > self._written_frames:
             raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "feature input is incomplete")
-        result = np.array(self._map[start:end].transpose(1, 2, 0), copy=True, order="C")
-        MappedResidency.evict(self.guard, self._map)
+        mapping = self._map
+        if mapping is None:
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "feature file is closed")
+        result = np.array(mapping[start:end].transpose(1, 2, 0), copy=True, order="C")
+        MappedResidency.evict(self.guard, mapping)
         if not np.isfinite(result).all():
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "nonfinite feature input")
         return result
@@ -102,19 +105,24 @@ class SamFeatureFile:
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "invalid feature output shape")
         end = start + values.shape[2]
         self._check_window(start, end)
-        if not self._owned or self._map.mode == "r":
+        mapping = self._map
+        if mapping is None:
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "feature file is closed")
+        if not self._owned or mapping.mode == "r":
             raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "feature input is read-only")
         if start != self._written_frames:
             raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "noncontiguous feature output")
         if not np.isfinite(values).all():
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "nonfinite feature output")
-        self._map[start:end] = values.transpose(2, 0, 1)
-        MappedResidency.evict(self.guard, self._map)
+        mapping[start:end] = values.transpose(2, 0, 1)
+        MappedResidency.evict(self.guard, mapping)
         self._written_frames = end
 
     def close(self, *, remove: bool = False) -> None:
         if self._map is not None:
-            self._map._mmap.close()
+            mmap_handle = getattr(self._map, "_mmap", None)
+            if mmap_handle is not None:
+                mmap_handle.close()
             self._map = None
         if remove and self._owned:
             self.path.unlink(missing_ok=True)

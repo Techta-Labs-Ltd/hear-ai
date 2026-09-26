@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-
 @dataclass
 class DiscoveryTaxonomyData:
     paths: list[str] = field(default_factory=list)
@@ -57,33 +56,22 @@ class DiscoveryTaxonomyLoader:
         self.__dict__.update(state)
         self._lock = threading.Lock()
 
-    def load(self, path: str | Path | None = None):
-        if path is not None:
-            paths = []
-            section = ""
-            source = Path(path)
-            if source.is_file():
-                for raw_line in source.read_text(encoding="utf-8").splitlines():
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    if line.startswith("[") and line.endswith("]"):
-                        section = line[1:-1].upper()
-                    elif section == "TAXONOMY":
-                        paths.append(line)
-        else:
-            from hear.models.database import DatabaseRuntime, TaxonomyPath
-
-            db = DatabaseRuntime.SessionLocal()
-            try:
-                paths = [
-                    row.path for row in db.query(TaxonomyPath).order_by(TaxonomyPath.path).all()
-                ]
-            finally:
-                db.close()
-        lookup = {TaxonomyLabels._norm(p): p for p in paths}
-        with self._lock:
-            self._data = DiscoveryTaxonomyData(paths=paths, path_lookup=lookup)
+    def load(self, path: str | Path | None = None) -> None:
+        if path is None:
+            raise RuntimeError("pipeline_taxonomy_not_loaded")
+        paths = []
+        section = ""
+        source = Path(path)
+        if source.is_file():
+            for raw_line in source.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    section = line[1:-1].upper()
+                elif section == "TAXONOMY":
+                    paths.append(line)
+        self.load_paths(paths)
 
     def load_paths(self, paths: list[str]) -> None:
         normalized = [str(item).strip() for item in paths if str(item).strip()]
