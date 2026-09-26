@@ -9,7 +9,10 @@ from typing import Any
 import numpy as np
 import torch
 import whisperx
+from silero_vad import get_speech_timestamps, load_silero_vad
 from whisperx.asr_qwen import load_model as load_qwen_asr_model
+from whisperx.diarize import Segment as SegmentX
+from whisperx.vads.vad import Vad
 
 from hear.execution.native import NativeExecutor
 from hear.utils.transcription_chunks import (
@@ -18,6 +21,45 @@ from hear.utils.transcription_chunks import (
     finalize_combined_result,
     iter_audio_chunks,
 )
+
+
+class LocalSileroVad(Vad):
+    def __init__(self, vad_onset: float, chunk_size: int) -> None:
+        super().__init__(vad_onset)
+        self._vad_onset = vad_onset
+        self._chunk_size = chunk_size
+        self._model = load_silero_vad(onnx=False)
+
+    @staticmethod
+    def preprocess_audio(audio):
+        return torch.from_numpy(np.asarray(audio, dtype=np.float32))
+
+    @staticmethod
+    def merge_chunks(segments, chunk_size, onset, offset):
+        return Vad.merge_chunks(segments, chunk_size, onset, offset)
+
+    def __call__(self, audio, **kwargs):
+        if int(audio["sample_rate"]) != 16000:
+            raise ValueError("silero_vad_requires_16000hz")
+        waveform = audio["waveform"]
+        if isinstance(waveform, np.ndarray):
+            waveform = torch.from_numpy(waveform.astype(np.float32, copy=False))
+        waveform = waveform.float().reshape(-1)
+        timestamps = get_speech_timestamps(
+            waveform,
+            self._model,
+            threshold=self._vad_onset,
+            sampling_rate=16000,
+            max_speech_duration_s=float(self._chunk_size),
+        )
+        return [
+            SegmentX(
+                float(item["start"]) / 16000.0,
+                float(item["end"]) / 16000.0,
+                "UNKNOWN",
+            )
+            for item in timestamps
+        ]
 
 
 class QwenAsrEngine:
@@ -42,12 +84,14 @@ class QwenAsrEngine:
         self._long_audio_batch_size = long_audio_batch_size
         self._chunk_seconds = chunk_seconds
         self._cuda_healthy = True
+        vad_model = LocalSileroVad(vad_onset, chunk_seconds)
         self._asr = load_qwen_asr_model(
             str(model_path),
             device="cuda",
             language="en",
             download_root=str(cache_dir),
             local_files_only=True,
+            vad_model=vad_model,
             vad_options={
                 "vad_onset": vad_onset,
                 "vad_offset": vad_offset,
