@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -199,7 +200,7 @@ def test_magic_clean_workflow_maps_cleaner_bundle(monkeypatch, tmp_path):
     ]
 
 
-def test_available_magic_clean_returns_target_not_detected_outcome(tmp_path):
+def test_available_magic_clean_returns_processing_failure_outcome(tmp_path):
     class Audio:
         async def download_source(self, url, workspace):
             source = workspace.file("source.wav")
@@ -211,8 +212,8 @@ def test_available_magic_clean_returns_target_not_detected_outcome(tmp_path):
 
         def clean(self, *args):
             raise CleanExecutionError(
-                ErrorCode.TARGET_NOT_DETECTED,
-                "SAM Audio target was not detected in the source",
+                ErrorCode.PROCESS_FAILED,
+                "DeepFilterNet processing failed",
             )
 
     native = NativeExecutor("available-magic-clean-test")
@@ -226,13 +227,17 @@ def test_available_magic_clean_returns_target_not_detected_outcome(tmp_path):
     )
 
     async def run():
-        result = [item async for item in workflow.stream(envelope())]
+        request = envelope()
+        request = request.model_copy(update={"source": request.source.model_copy(
+            update={"file_sha256": hashlib.sha256(b"audio").hexdigest()}
+        )})
+        result = [item async for item in workflow.stream(request)]
         await native.close()
         return result
 
     events = asyncio.run(run())
     outcome = events[-1].data["outcome"]
     assert outcome["status"] == "failed"
-    assert outcome["error_code"] == "target_not_detected"
+    assert outcome["error_code"] == "process_failed"
     assert outcome["artifacts"] == []
     assert [item.event.value for item in events] == ["started", "stage", "outcome"]

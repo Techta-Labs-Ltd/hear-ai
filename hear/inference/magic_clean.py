@@ -40,34 +40,8 @@ class NaturalCertification(StrictModel):
     context_frames: int = Field(ge=4800, le=240000)
 
 
-class SamAudioCertification(StrictModel):
-    limits: RuntimeLimits
-    license_review_approved: bool
-    config_path: str
-    config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    checkpoint_path: str
-    checkpoint_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    text_encoder_path: str
-    text_config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    text_tokenizer_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    text_sentencepiece_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    text_weights_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    ranker_checkpoint_path: str
-    ranker_checkpoint_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    span_predictor_path: str
-    span_config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    span_weights_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    span_preprocessor_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    span_special_tokens_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    span_tokenizer_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    span_tokenizer_config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    dependency_cache_path: str
-    device: Literal["cpu", "cuda:0"]
-
-
 class CleanerCertifications(StrictModel):
     natural: NaturalCertification | None = None
-    sam_audio: SamAudioCertification | None = None
 
 
 class DisabledArtifactStore:
@@ -103,8 +77,6 @@ class MagicCleanRuntimeFactory:
         self._lock_directory.mkdir(parents=True, exist_ok=True)
         if role == WorkerRole.MAGIC_CLEAN_NATURAL:
             return self._build_natural()
-        if role == WorkerRole.MAGIC_CLEAN_SAM_AUDIO:
-            return self._build_sam_audio()
         raise RuntimeError("unsupported_magic_clean_role")
 
     def close(self) -> None:
@@ -162,95 +134,6 @@ class MagicCleanRuntimeFactory:
             runtimes=(runtime,),
             loaders={"deepfilternet3": loader},
             readiness={"deepfilternet3": ready},
-            store=DisabledArtifactStore(),
-            gpu_admission=(
-                GpuAdmissionController(NvidiaSmiMemoryProbe()) if cert.device == "cuda:0" else None
-            ),
-        )
-
-    def _build_sam_audio(self) -> CleanerWorker:
-        from hear.runtime.cleaner.factory import CleanerWorkerFactory
-        from hear.runtime.cleaner.gpu_admission import GpuAdmissionController, NvidiaSmiMemoryProbe
-        from hear.runtime.cleaner.sam_loader import PinnedSamAssets, PinnedSamBaseFactory
-        from hear.services.magic_clean.engines.sam_audio import SamEngine
-
-        cert = self._certifications.sam_audio
-        if cert is None:
-            raise RuntimeError("magic_clean_sam_audio_not_certified")
-        if not cert.license_review_approved:
-            raise RuntimeError("magic_clean_sam_audio_license_review_required")
-        assets = PinnedSamAssets(
-            Path(cert.config_path),
-            Path(cert.checkpoint_path),
-            Path(cert.text_encoder_path),
-            (
-                ("config.json", cert.text_config_sha256),
-                ("tokenizer.json", cert.text_tokenizer_sha256),
-                ("spiece.model", cert.text_sentencepiece_sha256),
-                ("model.safetensors", cert.text_weights_sha256),
-            ),
-            Path(cert.ranker_checkpoint_path),
-            cert.ranker_checkpoint_sha256,
-            Path(cert.span_predictor_path),
-            (
-                ("config.json", cert.span_config_sha256),
-                ("model.safetensors", cert.span_weights_sha256),
-                ("preprocessor_config.json", cert.span_preprocessor_sha256),
-                ("special_tokens_map.json", cert.span_special_tokens_sha256),
-                ("tokenizer.json", cert.span_tokenizer_sha256),
-                ("tokenizer_config.json", cert.span_tokenizer_config_sha256),
-            ),
-            Path(cert.dependency_cache_path),
-        )
-        if cert.config_sha256 != PinnedSamBaseFactory.CONFIG_SHA256:
-            raise RuntimeError("magic_clean_sam_audio_config_mismatch")
-        if cert.checkpoint_sha256 != PinnedSamBaseFactory.CHECKPOINT:
-            raise RuntimeError("magic_clean_sam_audio_checkpoint_mismatch")
-        factory = PinnedSamBaseFactory(
-            assets,
-            device=cert.device,
-            text_encoder_identity=assets.text_identity,
-        )
-        pinned_assets = PinnedAssetSet(
-            (
-                (assets.config, PinnedSamBaseFactory.CONFIG_SHA256, 1024 * 1024),
-                (assets.checkpoint, PinnedSamBaseFactory.CHECKPOINT, None),
-                *(
-                    (assets.text_directory / filename, digest, None)
-                    for filename, digest in assets.text_hashes
-                ),
-                (assets.ranker_checkpoint, assets.ranker_sha256, None),
-                *(
-                    (assets.span_directory / filename, digest, None)
-                    for filename, digest in assets.span_hashes
-                ),
-            )
-        )
-        identity = factory.identity
-        runtime = self._runtime(
-            cert.limits,
-            identity,
-            "gpu" if cert.device == "cuda:0" else "cpu",
-        )
-
-        def loader():
-            return SamEngine(identity, factory)
-
-        def ready(candidate):
-            if candidate != identity:
-                return False
-            pinned_assets.verify()
-            if not assets.dependency_cache_directory.is_dir():
-                return False
-            factory.validate_identity(identity)
-            return True
-
-        return CleanerWorkerFactory.build(
-            lock_directory=self._lock_directory,
-            lane="gpu" if cert.device == "cuda:0" else "cpu",
-            runtimes=(runtime,),
-            loaders={"sam_audio_base": loader},
-            readiness={"sam_audio_base": ready},
             store=DisabledArtifactStore(),
             gpu_admission=(
                 GpuAdmissionController(NvidiaSmiMemoryProbe()) if cert.device == "cuda:0" else None

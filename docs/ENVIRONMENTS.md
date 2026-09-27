@@ -23,13 +23,13 @@ Production images use the role-specific groups in `deploy/runtime/pyproject.toml
 | `HEAR_POD_STACK_ROLES` | Comma-separated Pod lanes; defaults to `pipeline`, which also accepts transcription |
 | `HEAR_HOST_JOB_LOCK_PATH` | Shared file lock that limits the Pod to one active model job across role processes |
 | `HEAR_API_MAX_BODY_BYTES` | Maximum JSON request body size for the Pod attempt endpoint |
-| `HEAR_OPTIONAL_ENGINE_MODE` | `available` uses DeepFilterNet3 for Natural and SAM Audio Base for prompt-driven removal or isolation; `certified` also requires deployment certificates |
-| `HEAR_MAGIC_CLEAN_MODEL_DEVICE` | Device used by DeepFilterNet and SAM Audio; defaults to `cuda:0` |
+| `HEAR_OPTIONAL_ENGINE_MODE` | `available` uses DeepFilterNet3 plus selectable preset DSP; `certified` supports the legacy Natural-only certificate workflow |
+| `HEAR_MAGIC_CLEAN_MODEL_DEVICE` | Device used by DeepFilterNet; defaults to `cuda:0` |
 | `AUDIO_DOWNLOAD_MAX_BYTES` | Maximum source download size |
 | `AUDIO_DOWNLOAD_READ_TIMEOUT_SECONDS` | Source download read timeout |
 | `AUDIO_DECODE_TIMEOUT_SECONDS` | Native decode timeout |
 
-The Pod has one authenticated HTTP endpoint at `POST /v1/attempts/stream`. The API selects the local RabbitMQ queue from the request's `job_type` and Magic Clean profile, then returns queued and execution events over the same SSE connection. Role processes consume RabbitMQ directly and expose no HTTP ports. The pipeline lane accepts transcription jobs so a Pod does not load the same Qwen model in separate pipeline and transcription processes. RabbitMQ uses bounded v2 role queues, delayed retries, and dead letter queues. Its AMQP listener binds to loopback and is required by the Pod profile. Serverless uses RunPod dispatch and emits the same canonical events without RabbitMQ. Available Magic Clean workers require their provisioned DeepFilterNet and SAM Audio Base assets. Certified optional engines and the pipeline models are provisioned before startup and validated from `hear/model_manifest.json`. `HEAR_MODEL_FEATURES=qwen_llm` is valid only for the pipeline LLM targets.
+The Pod has one authenticated HTTP endpoint at `POST /v1/attempts/stream`. The API selects the local RabbitMQ queue from the request's `job_type` and Magic Clean profile, then returns queued and execution events over the same SSE connection. Role processes consume RabbitMQ directly and expose no HTTP ports. The pipeline lane accepts transcription jobs so a Pod does not load the same Qwen model in separate pipeline and transcription processes. RabbitMQ uses bounded v2 role queues, delayed retries, and dead letter queues. Its AMQP listener binds to loopback and is required by the Pod profile. Serverless uses RunPod dispatch and emits the same canonical events without RabbitMQ. Available Magic Clean workers require the provisioned DeepFilterNet3 assets. Certified optional engines and the pipeline models are provisioned before startup and validated from `hear/model_manifest.json`. `HEAR_MODEL_FEATURES=qwen_llm` is valid only for the pipeline LLM targets.
 
 Model provisioning and readiness fail closed for entries whose `license_status` is `review_required` or `permission_required`. Update the manifest to `verified` only after the required license review or written permission is recorded through the deployment's review process. The default manifest intentionally keeps Fish Speech, DNSMOS, and SAM gated.
 
@@ -37,7 +37,7 @@ The Serverless entrypoint checks readiness before starting the RunPod worker and
 
 ## Profile settings
 
-Magic Clean workers set `HEAR_CLEANER_CERTIFICATION_PATH` and optionally `HEAR_CLEANER_LOCK_DIR`. Their resource limits are `MAGIC_CLEAN_SCRATCH_BYTES`, `MAGIC_CLEAN_MAX_INPUT_BYTES`, `MAGIC_CLEAN_MAX_FRAMES`, and the GPU budget variables. Natural and SAM Audio use separate worker environments and model assets.
+Certificate-mode Natural workers set `HEAR_CLEANER_CERTIFICATION_PATH` and optionally `HEAR_CLEANER_LOCK_DIR`. Their resource limits are `MAGIC_CLEAN_SCRATCH_BYTES`, `MAGIC_CLEAN_MAX_INPUT_BYTES`, `MAGIC_CLEAN_MAX_FRAMES`, and the GPU budget variables. All four DeepFilterNet presets share the `magic_clean_natural` worker environment and model assets. SAM is retired.
 
 ## Dependency patch
 

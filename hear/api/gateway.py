@@ -12,6 +12,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+from hear.contracts.cleaning import CleaningProfiles
 from hear.contracts.jobs import AttemptEnvelope
 from hear.runtime.gateway import (
     GatewayAttempt,
@@ -29,10 +30,12 @@ class PodGateway:
         api_key: str,
         *,
         enable_docs: bool = False,
+        cleaning_mode: str = "available",
     ) -> None:
         self._runtime = runtime
         self._api_key = api_key.strip()
         self.enable_docs = enable_docs
+        self._cleaning_mode = cleaning_mode
         self.router = APIRouter(tags=["gateway"])
         self.router.add_api_route("/v1/attempts/stream", self.stream_attempt, methods=["POST"])
         self.router.add_api_route("/healthz", self.healthz, methods=["GET"])
@@ -55,45 +58,18 @@ class PodGateway:
     async def capabilities(self) -> dict:
         lanes = await self._runtime.lane_status()
         ready = bool(lanes) and all(item["status"] == "ready" for item in lanes.values())
+        catalogue = CleaningProfiles.catalogue()
+        natural_lane = lanes.get("magic_clean_natural")
+        available = natural_lane is not None and natural_lane["status"] == "ready"
+        for name, profile in catalogue["profiles"].items():
+            profile["available"] = available and (
+                self._cleaning_mode == "available" or name == "natural"
+            )
+        catalogue["engine_mode"] = self._cleaning_mode
         return {
             "status": "ready" if ready else "loading",
             "lanes": lanes,
-            "magic_clean": {
-                "profiles": {
-                    "natural": {
-                        "engine": "deepfilternet3",
-                        "use_for": [
-                            "recording hiss",
-                            "steady background noise",
-                            "speech denoising",
-                        ],
-                        "options": {
-                            "attenuation_limit_db": [12, 18, 24],
-                        },
-                    },
-                    "sam_audio": {
-                        "engine": "sam_audio_base",
-                        "use_for": ["music", "speech", "speaker", "sound events"],
-                        "semantics": {
-                            "remove": "returns everything except the prompted sound",
-                            "isolate": "returns only the prompted sound",
-                            "target_not_detected": "no output artifact is published",
-                        },
-                        "quality": {
-                            "ambient": "two candidates ranked by official CLAP",
-                            "event": "official PE span prediction",
-                        },
-                        "options": {
-                            "prompt": "required lowercase sound description",
-                            "action": ["remove", "isolate"],
-                            "prompt_mode": ["ambient", "event"],
-                            "default_prompt_mode": "ambient",
-                            "default_action": "remove",
-                            "seed": "integer from 0 to 9223372036854775807",
-                        },
-                    },
-                }
-            },
+            "magic_clean": catalogue,
         }
 
     async def drain(self, authorization: str | None = Header(default=None)) -> dict[str, str]:
@@ -158,6 +134,11 @@ class PodGateway:
         authorization: str | None = Header(default=None),
     ) -> StreamingResponse:
         self._authenticate(authorization)
+        if envelope.job_type.value == "magic_clean" and self._cleaning_mode != "available":
+            if envelope.options.get("profile") != "natural" or any(
+                envelope.options.get(key) for key in ("auto_level", "remove_clicks", "trim_silence")
+            ):
+                raise HTTPException(status_code=422, detail="preset_requires_available_engine_mode")
         try:
             attempt = await self._runtime.enqueue(envelope)
         except GatewayQueueFull as exc:
@@ -204,7 +185,7 @@ class PodGateway:
                 "queue": "accepted",
             },
         )
-        iterator = self._runtime.stream(attempt).__aiter__()
+        iterator = self._runtime.stream(attempt)
         next_event = asyncio.ensure_future(iterator.__anext__())
         try:
             while True:

@@ -98,13 +98,3 @@ FROM runtime-base AS magic-clean-natural-serverless
 COPY --from=magic-clean-natural-serverless-builder /opt/venv /opt/venv
 ENV HEAR_WORKER_ROLE=magic_clean_natural
 CMD ["python", "-m", "hear.entrypoints.serverless"]
-
-FROM runtime-pod-base AS magic-clean-sam-audio-pod
-RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-sam-audio --group pod
-ENV HEAR_WORKER_ROLE=magic_clean_sam_audio
-CMD ["/usr/local/bin/run_pod.sh"]
-
-FROM runtime-base AS magic-clean-sam-audio-serverless
-RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-sam-audio --group serverless
-ENV HEAR_WORKER_ROLE=magic_clean_sam_audio
-CMD ["python", "-m", "hear.entrypoints.serverless"]

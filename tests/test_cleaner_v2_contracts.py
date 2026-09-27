@@ -116,7 +116,7 @@ def test_sample_cannot_replace_full_candidate(ticket):
         AttemptTicket.model_validate_json(json.dumps(ticket))
 
 
-def test_sam_audio_cannot_silently_downmix_stereo(ticket):
+def test_removed_sam_audio_is_rejected_even_with_mono_acknowledgement(ticket):
     prompt = "background noise"
     ticket["plan"].update(
         profile="sam_audio",
@@ -129,7 +129,8 @@ def test_sam_audio_cannot_silently_downmix_stereo(ticket):
     with pytest.raises(ValidationError):
         AttemptTicket.model_validate_json(json.dumps(ticket))
     ticket["plan"].update(channel_policy="validated_dual_mono", mono_acknowledged=True)
-    AttemptTicket.model_validate_json(json.dumps(ticket))
+    with pytest.raises(ValidationError):
+        AttemptTicket.model_validate_json(json.dumps(ticket))
 
 
 def test_uncertified_engine_never_loads(ticket):

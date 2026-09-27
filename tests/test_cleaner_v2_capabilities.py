@@ -21,7 +21,7 @@ def certified(ticket):
 def test_empty_registry_reports_all_profiles_unavailable():
     response = EngineRegistry((), {}).capabilities()
     assert response["contract_version"] == "hear.cleaner.capabilities.v2"
-    assert len(response["profiles"]) == 2
+    assert len(response["profiles"]) == 1
     assert all(not item["ready"] for item in response["profiles"])
     assert all(item["reason"] == "not_certified" for item in response["profiles"])
 
@@ -38,7 +38,7 @@ def test_capabilities_do_not_load_models_and_isolate_optional_profiles(certified
         {"deepfilternet3": lambda identity: identity == plan.runtime},
     )
     profiles = registry.capabilities()["profiles"]
-    assert [item["ready"] for item in profiles] == [True, False]
+    assert [item["ready"] for item in profiles] == [True]
     assert profiles[0]["rate_limits"] == [
         {"sample_rate": 16000, "max_frames": 96000, "max_duration_seconds": 6.0},
         {"sample_rate": 48000, "max_frames": 96000, "max_duration_seconds": 2.0},

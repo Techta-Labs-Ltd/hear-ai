@@ -9,7 +9,6 @@ ROLE_GROUPS = {
     "transcription": "transcription",
     "reconstruction": "reconstruction",
     "magic_clean_natural": "magic-clean-natural",
-    "magic_clean_sam_audio": "magic-clean-sam-audio",
 }
 
 

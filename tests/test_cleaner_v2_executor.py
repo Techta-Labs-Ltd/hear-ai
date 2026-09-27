@@ -270,32 +270,15 @@ def test_full_attempt_runs_real_inspection_mastering_and_manifest(execution):
     assert "master-0" not in json.dumps(report)
 
 
-def test_uncertified_sam_runtime_is_rejected_before_registry_and_model_loading(
-    execution, monkeypatch
-):
+def test_removed_sam_runtime_is_rejected_before_execution(execution):
     executor, context, engine, _ = execution
-    prompt = "background noise"
     values = context.ticket.plan.model_dump()
-    values.update(
-        profile="sam_audio",
-        attenuation_limit_db=None,
-        prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
-        prompt_text=prompt,
-        channel_policy="mono",
-        mono_acknowledged=True,
-    )
+    values["profile"] = "sam_audio"
     values["runtime"]["engine"] = "sam_audio_base"
-    plan = CleanPlan.model_validate(values)
-
-    def forbidden(*args, **kwargs):
-        pytest.fail("registry loaded before impossible SAM scratch reservation was rejected")
-
-    monkeypatch.setattr(executor.registry, "load", forbidden)
-    with pytest.raises(CleanExecutionError, match="requested runtime is not certified") as error:
-        executor._execute_verified(plan, context)
-    assert error.value.code == ErrorCode.ENGINE_UNAVAILABLE
+    with pytest.raises(ValueError):
+        CleanPlan.model_validate(values)
     assert not engine.closed
-    assert context.progress.stages == ["inspecting"]
+    assert context.progress.stages == []
 
 
 def test_sample_manifest_and_audio_have_exact_selected_length(execution):

@@ -39,7 +39,6 @@ class RabbitMQTopology:
             WorkerRole.TRANSCRIPTION: "transcription",
             WorkerRole.RECONSTRUCTION: "reconstruction",
             WorkerRole.MAGIC_CLEAN_NATURAL: "magic_clean.natural",
-            WorkerRole.MAGIC_CLEAN_SAM_AUDIO: "magic_clean.sam_audio",
         }
         suffix = suffixes[role]
         queue = f"{self._queue_prefix}.{suffix}.v{self._version}"
@@ -64,10 +63,7 @@ class RabbitMQTopology:
             return WorkerRole.TRANSCRIPTION
         if envelope.job_type == JobType.RECONSTRUCTION:
             return WorkerRole.RECONSTRUCTION
-        roles = {
-            MagicCleanProfile.NATURAL.value: WorkerRole.MAGIC_CLEAN_NATURAL,
-            MagicCleanProfile.SAM_AUDIO.value: WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
-        }
+        roles = {profile.value: WorkerRole.MAGIC_CLEAN_NATURAL for profile in MagicCleanProfile}
         return roles.get(str(envelope.options.get("profile") or ""))
 
     def queue_arguments(self, binding: QueueBinding) -> dict[str, str | int]:

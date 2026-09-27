@@ -96,6 +96,7 @@ class AvailableReconstructionWorkflow:
         workspace: AudioWorkspace,
     ) -> list[dict]:
         operation = envelope.operation
+        changes: list[dict]
         if operation == ReconstructionOperation.REMOVE_SEGMENTS:
             changes = [
                 {
@@ -109,9 +110,10 @@ class AvailableReconstructionWorkflow:
             ReconstructionOperation.EDIT_TRANSCRIPT,
             ReconstructionOperation.PREVIEW,
         }:
-            changes = envelope.options.get("changes")
-            if not isinstance(changes, list) or not changes:
+            raw_changes = envelope.options.get("changes")
+            if not isinstance(raw_changes, list) or not raw_changes:
                 raise ValueError("reconstruction_changes_required")
+            changes = raw_changes
         elif operation == ReconstructionOperation.REBUILD:
             replacement_url = str(envelope.options.get("rendered_audio_url") or "").strip()
             if not replacement_url:
@@ -139,8 +141,11 @@ class AvailableReconstructionWorkflow:
         for index, raw in enumerate(raw_changes):
             if not isinstance(raw, dict):
                 raise ValueError("invalid_reconstruction_change")
-            start = float(raw.get("segment_start"))
-            end = float(raw.get("segment_end"))
+            try:
+                start = float(raw["segment_start"])
+                end = float(raw["segment_end"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("invalid_reconstruction_interval") from exc
             if start < 0 or end <= start or end > duration:
                 raise ValueError("invalid_reconstruction_interval")
             replacement_url = str(raw.get("replacement_audio_url") or "").strip()

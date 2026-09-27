@@ -9,7 +9,7 @@ Hear Backend owns durable job state, provider selection, dispatch, retry policy,
 | `reconstruction` | Source revision, storage grant, one reconstruction operation, operation-specific options | `ReconstructionWorkflow` | Reconstructed audio and metadata; preview operations return preview artifacts |
 | `magic_clean` | Source revision, profile, profile-specific plan, storage grant, deadline | `MagicCleanWorkflow`; role is pinned to one profile | Immutable candidate artifacts and a verified result manifest |
 
-Reconstruction operations are `replace_segments`, `edit_transcript`, `rebuild`, `remove_segments`, and `preview`. Magic Clean profiles are `natural` and `sam_audio`. SAM Audio requires a `prompt`, defaults `action` to `remove`, and also supports `isolate`.
+Reconstruction operations are `replace_segments`, `edit_transcript`, `rebuild`, `remove_segments`, and `preview`. Magic Clean profiles are `natural`, `studio_voice`, `outdoor_mobile`, and `clean_raw`. All route to the existing Natural worker. See [the profile guide](DEEPFILTER_CLEANING_PROFILES.md) for boolean controls and measured-output semantics. SAM is retired.
 
 ## Dispatch and reporting
 

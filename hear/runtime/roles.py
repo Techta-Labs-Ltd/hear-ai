@@ -10,7 +10,6 @@ class WorkerRole(StrEnum):
     TRANSCRIPTION = "transcription"
     RECONSTRUCTION = "reconstruction"
     MAGIC_CLEAN_NATURAL = "magic_clean_natural"
-    MAGIC_CLEAN_SAM_AUDIO = "magic_clean_sam_audio"
 
 
 class WorkerCapability(BaseModel):
@@ -19,15 +18,17 @@ class WorkerCapability(BaseModel):
     role: WorkerRole
     job_types: tuple[JobType, ...]
     magic_clean_profile: MagicCleanProfile | None = None
+    magic_clean_profiles: tuple[MagicCleanProfile, ...] = ()
 
     def accepts(self, envelope: AttemptEnvelope) -> bool:
         if envelope.job_type not in self.job_types:
             return False
         if envelope.job_type != JobType.MAGIC_CLEAN:
             return True
-        if self.magic_clean_profile is None:
-            return False
-        return envelope.options.get("profile") == self.magic_clean_profile.value
+        profiles = self.magic_clean_profiles or (
+            (self.magic_clean_profile,) if self.magic_clean_profile else ()
+        )
+        return envelope.options.get("profile") in {profile.value for profile in profiles}
 
 
 class WorkerCapabilityRegistry:
@@ -49,11 +50,7 @@ class WorkerCapabilityRegistry:
                 role=WorkerRole.MAGIC_CLEAN_NATURAL,
                 job_types=(JobType.MAGIC_CLEAN,),
                 magic_clean_profile=MagicCleanProfile.NATURAL,
-            ),
-            WorkerRole.MAGIC_CLEAN_SAM_AUDIO: WorkerCapability(
-                role=WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
-                job_types=(JobType.MAGIC_CLEAN,),
-                magic_clean_profile=MagicCleanProfile.SAM_AUDIO,
+                magic_clean_profiles=tuple(MagicCleanProfile),
             ),
         }
 

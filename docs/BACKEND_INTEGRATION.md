@@ -4,9 +4,15 @@ This page describes the worker contract implemented in this repository. Hear Bac
 
 ## Job contract
 
-The only durable job types are `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Reconstruction carries one operation from `replace_segments`, `edit_transcript`, `rebuild`, `remove_segments`, or `preview`. Magic Clean has two production profiles: `natural` for DeepFilterNet3 denoising and `sam_audio` for prompt-driven separation.
+The only durable job types are `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Reconstruction carries one operation from `replace_segments`, `edit_transcript`, `rebuild`, `remove_segments`, or `preview`. Magic Clean has four DeepFilterNet3 profiles: `natural`, `studio_voice`, `outdoor_mobile`, and `clean_raw`, sharing the existing Natural worker route.
 
-For hiss, steady background noise, and speech denoising, use `{"profile":"natural","attenuation_limit_db":24}`. For semantic sound separation, send `options` as `{"profile":"sam_audio","prompt":"background music","action":"remove","prompt_mode":"ambient","seed":0}`. Use `prompt_mode=ambient` for continuous sources such as music, engines, rain, crowds, or speech; it generates two candidates and selects one with the official CLAP text ranker. Use `prompt_mode=event` for bounded events such as a dog bark, cough, door slam, or car horn; it uses the official PE Audio Frame span predictor. The SAM prompt describes one target sound. `remove` publishes everything except the target, while `isolate` publishes only the target and is not expected to retain speech when the prompt describes noise. The action and prompt mode default to `remove` and `ambient`. Prompts are trimmed, converted to lowercase, limited to 160 UTF-8 bytes, and should be short noun or verb phrases. When an isolated target is not audible in the source, the attempt fails with `target_not_detected` and publishes no audio artifact.
+For default spoken-word enhancement, send `options` as
+`{"profile":"studio_voice","auto_level":true,"remove_clicks":false,"trim_silence":false}`.
+Legacy `natural` supports attenuation 12, 18 or 24. The other choices are
+`outdoor_mobile` and `clean_raw`. Removed SAM requests are rejected, not remapped.
+Read `/capabilities` for labels, options and availability. See the
+[profile integration guide](DEEPFILTER_CLEANING_PROFILES.md), including trim offsets,
+measured-output metadata and frontend/backend allowlist changes.
 
 Workers validate the versioned `AttemptEnvelope` in `hear/contracts/jobs.py`. It includes job/run/attempt identity, source revision and URL, scoped storage credentials, options, an attempt deadline, and an attempt reporting grant. `HEAR_BACKEND_INTERNAL_URL` configures the reporting destination. The grant and storage application key are secrets and must not be logged.
 

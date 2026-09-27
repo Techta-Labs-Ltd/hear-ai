@@ -40,7 +40,11 @@ for role in "${role_list[@]}"; do
   role="${role//[[:space:]]/}"
   [[ -n "$role" ]] || continue
   case "$role" in
-    pipeline|transcription|reconstruction|magic_clean_natural|magic_clean_sam_audio) ;;
+    magic_clean_sam_audio)
+      printf 'Retired SAM Audio worker is not started; queued separation jobs are not remapped.\n' >&2
+      continue
+      ;;
+    pipeline|transcription|reconstruction|magic_clean_natural) ;;
     *)
       printf 'Unsupported worker role: %s\n' "$role" >&2
       exit 1

@@ -2,21 +2,28 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
-import subprocess
+import os
 import threading
 import time
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+from hear.contracts.cleaning import PROFILE_VERSION, CleaningProfiles, MagicCleanProfile
 from hear.runtime.cleaner.deepfilter_loader import PinnedDeepFilterAssets, PinnedDeepFilterFactory
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
-from hear.services.magic_clean.contracts import CleanPlan
+from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
+from hear.services.magic_clean.contracts import CleanExecutionError, CleanPlan, ErrorCode
 from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepFilterEngine
+from hear.services.magic_clean.mastering import AudioMasteringService
+from hear.services.magic_clean.profile_dsp import ProfileDspService, TrimResult
+from hear.services.magic_clean.quality import AudioQualityGate
 
 
 class DeepFilterNetCleaner:
     profile = "natural"
     engine = "deepfilternet3"
+    supported_profiles = frozenset(profile.value for profile in MagicCleanProfile)
     config_sha256 = "0a926b0471793d7ba7446b07a8bdc10eafa5c9e3b93de4d65496e2cbcacc40d3"
     checkpoint_sha256 = "23b92884f63ccf54bb026014604625ab231657b6480df65db4095c4c171e6003"
 
@@ -47,13 +54,16 @@ class DeepFilterNetCleaner:
         self._factory = PinnedDeepFilterFactory(assets)
         self._identity = self._factory.identity(self._policy.digest)
         self._engine = DeepFilterEngine(self._identity, self._factory, self._policy)
+        self._runner = CancellableProcessRunner()
+        self._dsp = ProfileDspService(self._runner)
+        self._mastering = AudioMasteringService(self._runner)
 
     def is_ready(self) -> bool:
         try:
             self._verify_file(self._assets.config_path, self.config_sha256)
             self._verify_file(self._assets.checkpoint_path, self.checkpoint_sha256)
             self._factory.validate_identity(self._identity)
-            return True
+            return self._dsp.is_ready()
         except Exception:
             return False
 
@@ -65,8 +75,9 @@ class DeepFilterNetCleaner:
         options: dict,
         deadline: datetime,
         timeout_seconds: float,
-    ) -> None:
-        remaining = max(1.0, (deadline - datetime.now(UTC)).total_seconds())
+    ) -> dict:
+        options = CleaningProfiles.validate(options)
+        remaining = (deadline - datetime.now(UTC)).total_seconds()
         guard = ResourceGuard(
             self._budget,
             workspace,
@@ -74,63 +85,93 @@ class DeepFilterNetCleaner:
             threading.Event(),
         )
         guard.bind_deadline(deadline)
+        guard.check_scratch()
+        if source.stat().st_size > self._budget.max_input_bytes:
+            raise CleanExecutionError(ErrorCode.RESOURCE_EXHAUSTED, "input exceeds byte limit")
         prepared = workspace / "deepfilter_input.wav"
+        conditioned = workspace / "deepfilter_conditioned.wav"
         processed = workspace / "deepfilter_output.wav"
-        self._run(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-v",
-                "error",
-                "-y",
-                "-i",
-                str(source),
-                "-vn",
-                "-ar",
-                "48000",
-                "-c:a",
-                "pcm_f32le",
-                str(prepared),
-            ],
-            timeout_seconds,
-        )
-        attenuation = int(options.get("attenuation_limit_db", 24))
-        if attenuation not in (12, 18, 24):
-            raise ValueError("invalid_deepfilter_attenuation_limit")
+        finished = workspace / "profile_output.wav"
+        self._dsp.render(source, prepared, [], guard, decode=True)
+        frames, channels = self._dsp.validate(prepared, guard)
+        guard.preflight_pcm(frames, channels, copies=5, output_bytes=frames * channels * 4)
+        original_measurement = self._mastering.measure(prepared, guard, frames / 48000)
+        preparation_filters = self._dsp.preparation_filters(options)
+        model_input = prepared
+        if preparation_filters:
+            self._dsp.render(prepared, conditioned, preparation_filters, guard)
+            model_input = conditioned
+        # Preserve the established pinned DeepFilterNet engine contract. User
+        # profiles select DSP and attenuation, never a substitute/fallback model.
         plan = CleanPlan(
             profile="natural",
-            profile_version="deepfilternet3-v1",
-            catalogue_sha256=hashlib.sha256(b"deepfilternet3-v1").hexdigest(),
+            profile_version=PROFILE_VERSION,
+            catalogue_sha256=hashlib.sha256(PROFILE_VERSION.encode()).hexdigest(),
             runtime=self._identity,
-            attenuation_limit_db=attenuation,
+            attenuation_limit_db=options["attenuation_limit_db"],
             prompt_sha256=None,
             channel_policy="preserve",
             mono_acknowledged=False,
-            adjust_loudness=False,
+            adjust_loudness=options["auto_level"],
             match_comparison_loudness=True,
             shorten_pauses=False,
             seed=0,
         )
         session = self._engine.open_session(plan, guard)
         try:
-            session.process(prepared, processed, plan, guard)
+            session.process(model_input, processed, plan, guard)
         finally:
             session.close()
-        self._run(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-v",
-                "error",
-                "-y",
-                "-i",
-                str(processed),
-                "-c:a",
-                "flac",
-                str(target),
-            ],
-            timeout_seconds,
-        )
+        AudioMasteringService.scan(processed, guard, rate=48000, channels=channels, frames=frames)
+        quality = AudioQualityGate().evaluate(model_input, processed, plan, guard)
+        finish_filters = self._dsp.finishing_filters(options)
+        master_input = processed
+        if finish_filters:
+            self._dsp.render(processed, finished, finish_filters, guard)
+            AudioMasteringService.scan(
+                finished, guard, rate=48000, channels=channels, frames=frames
+            )
+            master_input = finished
+        trim = TrimResult(0, frames, frames)
+        if options["trim_silence"]:
+            trimmed = workspace / "trimmed_output.wav"
+            trim = self._dsp.trim_edges(master_input, trimmed, guard)
+            master_input = trimmed
+        mastered = self._mastering.master(master_input, plan, guard)
+        delivery = workspace / "delivery_audio.mp3"
+        guard.check()
+        if target.exists() or delivery.exists():
+            raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "cleaning output already exists")
+        os.replace(mastered.master, target)
+        os.replace(mastered.delivery, delivery)
+        warnings = list(quality.warning_codes)
+        target_lufs = (-19.0 if channels == 1 else -16.0) if options["auto_level"] else None
+        measured_lufs = mastered.delivery_measurement.integrated_lufs
+        if target_lufs is not None and (
+            measured_lufs is None or abs(measured_lufs - target_lufs) > 1.0
+        ):
+            warnings.append("loudness_target_limited_by_headroom_or_measurement_gate")
+        if not options["auto_level"] and mastered.gain_db < 0:
+            warnings.append("linear_attenuation_applied_for_peak_safety")
+        return {
+            "engine": self.engine,
+            "profile": options["profile"],
+            "profile_version": PROFILE_VERSION,
+            "effective_options": {k: v for k, v in options.items() if k != "cleaner_ticket"},
+            "input_measurement": asdict(original_measurement),
+            "master_measurement": asdict(mastered.master_measurement),
+            "delivery_measurement": asdict(mastered.delivery_measurement),
+            "target_lufs": target_lufs,
+            "gain_db": mastered.gain_db,
+            "channels": channels,
+            "sample_rate": 48000,
+            "duration_seconds": mastered.frames / 48000,
+            "timeline": asdict(trim),
+            "warnings": warnings,
+            "technical_validation": "passed",
+            "perceptual_review_required": True,
+            "content_validation": quality.model_dump(mode="json"),
+        }
 
     def close(self) -> None:
         self._engine.close()
@@ -143,7 +184,3 @@ class DeepFilterNetCleaner:
                 digest.update(block)
         if digest.hexdigest() != expected:
             raise RuntimeError("deepfilter_asset_digest_mismatch")
-
-    @staticmethod
-    def _run(command: list[str], timeout_seconds: float) -> None:
-        subprocess.run(command, capture_output=True, check=True, timeout=timeout_seconds)
