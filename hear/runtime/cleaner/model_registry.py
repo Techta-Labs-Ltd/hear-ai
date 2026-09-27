@@ -45,7 +45,6 @@ class CertifiedRuntime:
 class EngineRegistry:
     PROFILES = {
         "deepfilternet3": "natural",
-        "sam_audio_base": "sam_audio",
     }
 
     def __init__(

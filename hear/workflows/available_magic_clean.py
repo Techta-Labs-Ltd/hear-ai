@@ -10,7 +10,7 @@ from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope, MagicCleanProfile
 from hear.contracts.outcomes import ExecutionOutcome
 from hear.execution.native import NativeExecutor
-from hear.services.magic_clean.contracts import CleanExecutionError
+from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 from hear.storage.b2 import B2StorageFactory
 
 
@@ -40,13 +40,22 @@ class AvailableMagicCleanWorkflow:
         sequence += 1
         try:
             source = await self._audio.download_source(str(envelope.source.url), workspace)
+            source_digest = await self._native.run(self._sha256, source)
+            if envelope.source.file_sha256 and source_digest != envelope.source.file_sha256:
+                raise CleanExecutionError(
+                    ErrorCode.SOURCE_MISMATCH, "downloaded source digest mismatch"
+                )
             yield self._event(envelope, sequence, "processing", 20, ExecutionEventType.STAGE)
             sequence += 1
             master = workspace.file("cleaned_master.flac")
             cleaner = self._model_cleaner
-            if cleaner is None or cleaner.profile != profile.value:
-                raise RuntimeError("magic_clean_model_engine_unavailable")
-            await self._native.run(
+            if cleaner is None or profile.value not in getattr(
+                cleaner, "supported_profiles", (cleaner.profile,)
+            ):
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE, "magic_clean_model_engine_unavailable"
+                )
+            clean_report = await self._native.run(
                 cleaner.clean,
                 source,
                 master,
@@ -57,7 +66,22 @@ class AvailableMagicCleanWorkflow:
             )
             engine = cleaner.engine
             delivery = workspace.file("delivery_audio.mp3")
-            encoded = await self._audio.encode_mp3(master, delivery, maximum_kbps=96)
+            if (
+                not isinstance(clean_report, dict)
+                or not delivery.is_file()
+                or not master.is_file()
+                or clean_report.get("technical_validation") != "passed"
+                or clean_report.get("profile") != profile.value
+                or clean_report.get("engine") != engine
+            ):
+                raise CleanExecutionError(
+                    ErrorCode.INVALID_AUDIO, "magic_clean_validated_delivery_missing"
+                )
+            delivery_digest = await self._native.run(self._sha256, delivery)
+            encoded = {
+                "sha256": delivery_digest,
+                "duration_seconds": clean_report["duration_seconds"],
+            }
             yield self._event(envelope, sequence, "uploading", 85, ExecutionEventType.STAGE)
             sequence += 1
             storage = self._storage_factory.create(envelope.storage)
@@ -77,6 +101,9 @@ class AvailableMagicCleanWorkflow:
                 content_type="audio/mpeg",
             )
             validation = {
+                **clean_report,
+                "source_sha256": source_digest,
+                "source_revision": envelope.source.revision,
                 "engine": engine,
                 "profile": profile.value,
                 "duration_seconds": encoded["duration_seconds"],

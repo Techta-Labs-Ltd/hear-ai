@@ -16,48 +16,8 @@ jobs:
       - run: uv run --project deploy/runtime ruff check hear tests scripts
       - run: uv run --project deploy/runtime mypy
       - run: uv run --project deploy/runtime python -m hear.tools.check_architecture
-      - run: >
-          uv run --project deploy/runtime python -m pytest
-          tests/test_architecture.py
-          tests/test_dependency_patches.py
-          tests/test_runtime_setup.py
-          tests/test_runtime_bootstrap_v2.py
-          tests/test_runtime_readiness_v2.py
-          tests/test_model_manifest_v2.py
-          tests/test_model_provisioning.py
-          tests/test_qwen_local_vad_v2.py
-          tests/test_cleaner_v2_path_cleanup.py
-          tests/test_cleaner_v2_runtime.py
-          tests/test_cleaner_v2_deepfilter_loader.py
-          tests/test_cleaner_v2_sam_loader.py
-          tests/test_cleaner_v2_factory.py
-          tests/test_cleaner_v2_executor.py
-          tests/test_cleaner_v2_resampling.py
-          tests/test_native_execution.py
-          tests/test_job_executor_v2.py
-          tests/test_pipeline_configuration.py
-          tests/test_pipeline_catalog_runtime_v2.py
-          tests/test_pipeline_workflow_v2.py
-          tests/test_transcription_workflow_v2.py
-          tests/test_magic_clean_workflow_v2.py
-          tests/test_audio_io_v2.py
-          tests/test_audio_workspace.py
-          tests/test_reconstruction_workflow_v2.py
-          tests/test_reconstruction_synthesizer.py
-          tests/test_content_context.py
-          tests/test_discovery.py
-          tests/test_moderation_context.py
-          tests/test_serverless_entrypoint.py
-          tests/test_serverless_runtime_v2.py
-          tests/test_pod_runtime_v2.py
-          tests/test_rabbitmq_runtime_v2.py
-          tests/test_cleaner_v2_contracts.py
-          tests/test_cleaner_v2_capabilities.py
-          tests/test_four_job_contracts.py
-          tests/test_queue_topology_v2.py
-          tests/test_docker_runtime_v2.py
-          tests/integration
-          -q
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libsox-dev
+      - run: uv run --project deploy/runtime python -m pytest tests tests/integration -q
   docker-images:
     needs: quality
     runs-on: ubuntu-latest
@@ -76,8 +36,6 @@ jobs:
           - reconstruction-serverless
           - magic-clean-natural-pod
           - magic-clean-natural-serverless
-          - magic-clean-sam-audio-pod
-          - magic-clean-sam-audio-serverless
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v4

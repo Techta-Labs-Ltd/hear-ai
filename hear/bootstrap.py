@@ -68,7 +68,6 @@ class RuntimeBootstrap:
         required_scratch_bytes = self._settings.min_free_scratch_bytes
         if role in {
             WorkerRole.MAGIC_CLEAN_NATURAL,
-            WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
         }:
             required_scratch_bytes = max(
                 required_scratch_bytes,
@@ -110,7 +109,6 @@ class RuntimeBootstrap:
             return self.reconstruction_executor()
         if role in {
             WorkerRole.MAGIC_CLEAN_NATURAL,
-            WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
         }:
             return self.magic_clean_executor(role)
         raise RuntimeError(f"unsupported_runtime_role:{role.value}")
@@ -381,7 +379,6 @@ class RuntimeBootstrap:
 
         if role not in {
             WorkerRole.MAGIC_CLEAN_NATURAL,
-            WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
         }:
             raise RuntimeError("unsupported_magic_clean_role")
         self._settings.required("cleaner_certification_path")
@@ -489,15 +486,6 @@ class RuntimeBootstrap:
                 self._magic_clean_budget(),
                 device=self._settings.magic_clean_model_device,
             )
-        elif role == WorkerRole.MAGIC_CLEAN_SAM_AUDIO:
-            from hear.runtime.cleaner.sam_available import SamAudioCleaner
-
-            model_cleaner = SamAudioCleaner(
-                self._model_root / "magic-clean" / "sam-audio-base",
-                self._model_root / "magic-clean" / "t5-base",
-                self._magic_clean_budget(),
-                device=self._settings.magic_clean_model_device,
-            )
         readiness = self.readiness(role)
         readiness.add_check("ffmpeg", self._ffmpeg_ready)
         if model_cleaner is not None:
@@ -553,7 +541,6 @@ class RuntimeBootstrap:
         return self._settings.optional_engine_mode == "available" and role in {
             WorkerRole.RECONSTRUCTION,
             WorkerRole.MAGIC_CLEAN_NATURAL,
-            WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
         }
 
     @staticmethod

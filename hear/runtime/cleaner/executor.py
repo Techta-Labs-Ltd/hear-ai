@@ -18,7 +18,6 @@ from hear.runtime.cleaner.metrics import StageTimings
 from hear.runtime.cleaner.model_registry import EngineRegistry
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.runtime.cleaner.s3_verification import S3SourceStager
-from hear.runtime.cleaner.sam_official import SamOfficialPipeline
 from hear.runtime.cleaner.worker_lease import WorkerLease
 from hear.services.magic_clean.artifacts import ArtifactWriter, LocalArtifact, PublishedBundle
 from hear.services.magic_clean.contracts import (
@@ -232,20 +231,7 @@ class CleanExecutor:
         )
         gpu_snapshot = None
         runtime = self.registry.certified_runtime(plan)
-        if plan.profile == "sam_audio":
-            SamOfficialPipeline.preflight(inspected.frames, inspected.sample_rate, guard)
-            engine_source = SamOfficialPipeline.prepare_input(
-                context.source,
-                guard.workspace / "sam_audio_mono.wav",
-                sample_rate=inspected.sample_rate,
-                channels=inspected.channels,
-                frames=inspected.frames,
-                channel_correlation=inspected.channel_correlation,
-                plan=plan,
-                guard=guard,
-            )
-        else:
-            engine_source = context.source
+        engine_source = context.source
         guard.check_scratch()
         self.worker_lease.assert_owned(self.worker_lease.lane)
         if runtime.lane == "gpu":

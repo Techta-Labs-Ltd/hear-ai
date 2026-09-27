@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -16,7 +17,13 @@ class GatewayEntrypoint:
     @staticmethod
     def roles() -> set[WorkerRole]:
         configured = os.environ.get("HEAR_POD_STACK_ROLES", WorkerRole.PIPELINE.value)
-        roles = {WorkerRole(item.strip()) for item in configured.split(",") if item.strip()}
+        names = {item.strip() for item in configured.split(",") if item.strip()}
+        if "magic_clean_sam_audio" in names:
+            logging.getLogger(__name__).warning(
+                "Ignoring retired SAM worker role; separation jobs are not remapped"
+            )
+            names.remove("magic_clean_sam_audio")
+        roles = {WorkerRole(item) for item in names}
         if not roles:
             raise RuntimeError("pod_stack_roles_required")
         return roles
@@ -30,6 +37,7 @@ class GatewayEntrypoint:
         gateway = PodGateway(
             runtime,
             os.environ.get("HEAR_POD_API_KEY", ""),
+            cleaning_mode=os.environ.get("HEAR_OPTIONAL_ENGINE_MODE", "available"),
             enable_docs=os.environ.get("HEAR_ENABLE_DOCS", "false").lower() == "true",
         )
 

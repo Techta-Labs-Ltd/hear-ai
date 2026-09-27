@@ -39,7 +39,7 @@ class AudioQualityGate:
         intervals: list[ContentWarningInterval] = []
         truncated = False
         with sf.SoundFile(source) as original, sf.SoundFile(processed) as output:
-            expected_channels = 1 if plan.profile == "sam_audio" else original.channels
+            expected_channels = original.channels
             if (
                 output.frames != original.frames
                 or output.samplerate != original.samplerate
@@ -50,7 +50,6 @@ class AudioQualityGate:
                     ErrorCode.INVALID_AUDIO, "engine output timeline or layout mismatch"
                 )
             frames = 0
-            target_detected = False
             while True:
                 guard.check()
                 before = original.read(32768, dtype="float64", always_2d=True)
@@ -70,47 +69,24 @@ class AudioQualityGate:
                     )
                 original_rms = np.sqrt(np.mean(before * before, axis=0))
                 output_rms = np.sqrt(np.mean(after * after, axis=0))
-                target_detected = target_detected or bool(np.max(output_rms) > 1e-8)
                 if np.max(original_rms) < 1e-8 and np.max(output_rms) > 1e-4:
                     raise CleanExecutionError(
                         ErrorCode.INVALID_AUDIO, "generated content on silent source"
                     )
-                if plan.profile == "natural":
-                    active = original_rms > 1e-4
-                    if np.any(active & (output_rms < original_rms * 0.01)):
-                        raise CleanExecutionError(
-                            ErrorCode.INVALID_AUDIO, "channel content disappeared"
-                        )
-                    if np.any(active & (output_rms < original_rms * 0.5)):
-                        warnings.add("possible_wanted_content_loss")
-                elif (
-                    plan.profile == "sam_audio"
-                    and plan.prompt_action == "isolate"
-                    and np.max(original_rms) > 1e-4
-                    and np.max(output_rms) < 1e-8
-                ):
-                    warnings.add("sam_audio_target_not_detected")
-                code: (
-                    Literal[
-                        "possible_wanted_content_loss",
-                        "sam_audio_target_not_detected",
-                    ]
-                    | None
-                ) = None
+                active_channels = original_rms > 1e-4
+                if np.any(active_channels & (output_rms < original_rms * 0.01)):
+                    raise CleanExecutionError(
+                        ErrorCode.INVALID_AUDIO, "channel content disappeared"
+                    )
+                code: Literal["possible_wanted_content_loss"] | None = None
                 ratio = 1.0
-                if plan.profile == "natural":
-                    if np.any(active):
-                        ratio = float(np.min(output_rms[active] / original_rms[active]))
-                        if ratio < 0.5:
-                            code = "possible_wanted_content_loss"
-                elif (
-                    plan.profile == "sam_audio"
-                    and plan.prompt_action == "isolate"
-                    and np.max(original_rms) > 1e-4
-                    and np.max(output_rms) < 1e-8
-                ):
-                    ratio = float(np.max(output_rms) / np.max(original_rms))
-                    code = "sam_audio_target_not_detected"
+                if np.any(active_channels):
+                    ratio = float(
+                        np.min(output_rms[active_channels] / original_rms[active_channels])
+                    )
+                    if ratio < 0.5:
+                        warnings.add("possible_wanted_content_loss")
+                        code = "possible_wanted_content_loss"
                 if code:
                     start = frames - len(before)
                     if (
@@ -140,12 +116,6 @@ class AudioQualityGate:
                         truncated = True
             if frames != original.frames:
                 raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "engine decode is incomplete")
-            if (
-                plan.profile == "sam_audio"
-                and plan.prompt_action == "isolate"
-                and not target_detected
-            ):
-                raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "no SAM Audio target detected")
         speech = None
         if self.speech is None:
             warnings.add("speech_activity_unavailable")

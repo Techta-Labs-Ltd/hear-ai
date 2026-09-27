@@ -54,9 +54,7 @@ class TestModelManifest:
             "fish-speech-s2-pro:permission_required",
             "dnsmos:review_required",
         )
-        assert manifest.license_blockers(WorkerRole.MAGIC_CLEAN_SAM_AUDIO) == (
-            "sam-audio-base:review_required",
-        )
+        assert all("sam-audio" not in model.logical_name for model in manifest.models)
 
     def test_manifest_json_has_unique_names_and_paths(self):
         payload = json.loads(Path("hear/model_manifest.json").read_text())

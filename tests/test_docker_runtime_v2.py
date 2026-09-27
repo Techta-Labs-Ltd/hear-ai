@@ -45,8 +45,6 @@ class TestDockerRuntime:
             "reconstruction-serverless",
             "magic-clean-natural-pod",
             "magic-clean-natural-serverless",
-            "magic-clean-sam-audio-pod",
-            "magic-clean-sam-audio-serverless",
         }
         docker_targets = set(re.findall(r"^FROM .* AS ([a-z][a-z0-9-]+)$", dockerfile, re.M))
         workflow_targets = set(
@@ -57,5 +55,7 @@ class TestDockerRuntime:
             )
         )
 
+        assert not any("sam-audio" in target for target in docker_targets)
+        assert not any("sam-audio" in target for target in workflow_targets)
         assert targets <= docker_targets
         assert targets <= workflow_targets

@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import importlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from hear.contracts.jobs import AttemptEnvelope
 from hear.queue.topology import RabbitMQTopology
 from hear.runtime.roles import WorkerRole
+
+
+class LaneStatus(TypedDict):
+    status: str
+    consumers: int
+    queued: int
+    queue_capacity: int
+    queue: str
 
 
 class GatewayUnavailable(RuntimeError):
@@ -153,7 +161,7 @@ class RabbitMQGateway:
         )
         return GatewayAttempt(envelope, reply_queue)
 
-    async def stream(self, attempt: GatewayAttempt) -> AsyncIterator[dict]:
+    async def stream(self, attempt: GatewayAttempt) -> AsyncGenerator[dict, None]:
         try:
             async with attempt.queue.iterator() as iterator:
                 async for message in iterator:
@@ -165,7 +173,7 @@ class RabbitMQGateway:
         finally:
             await attempt.close()
 
-    async def lane_status(self) -> dict[str, dict[str, object]]:
+    async def lane_status(self) -> dict[str, LaneStatus]:
         if self._channel is None or self._connection is None or self._connection.is_closed:
             return {
                 role.value: {
@@ -177,7 +185,7 @@ class RabbitMQGateway:
                 }
                 for role in self._roles
             }
-        result: dict[str, dict[str, object]] = {}
+        result: dict[str, LaneStatus] = {}
         for role in sorted(self._roles, key=lambda item: item.value):
             binding = self._topology.binding(role)
             try:
@@ -189,9 +197,9 @@ class RabbitMQGateway:
                 consumers = queue.declaration_result.consumer_count
                 queued = queue.declaration_result.message_count
                 result[role.value] = {
-                    "status": "draining" if self._draining else (
-                        "ready" if consumers > 0 else "loading"
-                    ),
+                    "status": "draining"
+                    if self._draining
+                    else ("ready" if consumers > 0 else "loading"),
                     "consumers": consumers,
                     "queued": queued,
                     "queue_capacity": self._topology.max_queue_messages,

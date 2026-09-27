@@ -15,7 +15,7 @@ Hear Backend
 Pod worker / Serverless handler -- canonical events as SSE --> Hear Backend
 ```
 
-The runtime supports four durable job types: `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Magic Clean has two production profiles: `natural` and `sam_audio`. Natural uses the pinned DeepFilterNet3 model for general denoising. SAM Audio accepts a text prompt describing a sound and returns either the residual with that sound removed or the isolated target. Reconstruction uses a disk-backed FFmpeg timeline. The backend owns durable job state, retries, routing, and client progress streams; this service does not connect to the application database or Redis.
+The runtime supports four durable job types: `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Magic Clean uses the pinned DeepFilterNet3 model with four one-click profiles: `natural`, `studio_voice`, `outdoor_mobile`, and `clean_raw`. SAM-Audio is no longer supported. See [DeepFilterNet cleaning profiles](docs/DEEPFILTER_CLEANING_PROFILES.md) for processing, options, validation and migration. Reconstruction uses a disk-backed FFmpeg timeline. The backend owns durable job state, retries, routing, and client progress streams; this service does not connect to the application database or Redis.
 
 The Pod accepts authenticated `AttemptEnvelope` requests at `POST /v1/attempts/stream`, publishes them to a durable RabbitMQ role queue, and streams queued and canonical execution events as SSE. Its local worker consumes that queue, claims attempts through the backend, and executes them. RabbitMQ is local to the Pod, and its AMQP listener binds to loopback. Serverless workers use RunPod dispatch and emit the same canonical events; they do not use RabbitMQ. The backend persists events, outcomes, and user-facing progress. The Pod also exposes `/healthz`, `/readyz`, `/capabilities`, `/metrics`, and `/drain`.
 
@@ -45,7 +45,7 @@ Start with [.env.example](.env.example) and provide deployment values through th
 - `HEAR_SERVERLESS_MAX_CONCURRENT_JOBS` (defaults to `1` per Serverless worker)
 - `HEAR_HOST_JOB_LOCK_PATH` for the Pod-wide active job permit
 - `HEAR_API_MAX_BODY_BYTES` for bounded attempt request bodies
-- `HEAR_OPTIONAL_ENGINE_MODE=available` to run Natural with DeepFilterNet3 and prompt-driven separation with SAM Audio Base, or `certified` for certificate-gated model engines
+- `HEAR_OPTIONAL_ENGINE_MODE=available` to run all DeepFilterNet profiles, or `certified` for the legacy Natural certificate-gated workflow
 - `HEAR_MAGIC_CLEAN_MODEL_DEVICE=cuda:0` for the installed Magic Clean model engines
 - `HEAR_CLEANER_CERTIFICATION_PATH` for Magic Clean workers
 
@@ -77,17 +77,14 @@ uv run --project deploy/runtime --no-sync python -m hear.tools.model_provisionin
 
 In Serverless endpoint environment settings, use the values from `runpod-serverless.env.example` and attach a network volume in the same data center. Provision Serverless weights separately under `/runpod-volume/hear-ai-v11/models`; the Pod's `/models` directory is on its temporary container root and is not shared. Model provisioning is an explicit step; the worker image runs in Hugging Face offline mode and will not download weights at startup. Use a network volume for Serverless provisioning because the downloader uses atomic file replacement and Hugging Face cache locks; Runpod documents that its global volume does not provide file locks or atomic rename. Network volumes pin the endpoint to their data center. Keep `/tmp/hear-ai-audio` for per-job scratch; completed workflows remove their attempt directory, and the worker container disk is temporary.
 
-Provision the actual Magic Clean engines outside worker startup:
+Provision the Magic Clean engine outside worker startup:
 
 ```bash
-/opt/hear-ai-v11/venvs/magic_clean_sam_audio/bin/python \
+/opt/hear-ai-v11/venvs/magic_clean_natural/bin/python \
   scripts/provision_magic_clean_models.py --model-root /models --engine deepfilter
-HF_TOKEN=<accepted-hugging-face-token> \
-  /opt/hear-ai-v11/venvs/magic_clean_sam_audio/bin/python \
-  scripts/provision_magic_clean_models.py --model-root /models --engine sam
 ```
 
-The SAM command requires an account with accepted access to `facebook/sam-audio-base`. The provisioner verifies every pinned file hash before atomically replacing an installed model directory.
+The provisioner verifies pinned file hashes before replacing the model directory.
 
 Set the endpoint’s initial active workers and concurrency to one while measuring GPU and RAM use. Add workers only after confirming the chosen GPU can hold the selected role’s loaded models and concurrent jobs. Pipeline LLM use also reads `QWEN_LLM_GPU_MEMORY_UTILIZATION`; its default is `0.75`.
 
@@ -104,13 +101,9 @@ For an image that uses an optional pipeline feature, pass its feature explicitly
 python -m hear.tools.model_provisioning --role pipeline --feature qwen_llm --model-root /models
 ```
 
-Provision the pinned SAM Audio Base and T5 assets for the prompt-driven SAM Audio role with:
-
-```bash
-python -m hear.tools.model_provisioning --role magic_clean_sam_audio --model-root /models
-```
-
-Magic Clean assets are certified separately and referenced by the JSON file configured in `HEAR_CLEANER_CERTIFICATION_PATH`. Workers fail readiness when required local assets or runtime checks are unavailable.
+The optional certified Natural workflow requires a pinned Natural-only certificate.
+New cleaning presets use available mode and measured output validation; see the
+[profile migration guide](docs/DEEPFILTER_CLEANING_PROFILES.md).
 
 ## Run locally
 
@@ -148,23 +141,24 @@ scripts/run_pod_stack.sh
 
 Set backend credentials and the Pod API key in `/root/hear-ai-v11/runtime.env` before starting the process. The launcher prefers that root-owned environment file and falls back to the repository `.env` when it is absent. The API is the only web listener on port 8000. It authenticates the request, selects the RabbitMQ queue from `job_type` and the Magic Clean profile, and streams worker events over the same SSE connection. Role processes are queue consumers and do not expose HTTP ports. Pod environments use `/opt/hear-ai-v11/venvs/<role>` and Serverless environments use `/opt/hear-ai-v11/venvs/<role>-serverless`; no backend worker ID is needed to submit a job.
 
-The default role list starts pipeline, reconstruction, Natural, and SAM Audio consumers. The pipeline worker also handles transcription requests without loading Qwen twice. Available mode runs the pinned DeepFilterNet3 checkpoint for Natural and the official SAM Audio Base Python API for prompt-driven separation. The stack exits when any child worker exits so the Pod supervisor can restart the complete process set.
+The default role list starts pipeline, reconstruction, and the DeepFilterNet Natural
+consumer. All four cleaning profiles use this one consumer and its existing queue.
+Remove the retired SAM worker role from deployment environment settings.
 
-Natural accepts `attenuation_limit_db` as `12`, `18`, or `24` and is the correct profile for recording hiss, steady background noise, and speech denoising. SAM Audio requires `prompt`, accepts `action` as `remove` or `isolate`, accepts `prompt_mode` as `ambient` or `event`, and accepts a deterministic `seed`. The action and prompt mode default to `remove` and `ambient`. Ambient mode generates two candidates and selects one with the official CLAP text ranker. Event mode uses the official PE Audio Frame span predictor. Use a short lowercase noun or verb phrase naming one sound source, such as `background music`, `dog barking`, or `singing voice`.
-
-The Magic Clean portion of an attempt request uses one of these option objects:
+The Magic Clean portion of an attempt request accepts, for example:
 
 ```json
-{"profile":"natural","attenuation_limit_db":24}
+{"profile":"studio_voice","auto_level":true,"remove_clicks":false,"trim_silence":false}
 ```
 
 ```json
-{"profile":"sam_audio","prompt":"background music","action":"remove","prompt_mode":"ambient","seed":0}
+{"profile":"clean_raw"}
 ```
 
-For SAM Audio, the prompt names the target sound. `remove` returns everything except that target; `isolate` returns only that target. An isolated noise target is not expected to contain speech. If the requested isolated target is not audible in the source, the attempt returns `target_not_detected` and publishes no audio artifact.
-
-SAM Audio processes up to 75 seconds in one context window and uses 5-second overlap for longer inputs. Removal results are rejected if the residual collapses active source audio for two continuous seconds. Isolated targets are checked in one-second windows against an audible absolute and source-relative floor. These checks prevent collapsed residuals and absent targets from being published as successful output.
+Legacy `natural` requests still accept `attenuation_limit_db` as 12, 18 or 24.
+The new profiles use real preset DSP and produce a measured FLAC master, MP3 and
+validation report. All candidates require approval; originals are retained.
+[Full profile/API and deployment guide](docs/DEEPFILTER_CLEANING_PROFILES.md).
 
 Available reconstruction supports `remove_segments` directly. `replace_segments`, `edit_transcript`, and `preview` accept ordered changes containing `segment_start`, `segment_end`, and either `is_deletion=true` or `replacement_audio_url`. `rebuild` accepts `rendered_audio_url`. Text-to-speech voice cloning remains part of certified reconstruction.
 

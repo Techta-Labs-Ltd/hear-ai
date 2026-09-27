@@ -46,7 +46,7 @@ def test_factory_does_not_probe_load_or_contact_store(configuration):
 def test_readiness_tracks_worker_retirement_and_close(configuration):
     worker = CleanerWorkerFactory.build(**configuration)
     try:
-        assert [p["ready"] for p in worker.capabilities()["profiles"]] == [True, False]
+        assert [p["ready"] for p in worker.capabilities()["profiles"]] == [True]
         worker.executor.worker_lease.mark_unhealthy()
         profile = worker.capabilities()["profiles"][0]
         assert not profile["ready"]

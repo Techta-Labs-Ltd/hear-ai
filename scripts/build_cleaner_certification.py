@@ -12,7 +12,7 @@ from hear.runtime.cleaner.asset_probe import PinnedAssetProbe
 class CleanerCertificationBuilder:
     MAX_DRAFT_BYTES = 64 * 1024
     MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
-    PROFILES = ("natural", "sam_audio")
+    PROFILES = ("natural",)
 
     @classmethod
     def build(cls, *, draft_path: Path, output_path: Path) -> dict:
