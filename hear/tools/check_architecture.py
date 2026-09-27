@@ -3,6 +3,21 @@ import argparse
 import ast
 from pathlib import Path
 
+FORBIDDEN_IMPORT_PREFIXES = frozenset(
+    {
+        "ray",
+        "grpc",
+        "sqlalchemy",
+        "psycopg",
+        "psycopg2",
+        "asyncpg",
+        "redis",
+        "hear.proto",
+        "hear.deployments",
+        "hear.orchestrator",
+    }
+)
+
 
 class ArchitectureChecker:
     def __init__(self, root: Path):
@@ -25,6 +40,7 @@ class ArchitectureChecker:
             allows_lazy_imports = relative in {
                 Path("hear/bootstrap.py"),
                 Path("hear/inference/fish_speech.py"),
+                Path("hear/inference/magic_clean.py"),
                 Path("hear/inference/text_generation.py"),
             }
             executable_seen = False
@@ -41,6 +57,30 @@ class ArchitectureChecker:
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not is_utility:
                     violations.append(f"{relative}:{node.lineno}: standalone function {node.name}")
             for owner in ast.walk(tree):
+                imported_modules: list[str] = []
+                if isinstance(owner, ast.Import):
+                    imported_modules.extend(alias.name for alias in owner.names)
+                elif isinstance(owner, ast.ImportFrom) and owner.module:
+                    imported_modules.append(owner.module)
+                elif isinstance(owner, ast.Call):
+                    function = owner.func
+                    is_dynamic_import = isinstance(function, ast.Attribute) and (
+                        function.attr == "import_module"
+                    )
+                    if (
+                        is_dynamic_import
+                        and owner.args
+                        and isinstance(owner.args[0], ast.Constant)
+                        and isinstance(owner.args[0].value, str)
+                    ):
+                        imported_modules.append(owner.args[0].value)
+                for module in imported_modules:
+                    if any(
+                        module == prefix or module.startswith(prefix + ".")
+                        for prefix in FORBIDDEN_IMPORT_PREFIXES
+                    ):
+                        line = getattr(owner, "lineno", 0)
+                        violations.append(f"{relative}:{line}: forbidden legacy import {module}")
                 if isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     for descendant in ast.walk(owner):
                         if (

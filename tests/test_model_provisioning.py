@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from hear.inference.manifest import ModelManifest
 from hear.runtime.roles import WorkerRole
 from hear.tools.model_provisioning import ModelProvisioner
@@ -10,22 +12,33 @@ def test_role_provisioner_requests_only_selected_models(monkeypatch, tmp_path):
     manifest_path.write_text(
         """
 {
+  "manifest_version": 1,
   "models": [
     {
-      "name": "asr",
+      "logical_name": "asr",
       "repo_id": "example/asr",
       "revision": "1111111111111111111111111111111111111111",
       "relative_path": "asr",
       "roles": ["transcription", "pipeline"],
-      "required_files": ["config.json"]
+      "required_files": ["config.json"],
+      "engine_adapter": "test_asr",
+      "provenance_url": "https://example.com/asr",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://example.com/asr/license"
     },
     {
-      "name": "tts",
+      "logical_name": "tts",
       "repo_id": "example/tts",
       "revision": "2222222222222222222222222222222222222222",
       "relative_path": "tts",
       "roles": ["reconstruction"],
-      "required_files": ["config.json"]
+      "required_files": ["config.json"],
+      "engine_adapter": "test_tts",
+      "provenance_url": "https://example.com/tts",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://example.com/tts/license"
     }
   ]
 }
@@ -61,13 +74,13 @@ def test_real_manifest_role_sets_are_isolated():
     manifest = ModelManifest(Path("hear/model_manifest.json"))
 
     transcription = {
-        item.name for item in manifest.models_for(WorkerRole.TRANSCRIPTION)
+        item.logical_name for item in manifest.models_for(WorkerRole.TRANSCRIPTION)
     }
     reconstruction = {
-        item.name for item in manifest.models_for(WorkerRole.RECONSTRUCTION)
+        item.logical_name for item in manifest.models_for(WorkerRole.RECONSTRUCTION)
     }
     pipeline = {
-        item.name for item in manifest.models_for(WorkerRole.PIPELINE)
+        item.logical_name for item in manifest.models_for(WorkerRole.PIPELINE)
     }
 
     assert transcription == {"qwen3-asr-1.7b", "qwen3-forced-aligner"}
@@ -80,9 +93,11 @@ def test_real_manifest_role_sets_are_isolated():
 def test_optional_pipeline_llm_is_not_default():
     manifest = ModelManifest(Path("hear/model_manifest.json"))
 
-    default = {item.name for item in manifest.models_for(WorkerRole.PIPELINE)}
+    default = {
+        item.logical_name for item in manifest.models_for(WorkerRole.PIPELINE)
+    }
     enabled = {
-        item.name
+        item.logical_name
         for item in manifest.models_for(
             WorkerRole.PIPELINE,
             enabled_features=frozenset({"qwen_llm"}),
@@ -91,3 +106,14 @@ def test_optional_pipeline_llm_is_not_default():
 
     assert "qwen2.5-7b-instruct" not in default
     assert "qwen2.5-7b-instruct" in enabled
+
+
+def test_unapproved_model_license_blocks_provisioning_before_network_access(tmp_path):
+    manifest = ModelManifest(Path("hear/model_manifest.json"))
+    model_root = tmp_path / "models"
+    provisioner = ModelProvisioner(manifest, model_root)
+
+    with pytest.raises(RuntimeError, match="model license approval required"):
+        provisioner.provision(WorkerRole.RECONSTRUCTION)
+
+    assert not model_root.exists()

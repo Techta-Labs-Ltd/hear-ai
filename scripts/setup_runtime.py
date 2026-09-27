@@ -1,32 +1,77 @@
 import argparse
+import os
 import shutil
 import subprocess
 from pathlib import Path
+
+ROLE_GROUPS = {
+    "pipeline": "pipeline",
+    "transcription": "transcription",
+    "reconstruction": "reconstruction",
+    "magic_clean_natural": "magic-clean-natural",
+    "magic_clean_sam_audio": "magic-clean-sam-audio",
+}
 
 
 class RuntimeSetup:
     @staticmethod
     def main() -> int:
         parser = argparse.ArgumentParser(
-            description="Install locked dependencies and apply pinned patches"
+            description="Install a locked Hear AI role environment and apply its dependency patches"
         )
+        parser.add_argument("--role", choices=ROLE_GROUPS, required=True)
+        parser.add_argument("--provider", choices=("pod", "serverless"), default="pod")
+        parser.add_argument("--feature", choices=("qwen_llm",), action="append", default=[])
         parser.add_argument("--check", action="store_true")
         parser.add_argument("--no-dev", action="store_true")
         args = parser.parse_args()
+        if args.feature and args.role != "pipeline":
+            parser.error("qwen_llm is available only for the pipeline role")
+
         root = Path(__file__).resolve().parents[1]
+        project = root / "deploy" / "runtime"
+        environment = dict(os.environ)
+        suffix = args.role if args.provider == "pod" else f"{args.role}-serverless"
+        environment.setdefault("UV_PROJECT_ENVIRONMENT", f"/opt/hear-ai-v11/venvs/{suffix}")
         uv = shutil.which("uv")
         if uv is None:
             parser.exit(1, "uv must be installed before runtime setup\n")
+
         try:
             if not args.check:
-                install = [uv, "sync", "--locked"]
-                if args.no_dev:
-                    install.append("--no-dev")
-                subprocess.run(install, cwd=root, check=True)
-            command = [uv, "run", "--no-sync", "python", "-m", "hear.tools.dependency_patches"]
-            if args.check:
-                command.append("--check")
-            subprocess.run(command, cwd=root, check=True)
+                install = [
+                    uv,
+                    "sync",
+                    "--project",
+                    str(project),
+                    "--locked",
+                    "--no-default-groups",
+                    "--group",
+                    ROLE_GROUPS[args.role],
+                    "--group",
+                    args.provider,
+                ]
+                if not args.no_dev:
+                    install.extend(("--group", "dev"))
+                for feature in args.feature:
+                    if feature == "qwen_llm":
+                        install.extend(("--group", "pipeline-llm"))
+                subprocess.run(install, cwd=root, check=True, env=environment)
+
+            if args.role in {"pipeline", "transcription"}:
+                command = [
+                    uv,
+                    "run",
+                    "--project",
+                    str(project),
+                    "--no-sync",
+                    "python",
+                    "-m",
+                    "hear.tools.dependency_patches",
+                ]
+                if args.check:
+                    command.append("--check")
+                subprocess.run(command, cwd=root, check=True, env=environment)
         except subprocess.CalledProcessError as exc:
             return exc.returncode
         return 0

@@ -33,7 +33,7 @@ class AudioInspection:
 
 class SourceInspector:
     BLOCK_FRAMES = 32768
-    FORMATS = frozenset({"WAV", "WAVEX", "RF64", "FLAC", "MPEG", "OGG"})
+    FORMATS = frozenset({"WAV", "WAVEX", "RF64", "FLAC", "MP3", "MPEG", "OGG"})
 
     @staticmethod
     def inspect(path: Path, expected: SourceIdentity, guard: ResourceGuard) -> AudioInspection:

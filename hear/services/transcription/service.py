@@ -7,7 +7,7 @@ import soundfile as sf
 from scipy.signal import resample_poly
 
 from hear.config import settings
-from hear.core.blocking import AsyncCompletion
+from hear.execution.native import NativeExecutor
 from hear.utils.transcription_chunks import (
     adaptive_batch_size,
     append_shifted_result,
@@ -75,6 +75,7 @@ class TranscriptionService:
         chunk_seconds: int = 60,
         batch_size: int = 36,
         long_audio_batch_size: int = 4,
+        native: NativeExecutor | None = None,
     ):
         if not 1 <= chunk_seconds <= 600 or batch_size < 1 or long_audio_batch_size < 1:
             raise ValueError("invalid_transcription_window_policy")
@@ -82,6 +83,7 @@ class TranscriptionService:
         self._chunk_seconds = chunk_seconds
         self._batch_size = batch_size
         self._long_audio_batch_size = long_audio_batch_size
+        self._native = native
 
     @staticmethod
     def _read_window(source, frames: int):
@@ -111,8 +113,11 @@ class TranscriptionService:
             frames = source.samplerate * self._chunk_seconds
             while source.tell() < source.frames:
                 offset = source.tell() / source.samplerate
-                samples = await AsyncCompletion.run_blocking_to_completion(
-                    partial(self._read_window, source, frames)
+                operation = partial(self._read_window, source, frames)
+                samples = (
+                    await self._native.run(self._read_window, source, frames)
+                    if self._native is not None
+                    else await NativeExecutor.run_blocking_to_completion(operation)
                 )
                 result = await self._model_client.transcribe_window(
                     samples, batch_size, language or "en"

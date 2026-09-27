@@ -1,4 +1,3 @@
-from .rabbitmq import RabbitMQConsumer
-from .topology import QueueBinding, RabbitMQTopology
+from hear.queue.topology import QueueBinding, RabbitMQTopology
 
-__all__ = ["QueueBinding", "RabbitMQConsumer", "RabbitMQTopology"]
+__all__ = ["QueueBinding", "RabbitMQTopology"]

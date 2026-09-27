@@ -53,6 +53,7 @@ class ReconstructionWorkflow:
                 operation,
                 source,
                 storage,
+                workspace,
             )
             yield self._event(
                 envelope,
@@ -98,6 +99,7 @@ class ReconstructionWorkflow:
         operation: ReconstructionOperation,
         source: Path,
         storage: ReconstructionStorageAdapter,
+        workspace: AudioWorkspace,
     ) -> dict:
         same_speaker = bool(envelope.options.get("same_speaker", True))
         if operation in {
@@ -115,7 +117,7 @@ class ReconstructionWorkflow:
                 storage,
                 same_speaker=same_speaker,
                 job_id=envelope.job_id,
-                run_id=envelope.run_id,
+                workspace=workspace,
             )
         elif operation == ReconstructionOperation.REBUILD:
             edited_transcript = str(envelope.options.get("edited_transcript") or "").strip()
@@ -128,6 +130,7 @@ class ReconstructionWorkflow:
                 envelope.job_id,
                 storage,
                 original_transcript=str(envelope.options.get("original_transcript") or ""),
+                workspace=workspace,
             )
         elif operation == ReconstructionOperation.REMOVE_SEGMENTS:
             start = envelope.options.get("segment_start")
@@ -141,6 +144,7 @@ class ReconstructionWorkflow:
                 float(end),
                 storage,
                 envelope.job_id,
+                workspace=workspace,
             )
         else:
             raise ValueError("unsupported_reconstruction_operation")

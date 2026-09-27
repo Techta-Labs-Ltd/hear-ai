@@ -11,8 +11,8 @@ from hear.workflows.transcription import TranscriptionWorkflow
 
 
 class FakeAudio:
-    async def download_to_wav(self, url, workspace, preserve_channels=True):
-        path = workspace.file("source.wav")
+    async def download_source(self, url, workspace):
+        path = workspace.file("source.audio")
         path.write_bytes(b"wav")
         return path
 

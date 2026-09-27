@@ -6,7 +6,12 @@ from hear.contracts.jobs import AttemptEnvelope
 from hear.execution.native import NativeExecutor
 from hear.runtime.cleaner.resource_guard import ResourceBudget
 from hear.services.magic_clean.artifacts import PublishedBundle, StoredObject
-from hear.services.magic_clean.contracts import CleanResultManifest
+from hear.services.magic_clean.contracts import (
+    CleanExecutionError,
+    CleanResultManifest,
+    ErrorCode,
+)
+from hear.workflows.available_magic_clean import AvailableMagicCleanWorkflow
 from hear.workflows.magic_clean import MagicCleanWorkflow
 
 
@@ -192,3 +197,42 @@ def test_magic_clean_workflow_maps_cleaner_bundle(monkeypatch, tmp_path):
         "stage",
         "outcome",
     ]
+
+
+def test_available_magic_clean_returns_target_not_detected_outcome(tmp_path):
+    class Audio:
+        async def download_source(self, url, workspace):
+            source = workspace.file("source.wav")
+            source.write_bytes(b"audio")
+            return source
+
+    class Cleaner:
+        profile = "natural"
+
+        def clean(self, *args):
+            raise CleanExecutionError(
+                ErrorCode.TARGET_NOT_DETECTED,
+                "SAM Audio target was not detected in the source",
+            )
+
+    native = NativeExecutor("available-magic-clean-test")
+    workflow = AvailableMagicCleanWorkflow(
+        Audio(),
+        SimpleNamespace(),
+        native,
+        workspace_root=tmp_path,
+        timeout_seconds=30,
+        model_cleaner=Cleaner(),
+    )
+
+    async def run():
+        result = [item async for item in workflow.stream(envelope())]
+        await native.close()
+        return result
+
+    events = asyncio.run(run())
+    outcome = events[-1].data["outcome"]
+    assert outcome["status"] == "failed"
+    assert outcome["error_code"] == "target_not_detected"
+    assert outcome["artifacts"] == []
+    assert [item.event.value for item in events] == ["started", "stage", "outcome"]

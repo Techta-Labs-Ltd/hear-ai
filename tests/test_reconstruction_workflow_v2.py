@@ -81,7 +81,7 @@ class Synthesizer:
             "bucket",
         )
 
-    async def remove_segment(self, source, track_id, start, end, storage, job_id):
+    async def remove_segment(self, source, track_id, start, end, storage, job_id, *, workspace=None):
         self.calls.append(("remove", start, end))
         return Result(
             "prefix/reconstructed/job.mp3",

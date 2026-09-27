@@ -107,37 +107,26 @@ class AudioIO:
         source: Path,
         target: Path,
         *,
-        bitrate_kbps: int,
-    ) -> dict:
+        maximum_kbps: int = 96,
+    ) -> dict[str, str | int | float]:
+        if maximum_kbps < 1:
+            raise ValueError("invalid_mp3_bitrate")
+        bitrate = await self._native.run(
+            self._delivery_bitrate_kbps,
+            source,
+            maximum_kbps,
+            self._decode_timeout_seconds,
+        )
         return await self._native.run(
             self._encode_mp3,
             source,
             target,
-            bitrate_kbps,
+            bitrate,
+            self._decode_timeout_seconds,
         )
 
     @staticmethod
-    def _encode_mp3(
-        source: Path,
-        target: Path,
-        bitrate_kbps: int,
-    ) -> dict:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-v",
-                "error",
-                "-y",
-                "-i",
-                str(source),
-                "-b:a",
-                f"{bitrate_kbps}k",
-                str(target),
-            ],
-            capture_output=True,
-            check=True,
-        )
+    def _probe(path: Path, timeout_seconds: float) -> dict:
         completed = subprocess.run(
             [
                 "ffprobe",
@@ -147,24 +136,81 @@ class AudioIO:
                 "format=duration,size,bit_rate,format_name",
                 "-of",
                 "json",
-                str(target),
+                str(path),
             ],
             capture_output=True,
             check=True,
             text=True,
+            timeout=timeout_seconds,
         )
-        payload = json.loads(completed.stdout).get("format") or {}
-        digest = hashlib.sha256()
-        with target.open("rb") as stream:
-            while chunk := stream.read(1024 * 1024):
-                digest.update(chunk)
-        return {
-            "duration_seconds": float(payload.get("duration") or 0.0),
-            "size_bytes": int(payload.get("size") or target.stat().st_size),
-            "bitrate_bps": int(payload.get("bit_rate") or 0),
-            "format": str(payload.get("format_name") or ""),
-            "sha256": digest.hexdigest(),
-        }
+        return (json.loads(completed.stdout).get("format") or {})
+
+    @classmethod
+    def _delivery_bitrate_kbps(
+        cls,
+        source: Path,
+        maximum_kbps: int,
+        timeout_seconds: float,
+    ) -> int:
+        info = cls._probe(source, timeout_seconds)
+        source_kbps = int(info.get("bit_rate") or 0) / 1000
+        formats = set(str(info.get("format_name") or "").split(","))
+        if source_kbps <= 0 or formats.intersection({"wav", "aiff", "flac"}):
+            return maximum_kbps
+        target = min(maximum_kbps, int(source_kbps * 0.8))
+        return next(
+            (rate for rate in (96, 80, 64, 56, 48, 40, 32, 24) if rate <= target),
+            min(maximum_kbps, 24),
+        )
+
+    def _encode_mp3(
+        self,
+        source: Path,
+        target: Path,
+        bitrate_kbps: int,
+        timeout_seconds: float,
+    ) -> dict[str, str | int | float]:
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-vn",
+                    "-b:a",
+                    f"{bitrate_kbps}k",
+                    str(target),
+                ],
+                capture_output=True,
+                check=True,
+                timeout=timeout_seconds,
+            )
+            source_info = AudioIO._probe(source, timeout_seconds)
+            output_info = AudioIO._probe(target, timeout_seconds)
+            source_duration = float(source_info.get("duration") or 0.0)
+            output_duration = float(output_info.get("duration") or 0.0)
+            tolerance = max(0.1, source_duration * 0.001)
+            if abs(output_duration - source_duration) > tolerance:
+                raise RuntimeError("encoded_audio_duration_mismatch")
+            digest = hashlib.sha256()
+            with target.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+            return {
+                "duration_seconds": output_duration,
+                "size_bytes": int(output_info.get("size") or target.stat().st_size),
+                "bitrate_bps": int(output_info.get("bit_rate") or 0),
+                "bitrate_kbps": bitrate_kbps,
+                "format": str(output_info.get("format_name") or ""),
+                "sha256": digest.hexdigest(),
+            }
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
 
     def _convert_to_wav(
         self,

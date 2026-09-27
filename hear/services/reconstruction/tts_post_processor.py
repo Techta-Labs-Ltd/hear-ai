@@ -6,9 +6,9 @@ import pyloudnorm as pyln
 import torch
 import torchaudio
 
-from hear.services.magic_clean.processing.silence import SilenceProcessor
 from hear.services.reconstruction.audio_buffer import AudioBuffer
 from hear.services.reconstruction.dnsmos import DNSMOSScorer
+from hear.services.reconstruction.silence import SilenceProcessor
 
 logger = logging.getLogger(__name__)
 

@@ -4,18 +4,18 @@ import hashlib
 import importlib.metadata
 import os
 import pickle
+import tempfile
 import threading
 import time
 import weakref
 from dataclasses import replace
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 
 from hear.runtime.cleaner.deepfilter_loader import (
-    LoadedDeepFilter,
+    LoadedDeepFilterRuntime,
     PinnedDeepFilterAssets,
     PinnedDeepFilterFactory,
 )
@@ -115,7 +115,7 @@ def test_environment_cannot_override_pinned_config(key, monkeypatch):
     parser.read("deploy/cleaner/deepfilter3.ini")
     monkeypatch.setenv(key, "unexpected")
     with pytest.raises(CleanExecutionError) as error:
-        PinnedDeepFilterFactory.verify_environment(SimpleNamespace(parser=parser))
+        PinnedDeepFilterFactory.verify_environment(parser)
     assert error.value.code == ErrorCode.ENGINE_UNAVAILABLE
 
 
@@ -124,7 +124,7 @@ def test_unrelated_environment_is_not_modified(monkeypatch):
     parser.read_string("[df]\nsr = 48000\n")
     monkeypatch.delenv("SR", raising=False)
     monkeypatch.setenv("HEAR_SERVICE_KEY", "private-value")
-    PinnedDeepFilterFactory.verify_environment(SimpleNamespace(parser=parser))
+    PinnedDeepFilterFactory.verify_environment(parser)
     assert os.environ["HEAR_SERVICE_KEY"] == "private-value"
 
 
@@ -208,16 +208,15 @@ def test_inference_fault_closes_model_and_does_not_retain_native_traceback(
     lease.acquire()
     model = Model()
     reference = weakref.ref(model)
-    backend = LoadedDeepFilter(
+    runtime = LoadedDeepFilterRuntime(
         model,
-        lambda **kw: object(),
         {},
         broken,
         lease,
-        guard,
-        SimpleNamespace(parser=configparser.ConfigParser()),
+        tempfile.TemporaryDirectory(),
         device,
     )
+    backend = runtime.borrow(guard)
     del model
     with pytest.raises(CleanExecutionError) as error:
         backend.enhance(np.zeros((1, 512), dtype=np.float32), 18)

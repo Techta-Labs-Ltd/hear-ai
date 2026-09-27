@@ -12,6 +12,7 @@ import soundfile as sf
 
 from hear.runtime.cleaner.executor import ExecutionContext, PublishedExecutionError
 from hear.runtime.cleaner.factory import CleanerWorkerFactory
+from hear.runtime.cleaner.gpu_admission import DeviceMemorySnapshot, GpuAdmissionController
 from hear.runtime.cleaner.model_registry import CertifiedRuntime
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
 from hear.runtime.cleaner.s3_verification import S3SourceStager
@@ -29,6 +30,11 @@ from tests.test_cleaner_v2_contracts import ticket as ticket_fixture
 from tests.test_cleaner_v2_source_staging import SourceClient
 
 ticket = ticket_fixture
+
+
+class AvailableGpuProbe:
+    def snapshot(self, device_index):
+        return DeviceMemorySnapshot(24_000_000_000, 0, 24_000_000_000)
 
 
 def test_executor_publishes_speech_evidence_in_manifest_and_report(execution):
@@ -94,6 +100,7 @@ def test_restart_required_fault_publishes_no_candidate_and_blocks_next_admission
 )
 def test_session_cleanup_failure_retires_worker_and_preserves_primary_code(execution, primary_code):
     executor, context, engine, store = execution
+    original_close = engine.close
     if primary_code is not None:
 
         def fail_processing(*args):
@@ -129,6 +136,7 @@ def test_session_cleanup_failure_retires_worker_and_preserves_primary_code(execu
     with pytest.raises(CleanExecutionError) as retired:
         executor.worker_lease.assert_owned("gpu")
     assert retired.value.worker_restart_required
+    engine.close = original_close
 
 
 class Authorizer:
@@ -195,7 +203,16 @@ def execution(tmp_path, ticket):
     ticket["deadline"] = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
     parsed = AttemptTicket.model_validate_json(json.dumps(ticket))
     engine = FakeEngine(parsed.plan.runtime)
-    certified = CertifiedRuntime(parsed.plan.runtime, "c" * 64, 48000, len(data), (48000,), (2,), "gpu")
+    certified = CertifiedRuntime(
+        parsed.plan.runtime,
+        "c" * 64,
+        48000,
+        len(data),
+        (48000,),
+        (2,),
+        "gpu",
+        1_000_000_000,
+    )
     store = MemoryStore()
     worker = CleanerWorkerFactory.build(
         lock_directory=tmp_path,
@@ -204,6 +221,7 @@ def execution(tmp_path, ticket):
         loaders={"deepfilternet3": lambda: engine},
         readiness={"deepfilternet3": lambda identity: identity == engine.identity},
         store=store,
+        gpu_admission=GpuAdmissionController(AvailableGpuProbe(), safety_reserve_bytes=0),
     )
     guard = ResourceGuard(
         ResourceBudget(20_000_000, 5_000_000, 100000),
@@ -252,26 +270,30 @@ def test_full_attempt_runs_real_inspection_mastering_and_manifest(execution):
     assert "master-0" not in json.dumps(report)
 
 
-def test_sam_scratch_preflight_precedes_registry_and_model_loading(execution, monkeypatch):
+def test_uncertified_sam_runtime_is_rejected_before_registry_and_model_loading(
+    execution, monkeypatch
+):
     executor, context, engine, _ = execution
+    prompt = "background noise"
     values = context.ticket.plan.model_dump()
     values.update(
-        profile="voice_focus",
+        profile="sam_audio",
         attenuation_limit_db=None,
-        prompt_sha256="a" * 64,
+        prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+        prompt_text=prompt,
         channel_policy="mono",
         mono_acknowledged=True,
     )
-    values["runtime"]["engine"] = "sam_audio_small"
+    values["runtime"]["engine"] = "sam_audio_base"
     plan = CleanPlan.model_validate(values)
 
     def forbidden(*args, **kwargs):
         pytest.fail("registry loaded before impossible SAM scratch reservation was rejected")
 
     monkeypatch.setattr(executor.registry, "load", forbidden)
-    with pytest.raises(CleanExecutionError, match="minimum codec scratch") as error:
+    with pytest.raises(CleanExecutionError, match="requested runtime is not certified") as error:
         executor._execute_verified(plan, context)
-    assert error.value.code == ErrorCode.RESOURCE_EXHAUSTED
+    assert error.value.code == ErrorCode.ENGINE_UNAVAILABLE
     assert not engine.closed
     assert context.progress.stages == ["inspecting"]
 

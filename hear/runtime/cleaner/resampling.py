@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from hear.runtime.cleaner.path_cleanup import AttemptPathCleanup, OwnedFileIdentity
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
@@ -42,26 +43,19 @@ class AudioResampler:
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "resample path outside workspace")
         if destination.exists():
             raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "resample output already exists")
-        published = None
+        published: OwnedFileIdentity | None = None
         try:
             with tempfile.TemporaryDirectory(prefix="resample-", dir=guard.workspace) as directory:
                 staged = Path(directory) / "output.wav"
                 self._convert_owned(source, staged, target_rate, guard, exact_frames=exact_frames)
                 guard.check()
-                stat = staged.stat()
+                published = AttemptPathCleanup.identity(staged)
                 os.link(staged, destination)
-                published = (stat.st_dev, stat.st_ino)
                 staged.unlink()
             guard.check()
         except BaseException as exc:
             if published is not None:
-                try:
-                    stat = destination.lstat()
-                except FileNotFoundError:
-                    pass
-                else:
-                    if (stat.st_dev, stat.st_ino) == published:
-                        destination.unlink()
+                AttemptPathCleanup.remove_if_owned(destination, published, exc)
             if isinstance(exc, FileExistsError):
                 raise CleanExecutionError(
                     ErrorCode.ARTIFACT_CONFLICT, "resample output already exists"
@@ -177,7 +171,7 @@ class AudioResampler:
                             ErrorCode.INVALID_AUDIO, "non-finite resample output"
                         )
         except BaseException as exc:
-            destination.unlink(missing_ok=True)
+            AttemptPathCleanup.remove_private(destination, exc)
             if isinstance(exc, (OSError, ValueError, RuntimeError)) and not isinstance(
                 exc, CleanExecutionError
             ):

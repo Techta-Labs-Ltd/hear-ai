@@ -1,34 +1,17 @@
 from __future__ import annotations
 
 import hashlib
-import tempfile
-import threading
-import time
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hear.runtime.cleaner.deepfilter_loader import (
-    PinnedDeepFilterAssets,
-    PinnedDeepFilterFactory,
-)
-from hear.runtime.cleaner.factory import CleanerWorker, CleanerWorkerFactory
+from hear.runtime.cleaner.asset_probe import PinnedAssetProbe, PinnedAssetSet
+from hear.runtime.cleaner.factory import CleanerWorker
 from hear.runtime.cleaner.model_registry import CertifiedRuntime
-from hear.runtime.cleaner.noise_reference import SpeechAwareNoiseReferenceAnalyser
-from hear.runtime.cleaner.resampling import AudioResampler
-from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
-from hear.runtime.cleaner.sam_loader import PinnedSamAssets, PinnedSamFactory
-from hear.runtime.cleaner.sam_prompt_cache import SamPromptCache, SamPromptIdentity
-from hear.runtime.cleaner.speech_activity import CpuSpeechActivity, SpeechActivityPolicy
-from hear.runtime.cleaner.speech_risk import SpeechRiskComparison
-from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
 from hear.runtime.roles import WorkerRole
 from hear.services.magic_clean.artifacts import StoredObject
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
-from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepFilterEngine
-from hear.services.magic_clean.engines.noise_profile import NoiseProfileEngine
-from hear.services.magic_clean.engines.sam_audio import SamEngine
 
 
 class StrictModel(BaseModel):
@@ -36,11 +19,13 @@ class StrictModel(BaseModel):
 
 
 class RuntimeLimits(StrictModel):
+    evidence_path: str = Field(min_length=1, max_length=4096)
     evidence_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     max_frames: int = Field(gt=0)
     max_input_bytes: int = Field(gt=0)
     sample_rates: tuple[int, ...]
     channels: tuple[Literal[1, 2], ...]
+    certified_peak_device_bytes: int = Field(ge=0)
 
 
 class NaturalCertification(StrictModel):
@@ -55,44 +40,34 @@ class NaturalCertification(StrictModel):
     context_frames: int = Field(ge=4800, le=240000)
 
 
-class SpeechCertification(StrictModel):
-    model_path: str
-    model_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    onnxruntime_version: str
-    numpy_version: str
-    threshold: float = Field(gt=0, lt=1)
-
-
-class MusicCertification(StrictModel):
+class SamAudioCertification(StrictModel):
     limits: RuntimeLimits
-    speech: SpeechCertification
-
-
-class PromptCertification(StrictModel):
-    path: str
-    prompt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    model_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    precision_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    embedding_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    mask_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    tokens: int = Field(ge=1, le=512)
-
-
-class VoiceFocusCertification(StrictModel):
-    limits: RuntimeLimits
-    sam_source: str
-    codec_source: str
+    license_review_approved: bool
     config_path: str
+    config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     checkpoint_path: str
-    optional_manifest_path: str
-    prompt: PromptCertification
+    checkpoint_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    text_encoder_path: str
+    text_config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    text_tokenizer_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    text_sentencepiece_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    text_weights_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    ranker_checkpoint_path: str
+    ranker_checkpoint_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    span_predictor_path: str
+    span_config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    span_weights_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    span_preprocessor_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    span_special_tokens_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    span_tokenizer_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    span_tokenizer_config_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    dependency_cache_path: str
     device: Literal["cpu", "cuda:0"]
 
 
 class CleanerCertifications(StrictModel):
     natural: NaturalCertification | None = None
-    voice_focus: VoiceFocusCertification | None = None
-    music_atmosphere: MusicCertification | None = None
+    sam_audio: SamAudioCertification | None = None
 
 
 class DisabledArtifactStore:
@@ -105,22 +80,31 @@ class MagicCleanRuntimeFactory:
         self,
         certification_path: Path,
         lock_directory: Path,
+        expected_certification_sha256: str,
     ) -> None:
         self._certification_path = certification_path
         self._lock_directory = lock_directory
-        self._certifications = CleanerCertifications.model_validate_json(
-            certification_path.read_text()
+        if (
+            not isinstance(expected_certification_sha256, str)
+            or len(expected_certification_sha256) != 64
+            or any(value not in "0123456789abcdef" for value in expected_certification_sha256)
+        ):
+            raise ValueError("cleaner certification requires a pinned SHA-256")
+        payload = PinnedAssetProbe.read_regular(
+            certification_path,
+            maximum_bytes=64 * 1024,
         )
+        if hashlib.sha256(payload).hexdigest() != expected_certification_sha256:
+            raise RuntimeError("magic_clean_certification_digest_mismatch")
+        self._certifications = CleanerCertifications.model_validate_json(payload)
         self._owned: list[object] = []
 
     def build(self, role: WorkerRole) -> CleanerWorker:
         self._lock_directory.mkdir(parents=True, exist_ok=True)
         if role == WorkerRole.MAGIC_CLEAN_NATURAL:
             return self._build_natural()
-        if role == WorkerRole.MAGIC_CLEAN_VOICE_FOCUS:
-            return self._build_voice_focus()
-        if role == WorkerRole.MAGIC_CLEAN_MUSIC_ATMOSPHERE:
-            return self._build_music()
+        if role == WorkerRole.MAGIC_CLEAN_SAM_AUDIO:
+            return self._build_sam_audio()
         raise RuntimeError("unsupported_magic_clean_role")
 
     def close(self) -> None:
@@ -131,6 +115,14 @@ class MagicCleanRuntimeFactory:
         self._owned.clear()
 
     def _build_natural(self) -> CleanerWorker:
+        from hear.runtime.cleaner.deepfilter_loader import (
+            PinnedDeepFilterAssets,
+            PinnedDeepFilterFactory,
+        )
+        from hear.runtime.cleaner.factory import CleanerWorkerFactory
+        from hear.runtime.cleaner.gpu_admission import GpuAdmissionController, NvidiaSmiMemoryProbe
+        from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepFilterEngine
+
         cert = self._certifications.natural
         if cert is None:
             raise RuntimeError("magic_clean_natural_not_certified")
@@ -141,6 +133,12 @@ class MagicCleanRuntimeFactory:
             cert.checkpoint_sha256,
             cert.package_versions,
             cert.device,
+        )
+        pinned_assets = PinnedAssetSet(
+            (
+                (assets.config_path, assets.config_sha256, 1024 * 1024),
+                (assets.checkpoint_path, assets.checkpoint_sha256, None),
+            )
         )
         policy = ContextualPolicy(cert.block_frames, cert.context_frames)
         factory = PinnedDeepFilterFactory(assets)
@@ -153,8 +151,8 @@ class MagicCleanRuntimeFactory:
         def ready(candidate):
             if candidate != identity:
                 return False
-            self._verify_file(Path(cert.config_path), cert.config_sha256)
-            self._verify_file(Path(cert.checkpoint_path), cert.checkpoint_sha256)
+            pinned_assets.verify()
+            PinnedAssetProbe.packages(cert.package_versions)
             factory.validate_identity(identity)
             return True
 
@@ -165,63 +163,75 @@ class MagicCleanRuntimeFactory:
             loaders={"deepfilternet3": loader},
             readiness={"deepfilternet3": ready},
             store=DisabledArtifactStore(),
+            gpu_admission=(
+                GpuAdmissionController(NvidiaSmiMemoryProbe()) if cert.device == "cuda:0" else None
+            ),
         )
 
-    def _build_music(self) -> CleanerWorker:
-        cert = self._certifications.music_atmosphere
+    def _build_sam_audio(self) -> CleanerWorker:
+        from hear.runtime.cleaner.factory import CleanerWorkerFactory
+        from hear.runtime.cleaner.gpu_admission import GpuAdmissionController, NvidiaSmiMemoryProbe
+        from hear.runtime.cleaner.sam_loader import PinnedSamAssets, PinnedSamBaseFactory
+        from hear.services.magic_clean.engines.sam_audio import SamEngine
+
+        cert = self._certifications.sam_audio
         if cert is None:
-            raise RuntimeError("magic_clean_music_atmosphere_not_certified")
-        speech = self._speech(cert.speech)
-        analyser = SpeechAwareNoiseReferenceAnalyser(speech)
-        identity = NoiseProfileEngine.describe(analyser)
-        runtime = self._runtime(cert.limits, identity, "cpu")
-
-        def loader():
-            return NoiseProfileEngine(identity, analyser)
-
-        def ready(candidate):
-            return candidate == identity
-
-        risk = SpeechRiskComparison(speech)
-        self._owned.append(speech)
-        return CleanerWorkerFactory.build(
-            lock_directory=self._lock_directory,
-            lane="cpu",
-            runtimes=(runtime,),
-            loaders={"noise_profile": loader},
-            readiness={"noise_profile": ready},
-            store=DisabledArtifactStore(),
-            speech=risk,
-        )
-
-    def _build_voice_focus(self) -> CleanerWorker:
-        cert = self._certifications.voice_focus
-        if cert is None:
-            raise RuntimeError("magic_clean_voice_focus_not_certified")
-        prompt = SamPromptIdentity(
-            prompt_sha256=cert.prompt.prompt_sha256,
-            model_sha256=cert.prompt.model_sha256,
-            precision_sha256=cert.prompt.precision_sha256,
-            embedding_sha256=cert.prompt.embedding_sha256,
-            mask_sha256=cert.prompt.mask_sha256,
-            tokens=cert.prompt.tokens,
-        )
-        cache = SamPromptCache.from_files(((prompt, Path(cert.prompt.path)),))
+            raise RuntimeError("magic_clean_sam_audio_not_certified")
+        if not cert.license_review_approved:
+            raise RuntimeError("magic_clean_sam_audio_license_review_required")
         assets = PinnedSamAssets(
-            Path(cert.sam_source),
-            Path(cert.codec_source),
             Path(cert.config_path),
             Path(cert.checkpoint_path),
-            Path(cert.optional_manifest_path),
+            Path(cert.text_encoder_path),
+            (
+                ("config.json", cert.text_config_sha256),
+                ("tokenizer.json", cert.text_tokenizer_sha256),
+                ("spiece.model", cert.text_sentencepiece_sha256),
+                ("model.safetensors", cert.text_weights_sha256),
+            ),
+            Path(cert.ranker_checkpoint_path),
+            cert.ranker_checkpoint_sha256,
+            Path(cert.span_predictor_path),
+            (
+                ("config.json", cert.span_config_sha256),
+                ("model.safetensors", cert.span_weights_sha256),
+                ("preprocessor_config.json", cert.span_preprocessor_sha256),
+                ("special_tokens_map.json", cert.span_special_tokens_sha256),
+                ("tokenizer.json", cert.span_tokenizer_sha256),
+                ("tokenizer_config.json", cert.span_tokenizer_config_sha256),
+            ),
+            Path(cert.dependency_cache_path),
         )
-        factory = PinnedSamFactory(
+        if cert.config_sha256 != PinnedSamBaseFactory.CONFIG_SHA256:
+            raise RuntimeError("magic_clean_sam_audio_config_mismatch")
+        if cert.checkpoint_sha256 != PinnedSamBaseFactory.CHECKPOINT:
+            raise RuntimeError("magic_clean_sam_audio_checkpoint_mismatch")
+        factory = PinnedSamBaseFactory(
             assets,
-            prompt,
-            cache,
             device=cert.device,
+            text_encoder_identity=assets.text_identity,
+        )
+        pinned_assets = PinnedAssetSet(
+            (
+                (assets.config, PinnedSamBaseFactory.CONFIG_SHA256, 1024 * 1024),
+                (assets.checkpoint, PinnedSamBaseFactory.CHECKPOINT, None),
+                *(
+                    (assets.text_directory / filename, digest, None)
+                    for filename, digest in assets.text_hashes
+                ),
+                (assets.ranker_checkpoint, assets.ranker_sha256, None),
+                *(
+                    (assets.span_directory / filename, digest, None)
+                    for filename, digest in assets.span_hashes
+                ),
+            )
         )
         identity = factory.identity
-        runtime = self._runtime(cert.limits, identity)
+        runtime = self._runtime(
+            cert.limits,
+            identity,
+            "gpu" if cert.device == "cuda:0" else "cpu",
+        )
 
         def loader():
             return SamEngine(identity, factory)
@@ -229,46 +239,23 @@ class MagicCleanRuntimeFactory:
         def ready(candidate):
             if candidate != identity:
                 return False
-            self._verify_file(Path(cert.checkpoint_path), PinnedSamFactory.CHECKPOINT)
+            pinned_assets.verify()
+            if not assets.dependency_cache_directory.is_dir():
+                return False
             factory.validate_identity(identity)
             return True
 
-        self._owned.append(cache)
         return CleanerWorkerFactory.build(
             lock_directory=self._lock_directory,
             lane="gpu" if cert.device == "cuda:0" else "cpu",
             runtimes=(runtime,),
-            loaders={"sam_audio_small": loader},
-            readiness={"sam_audio_small": ready},
+            loaders={"sam_audio_base": loader},
+            readiness={"sam_audio_base": ready},
             store=DisabledArtifactStore(),
+            gpu_admission=(
+                GpuAdmissionController(NvidiaSmiMemoryProbe()) if cert.device == "cuda:0" else None
+            ),
         )
-
-    def _speech(self, cert: SpeechCertification) -> CpuSpeechActivity:
-        model = Path(cert.model_path)
-        self._verify_file(model, cert.model_sha256)
-        policy = SpeechActivityPolicy(
-            cert.model_sha256,
-            cert.onnxruntime_version,
-            cert.numpy_version,
-            cert.threshold,
-        )
-        with tempfile.TemporaryDirectory(prefix="hear-speech-bootstrap-") as directory:
-            guard = ResourceGuard(
-                ResourceBudget(
-                    64 * 1024 * 1024,
-                    32 * 1024 * 1024,
-                    16_000 * 60,
-                ),
-                Path(directory),
-                time.monotonic() + 60,
-                threading.Event(),
-            )
-            return CpuSpeechActivity(
-                model,
-                policy,
-                AudioResampler(CancellableProcessRunner()),
-                guard,
-            )
 
     @staticmethod
     def _runtime(
@@ -276,6 +263,11 @@ class MagicCleanRuntimeFactory:
         identity,
         lane: Literal["cpu", "gpu"],
     ) -> CertifiedRuntime:
+        PinnedAssetProbe.sha256(
+            Path(limits.evidence_path),
+            limits.evidence_sha256,
+            maximum_bytes=16 * 1024 * 1024,
+        )
         return CertifiedRuntime(
             identity,
             limits.evidence_sha256,
@@ -284,15 +276,9 @@ class MagicCleanRuntimeFactory:
             limits.sample_rates,
             limits.channels,
             lane,
+            limits.certified_peak_device_bytes,
         )
 
     @staticmethod
     def _verify_file(path: Path, expected: str) -> None:
-        if path.is_symlink() or not path.is_file():
-            raise RuntimeError("certified_asset_missing")
-        digest = hashlib.sha256()
-        with path.open("rb") as source:
-            while chunk := source.read(1024 * 1024):
-                digest.update(chunk)
-        if digest.hexdigest() != expected:
-            raise RuntimeError("certified_asset_mismatch")
+        PinnedAssetProbe.sha256(path, expected)

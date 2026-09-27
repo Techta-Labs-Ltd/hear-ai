@@ -10,7 +10,11 @@ fi
 # Parse dotenv syntax instead of sourcing the file as shell code. This keeps
 # JSON values such as BACKEND_REGISTRY_JSON intact and avoids shell expansion
 # of credentials containing punctuation.
-eval "$(ENV_FILE="$dotenv_path" uv run --no-project python - <<'PY'
+parser_python="${HEAR_ENV_PARSER_PYTHON:-/opt/hear-ai-v11/venvs/pipeline/bin/python}"
+if [[ ! -x "$parser_python" ]]; then
+  parser_python=python
+fi
+eval "$(ENV_FILE="$dotenv_path" "$parser_python" - <<'PY'
 import os
 import re
 import shlex

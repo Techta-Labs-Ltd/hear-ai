@@ -1,8 +1,5 @@
-from types import SimpleNamespace
-
 import pytest
 
-from hear.services.moderation import service as moderation_module
 from hear.services.moderation.service import ModerationService
 
 
@@ -17,13 +14,8 @@ class Models:
 
 
 @pytest.mark.anyio
-async def test_non_harmful_content_is_not_flagged(monkeypatch):
-    monkeypatch.setattr(
-        moderation_module,
-        "harm_keyword_loader",
-        SimpleNamespace(harm_keywords=[]),
-    )
-    result = await ModerationService(Models()).moderate(
+async def test_non_harmful_content_is_not_flagged():
+    result = await ModerationService(Models(), harm_keywords=()).moderate(
         "We will shoot the music video tomorrow"
     )
     assert result["flagged"] is False

@@ -13,11 +13,12 @@ from typing import Protocol
 
 import soundfile as sf
 
+from hear.runtime.cleaner.gpu_admission import GpuAdmissionController
 from hear.runtime.cleaner.metrics import StageTimings
 from hear.runtime.cleaner.model_registry import EngineRegistry
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.runtime.cleaner.s3_verification import S3SourceStager
-from hear.runtime.cleaner.sam_pipeline import SamSeparationPipeline
+from hear.runtime.cleaner.sam_official import SamOfficialPipeline
 from hear.runtime.cleaner.worker_lease import WorkerLease
 from hear.services.magic_clean.artifacts import ArtifactWriter, LocalArtifact, PublishedBundle
 from hear.services.magic_clean.contracts import (
@@ -90,6 +91,7 @@ class CleanExecutor:
         masterer: AudioMasteringService,
         artifacts: ArtifactWriter,
         worker_lease: WorkerLease,
+        gpu_admission: GpuAdmissionController | None = None,
     ):
         self.inspector = inspector
         self.registry = registry
@@ -97,6 +99,7 @@ class CleanExecutor:
         self.masterer = masterer
         self.artifacts = artifacts
         self.worker_lease = worker_lease
+        self.gpu_admission = gpu_admission
 
     @staticmethod
     def _close_session(session: EngineSession, primary_code: ErrorCode) -> None:
@@ -180,7 +183,7 @@ class CleanExecutor:
                 context.progress.transition(context.ticket, "downloading")
                 with context.timings.measure("download"):
                     stager.stage(context.ticket, context.source, context.guard)
-                context.check()
+                context.guard.check_scratch()
             return self._execute_verified(plan, context, artifacts)
         except CleanExecutionError as error:
             if error.worker_restart_required:
@@ -190,6 +193,7 @@ class CleanExecutor:
             if error.code not in (
                 ErrorCode.PROCESS_FAILED,
                 ErrorCode.INVALID_AUDIO,
+                ErrorCode.TARGET_NOT_DETECTED,
                 ErrorCode.SOURCE_MISMATCH,
                 ErrorCode.ENGINE_UNAVAILABLE,
                 ErrorCode.RESOURCE_EXHAUSTED,
@@ -199,9 +203,7 @@ class CleanExecutor:
                 context.check()
                 context.authorizer.verify(context.ticket)
                 with context.timings.measure("upload"):
-                    bundle = artifacts.publish_failure(
-                        context.ticket, error.code, context.guard
-                    )
+                    bundle = artifacts.publish_failure(context.ticket, error.code, context.guard)
             except Exception:
                 # Finalization must not hide the original typed processing error.
                 raise error from None
@@ -228,10 +230,32 @@ class CleanExecutor:
             copies=6,
             output_bytes=ticket.input.size_bytes + 262144,
         )
-        if plan.runtime.engine == "sam_audio_small":
-            SamSeparationPipeline.preflight(inspected.frames, inspected.sample_rate, guard)
-        context.check()
+        gpu_snapshot = None
+        runtime = self.registry.certified_runtime(plan)
+        if plan.profile == "sam_audio":
+            SamOfficialPipeline.preflight(inspected.frames, inspected.sample_rate, guard)
+            engine_source = SamOfficialPipeline.prepare_input(
+                context.source,
+                guard.workspace / "sam_audio_mono.wav",
+                sample_rate=inspected.sample_rate,
+                channels=inspected.channels,
+                frames=inspected.frames,
+                channel_correlation=inspected.channel_correlation,
+                plan=plan,
+                guard=guard,
+            )
+        else:
+            engine_source = context.source
+        guard.check_scratch()
         self.worker_lease.assert_owned(self.worker_lease.lane)
+        if runtime.lane == "gpu":
+            if self.gpu_admission is None:
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE,
+                    "GPU cleaner admission is not configured",
+                )
+            gpu_snapshot = self.gpu_admission.admit(runtime)
+            context.check()
         with context.timings.measure("loading"):
             engine = self.registry.load(
                 plan,
@@ -251,8 +275,8 @@ class CleanExecutor:
         primary_code = ErrorCode.PROCESS_FAILED
         try:
             with context.timings.measure("inference"):
-                session.process(context.source, processed, plan, guard)
-                context.check()
+                session.process(engine_source, processed, plan, guard)
+                guard.check_scratch()
         except CleanExecutionError as error:
             primary_code = error.code
             raise
@@ -268,10 +292,25 @@ class CleanExecutor:
         context.progress.transition(ticket, "mastering")
         with context.timings.measure("mastering"):
             mastered = self.masterer.master(sample, plan, guard)
-        context.check()
+        guard.check_scratch()
         report = guard.workspace / "validation_report.json"
         payload = {
             "stage_seconds_before_publication": context.timings.snapshot(),
+            "resources": {
+                "scratch_peak_bytes": guard.scratch_peak_bytes,
+                "scratch_budget_bytes": guard.budget.scratch_bytes,
+                "gpu_admission": (
+                    {
+                        "certified_peak_device_bytes": runtime.certified_peak_device_bytes,
+                        "safety_reserve_bytes": self.gpu_admission.safety_reserve_bytes,
+                        "device_total_bytes": gpu_snapshot.total_bytes,
+                        "device_used_bytes_at_admission": gpu_snapshot.used_bytes,
+                        "device_free_bytes_at_admission": gpu_snapshot.free_bytes,
+                    }
+                    if gpu_snapshot is not None and self.gpu_admission is not None
+                    else None
+                ),
+            },
             "validation": validation.model_dump(mode="json"),
             "source": asdict(inspected),
             "master": {

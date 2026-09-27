@@ -11,10 +11,21 @@ from hear.workflows.pipeline import PipelineWorkflow
 
 
 class FakeAudio:
-    async def download_to_wav(self, url, workspace, preserve_channels=True):
-        path = workspace.file("source.wav")
+    async def download_source(self, url, workspace):
+        path = workspace.file("source.audio")
         path.write_bytes(b"wav")
         return path
+
+    async def encode_mp3(self, source, target, *, maximum_kbps=96):
+        target.write_bytes(b"mp3")
+        return {
+            "duration_seconds": 2.0,
+            "size_bytes": 3,
+            "bitrate_bps": maximum_kbps * 1000,
+            "bitrate_kbps": maximum_kbps,
+            "format": "mp3",
+            "sha256": "b" * 64,
+        }
 
 
 class FakeTranscriber:
@@ -55,11 +66,19 @@ class FakeCategorizer:
 
 class FakeDiscovery:
     async def build_profile(self, *args, **kwargs):
-        return None
+        return {
+            "title_suggestion": "Local community news",
+            "summary_short": "A local news update.",
+            "one_line_description": "Local news.",
+            "entities": {},
+        }
 
 
 class FakeStorage:
     bucket_name = "bucket"
+
+    def __init__(self):
+        self.uploaded_json = None
 
     def key(self, *parts):
         return "users/user-1/" + "/".join(parts)
@@ -75,6 +94,7 @@ class FakeStorage:
         )
 
     def upload_json(self, payload, key):
+        self.uploaded_json = payload
         return ArtifactManifest(
             bucket_name="bucket",
             object_key=key,
@@ -86,8 +106,11 @@ class FakeStorage:
 
 
 class FakeStorageFactory:
+    def __init__(self):
+        self.storage = FakeStorage()
+
     def create(self, context):
-        return FakeStorage()
+        return self.storage
 
 
 def envelope():
@@ -118,23 +141,18 @@ def envelope():
 @pytest.mark.anyio
 async def test_pipeline_streams_all_core_stages(tmp_path: Path):
     native = NativeExecutor("pipeline-test")
+    storage_factory = FakeStorageFactory()
     workflow = PipelineWorkflow(
         FakeTranscriber(),
         FakeModerator(),
         FakeCategorizer(),
         FakeDiscovery(),
         FakeAudio(),
-        FakeStorageFactory(),
+        storage_factory,
         native,
         workspace_root=tmp_path,
     )
 
-    async def fake_encode(source, attempt, workspace):
-        target = workspace.file("source.mp3")
-        target.write_bytes(b"mp3")
-        return target
-
-    workflow._encode = fake_encode
     events = [event async for event in workflow.stream(envelope())]
     await native.close()
     stages = [event.stage for event in events]
@@ -147,3 +165,7 @@ async def test_pipeline_streams_all_core_stages(tmp_path: Path):
     outcome = events[-1].data["outcome"]
     assert outcome["status"] == "completed"
     assert outcome["result"]["pipeline_manifest"]["object_key"].endswith("pipeline.json")
+    assert storage_factory.storage.uploaded_json["discovery"]["title_suggestion"] == (
+        "Local community news"
+    )
+    assert storage_factory.storage.uploaded_json["content_description"] == "Local news."

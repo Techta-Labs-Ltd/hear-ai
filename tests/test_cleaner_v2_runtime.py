@@ -133,9 +133,11 @@ def test_reservation_uses_all_channels_and_copies(tmp_path):
         guard.preflight_pcm(1000, 2, 3, 100)
 
 
-def test_gpu_cap_cannot_be_raised():
-    with pytest.raises(ValueError):
-        ResourceBudget(1, 1, 1, gpu_limit_bytes=12 * 1024**3)
+def test_resource_budget_contains_only_host_resource_limits():
+    budget = ResourceBudget(1, 1, 1)
+    assert not hasattr(budget, "gpu_limit_bytes")
+    assert not hasattr(budget, "gpu_target_bytes")
+    assert not hasattr(budget, "gpu_allocator_cap_bytes")
 
 
 def test_child_failure_does_not_expose_diagnostics(tmp_path):

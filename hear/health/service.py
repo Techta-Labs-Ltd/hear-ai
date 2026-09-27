@@ -16,12 +16,14 @@ class RuntimeReadiness:
         patch_manager: Any,
         *,
         enabled_features: frozenset[str] = frozenset(),
+        require_manifest_models: bool = True,
     ) -> None:
         self._role = role
         self._manifest = manifest
         self._model_root = model_root
         self._patch_manager = patch_manager
         self._enabled_features = enabled_features
+        self._require_manifest_models = require_manifest_models
         self._patch_required = role in {WorkerRole.PIPELINE, WorkerRole.TRANSCRIPTION}
         self._patch_verified = not self._patch_required
         self._patch_error: str | None = None
@@ -47,10 +49,22 @@ class RuntimeReadiness:
         self._initialized = True
 
     def snapshot(self) -> dict:
-        missing_models = self._manifest.validate_local(
-            self._model_root,
-            self._role,
-            enabled_features=self._enabled_features,
+        missing_models = (
+            self._manifest.validate_local(
+                self._model_root,
+                self._role,
+                enabled_features=self._enabled_features,
+            )
+            if self._require_manifest_models
+            else ()
+        )
+        license_blockers = (
+            self._manifest.license_blockers(
+                self._role,
+                enabled_features=self._enabled_features,
+            )
+            if self._require_manifest_models
+            else ()
         )
         capability = WorkerCapabilityRegistry().get(self._role)
         check_results: dict[str, bool] = {}
@@ -66,6 +80,7 @@ class RuntimeReadiness:
             and not self._draining
             and self._patch_verified
             and not missing_models
+            and not license_blockers
             and all(check_results.values())
         )
         status = "draining" if self._draining else ("ready" if ready else "loading")
@@ -82,6 +97,7 @@ class RuntimeReadiness:
             "patch_verified": self._patch_verified,
             "patch_error": self._patch_error,
             "missing_models": list(missing_models),
+            "license_blockers": list(license_blockers),
             "features": sorted(self._enabled_features),
             "checks": check_results,
             "check_errors": check_errors,

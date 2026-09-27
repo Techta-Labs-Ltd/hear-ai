@@ -25,3 +25,15 @@ class TestArchitecture:
         assert any(
             "import after executable code" in item for item in ArchitectureChecker(tmp_path).check()
         )
+
+    def test_checker_rejects_legacy_runtime_imports(self, tmp_path):
+        (tmp_path / "main.py").write_text(
+            "import ray.serve\n"
+            "from sqlalchemy.orm import Session\n"
+            "import importlib\n"
+            "importlib.import_module('hear.proto.pipeline_pb2')\n"
+        )
+        violations = ArchitectureChecker(tmp_path).check()
+        assert any("forbidden legacy import ray.serve" in item for item in violations)
+        assert any("forbidden legacy import sqlalchemy.orm" in item for item in violations)
+        assert any("forbidden legacy import hear.proto.pipeline_pb2" in item for item in violations)

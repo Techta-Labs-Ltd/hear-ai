@@ -2,12 +2,14 @@ import asyncio
 import json
 import os
 import subprocess
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 import torch
 
-from hear.core.hear_temp import TempWorkspace
+from hear.audio.workspace import AudioWorkspace
 
 
 async def convert_wav_file_to_mp3(
@@ -91,11 +93,9 @@ def save_as_mp3(
     audio,
     sample_rate: int,
     *,
-    job_id: str | None = None,
-    run_id: str | None = None,
-    track_id: str | None = None,
     purpose: str = "mp3",
     bitrate_kbps: int = 96,
+    workspace: AudioWorkspace | None = None,
 ) -> str:
     if isinstance(audio, torch.Tensor):
         audio_np = audio.detach().cpu().numpy()
@@ -105,16 +105,24 @@ def save_as_mp3(
         audio_np = audio_np.reshape(1, -1)
     elif audio_np.ndim == 2 and audio_np.shape[0] > audio_np.shape[1]:
         audio_np = audio_np.T
-    if job_id and run_id:
-        output_dir = TempWorkspace.hear_temp_job_dir(job_id, run_id)
-    else:
-        output_dir = TempWorkspace.hear_temp_standalone_dir(purpose)
-    wav_path = os.path.join(output_dir, f"{purpose}.wav")
-    sf.write(wav_path, audio_np.T, sample_rate, format="WAV")
+    descriptor, wav_path = tempfile.mkstemp(
+        prefix=f"{_safe_prefix(purpose)}-",
+        suffix=".wav",
+        dir=workspace.path if workspace is not None else None,
+    )
+    os.close(descriptor)
     mp3_path = wav_path + ".mp3"
-    _convert_sync(wav_path, mp3_path, bitrate_kbps)
     try:
-        os.unlink(wav_path)
-    except OSError:
-        pass
+        sf.write(wav_path, audio_np.T, sample_rate, format="WAV")
+        _convert_sync(wav_path, mp3_path, bitrate_kbps)
+    except BaseException:
+        Path(wav_path).unlink(missing_ok=True)
+        Path(mp3_path).unlink(missing_ok=True)
+        raise
+    Path(wav_path).unlink(missing_ok=True)
     return mp3_path
+
+
+def _safe_prefix(value: str) -> str:
+    prefix = "".join(character if character.isalnum() or character in "_.-" else "_" for character in value)
+    return prefix[:48] or "audio"

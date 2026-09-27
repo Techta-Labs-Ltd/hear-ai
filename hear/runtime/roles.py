@@ -10,8 +10,7 @@ class WorkerRole(StrEnum):
     TRANSCRIPTION = "transcription"
     RECONSTRUCTION = "reconstruction"
     MAGIC_CLEAN_NATURAL = "magic_clean_natural"
-    MAGIC_CLEAN_VOICE_FOCUS = "magic_clean_voice_focus"
-    MAGIC_CLEAN_MUSIC_ATMOSPHERE = "magic_clean_music_atmosphere"
+    MAGIC_CLEAN_SAM_AUDIO = "magic_clean_sam_audio"
 
 
 class WorkerCapability(BaseModel):
@@ -51,15 +50,10 @@ class WorkerCapabilityRegistry:
                 job_types=(JobType.MAGIC_CLEAN,),
                 magic_clean_profile=MagicCleanProfile.NATURAL,
             ),
-            WorkerRole.MAGIC_CLEAN_VOICE_FOCUS: WorkerCapability(
-                role=WorkerRole.MAGIC_CLEAN_VOICE_FOCUS,
+            WorkerRole.MAGIC_CLEAN_SAM_AUDIO: WorkerCapability(
+                role=WorkerRole.MAGIC_CLEAN_SAM_AUDIO,
                 job_types=(JobType.MAGIC_CLEAN,),
-                magic_clean_profile=MagicCleanProfile.VOICE_FOCUS,
-            ),
-            WorkerRole.MAGIC_CLEAN_MUSIC_ATMOSPHERE: WorkerCapability(
-                role=WorkerRole.MAGIC_CLEAN_MUSIC_ATMOSPHERE,
-                job_types=(JobType.MAGIC_CLEAN,),
-                magic_clean_profile=MagicCleanProfile.MUSIC_ATMOSPHERE,
+                magic_clean_profile=MagicCleanProfile.SAM_AUDIO,
             ),
         }
 

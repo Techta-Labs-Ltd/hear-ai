@@ -17,6 +17,7 @@ from typing import Protocol
 import numpy as np
 import soundfile as sf
 
+from hear.runtime.cleaner.path_cleanup import AttemptPathCleanup, OwnedFileIdentity
 from hear.runtime.cleaner.resampling import AudioResampler
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
@@ -46,6 +47,8 @@ class DeepFilterBackendFactory(Protocol):
 
     def open(self, guard: ResourceGuard) -> DeepFilterBackend: ...
 
+    def close(self) -> None: ...
+
 
 @dataclass(frozen=True)
 class ContextualPolicy:
@@ -64,6 +67,10 @@ class ContextualPolicy:
             "block_frames": self.block_frames,
             "context_frames": self.context_frames,
             "resampling": AudioResampler.POLICY,
+            "subprocess_runner": CancellableProcessRunner.POLICY,
+            "subprocess_shutdown_seconds": (
+                CancellableProcessRunner.DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+            ),
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -81,6 +88,7 @@ class DeepFilterEngine:
         self.factory = factory
         self.policy = policy
         self._lease = threading.Lock()
+        self._closed = False
 
     @property
     def identity(self) -> RuntimeIdentity:
@@ -88,6 +96,8 @@ class DeepFilterEngine:
 
     def open_session(self, plan: CleanPlan, guard: ResourceGuard):
         guard.check()
+        if self._closed:
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "DeepFilter engine is closed")
         if plan.runtime != self.identity or plan.profile != "natural":
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "DeepFilter runtime mismatch")
         if not self._lease.acquire(blocking=False):
@@ -101,6 +111,21 @@ class DeepFilterEngine:
             self._lease.release()
             raise
         return DeepFilterSession(plan, backend, self.policy, self._lease)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        if not self._lease.acquire(blocking=False):
+            raise CleanExecutionError(
+                ErrorCode.RESOURCE_EXHAUSTED,
+                "DeepFilter engine still has an active session",
+                worker_restart_required=True,
+            )
+        try:
+            self.factory.close()
+            self._closed = True
+        finally:
+            self._lease.release()
 
 
 class DeepFilterSession:
@@ -139,7 +164,7 @@ class DeepFilterSession:
             raise CleanExecutionError(
                 ErrorCode.ARTIFACT_CONFLICT, "DeepFilter output already exists"
             )
-        published = None
+        published: OwnedFileIdentity | None = None
         try:
             with tempfile.TemporaryDirectory(
                 prefix="df3-output-", dir=guard.workspace
@@ -147,20 +172,13 @@ class DeepFilterSession:
                 staged = Path(directory) / "output.wav"
                 self._process_attempt(source, staged, plan, guard)
                 guard.check()
-                stat = staged.stat()
+                published = AttemptPathCleanup.identity(staged)
                 os.link(staged, destination)
-                published = (stat.st_dev, stat.st_ino)
                 staged.unlink()
             guard.check()
         except BaseException as exc:
             if published is not None:
-                try:
-                    stat = destination.lstat()
-                except FileNotFoundError:
-                    pass
-                else:
-                    if (stat.st_dev, stat.st_ino) == published:
-                        destination.unlink()
+                AttemptPathCleanup.remove_if_owned(destination, published, exc)
             if isinstance(exc, FileExistsError):
                 raise CleanExecutionError(
                     ErrorCode.ARTIFACT_CONFLICT, "DeepFilter output already exists"
@@ -207,14 +225,14 @@ class DeepFilterSession:
                     self._process(prepared, enhanced, guard)
                     resampler.convert(enhanced, destination, rate, guard, exact_frames=frames)
         except (OSError, RuntimeError, ValueError) as exc:
-            destination.unlink(missing_ok=True)
+            AttemptPathCleanup.remove_private(destination, exc)
             if isinstance(exc, CleanExecutionError):
                 raise
             raise CleanExecutionError(
                 ErrorCode.PROCESS_FAILED, "DeepFilter processing failed"
             ) from exc
-        except BaseException:
-            destination.unlink(missing_ok=True)
+        except BaseException as exc:
+            AttemptPathCleanup.remove_private(destination, exc)
             raise
 
     def _process(self, source: Path, destination: Path, guard: ResourceGuard) -> None:

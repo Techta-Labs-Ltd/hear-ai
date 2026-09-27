@@ -7,9 +7,8 @@ import uvicorn
 
 from hear.api.app import RuntimeApi
 from hear.bootstrap import RuntimeBootstrap
-from hear.queue.rabbitmq import RabbitMQConsumer
+from hear.config import RuntimeSettings
 from hear.runtime.pod import PodRuntime
-from hear.runtime.roles import WorkerRole
 
 
 class PodEntrypoint:
@@ -18,47 +17,60 @@ class PodEntrypoint:
         bootstrap: RuntimeBootstrap | None = None,
         environment: dict[str, str] | None = None,
     ) -> None:
-        self._environment = environment or dict(os.environ)
-        self._bootstrap = bootstrap or RuntimeBootstrap(self._environment)
+        source = dict(os.environ) if environment is None else environment
+        self._settings = RuntimeSettings.from_environment(source)
+        self._bootstrap = bootstrap or RuntimeBootstrap(source)
 
     async def run(self) -> None:
-        role = WorkerRole(self._environment.get("HEAR_WORKER_ROLE", "transcription"))
+        role = self._settings.worker_role
+        api_key = self._settings.required("pod_api_key")
         readiness = self._bootstrap.readiness(role)
         executor, backend, resources = self._bootstrap.executor_for(role)
-        consumer = RabbitMQConsumer(
-            self._required("HEAR_RABBITMQ_URL"),
+        runtime = PodRuntime(
+            readiness,
             role,
             executor,
             backend,
-            self._bootstrap.worker_identity(),
+            api_key=api_key,
+            max_concurrent_jobs=self._settings.pod_max_concurrent_jobs,
+            rabbitmq_url=self._settings.required("rabbitmq_url"),
         )
-        runtime = PodRuntime(readiness, consumer)
-        server = uvicorn.Server(
-            uvicorn.Config(
-                RuntimeApi(readiness, drain=runtime.drain).app,
-                host=self._environment.get("HTTP_HOST", "0.0.0.0"),
-                port=int(self._environment.get("HTTP_PORT", "8000")),
-                log_level=self._environment.get("LOG_LEVEL", "info").lower(),
-            )
-        )
-        await runtime.start()
         try:
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    RuntimeApi(
+                        readiness,
+                        drain=runtime.drain,
+                        pod_runtime=runtime,
+                        pod_api_key=api_key,
+                        enable_docs=self._settings.enable_docs,
+                    ).app,
+                    host=self._settings.http_host,
+                    port=self._settings.http_port,
+                    log_level=self._settings.log_level.lower(),
+                )
+            )
+            await runtime.start()
             await server.serve()
         finally:
-            await runtime.close()
+            error = None
+            try:
+                await runtime.close()
+            except BaseException as exc:
+                error = exc
             for resource in reversed(resources):
                 close = getattr(resource, "close", None)
                 if close is None:
                     continue
-                value = close()
-                if asyncio.iscoroutine(value):
-                    await value
-
-    def _required(self, name: str) -> str:
-        value = self._environment.get(name, "").strip()
-        if not value:
-            raise RuntimeError(f"missing_runtime_setting:{name}")
-        return value
+                try:
+                    value = close()
+                    if asyncio.iscoroutine(value):
+                        await value
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
+            if error is not None:
+                raise error
 
 
 if __name__ == "__main__":

@@ -197,7 +197,7 @@ def test_voice_reference_uses_transcript_aligned_to_expanded_clip(monkeypatch, t
     reference_path.write_bytes(b"reference audio")
     exported_bounds = {}
 
-    def fake_export(_waveform, start, end, *, track_id):
+    def fake_export(_waveform, start, end, *, track_id, workspace=None):
         exported_bounds.update(start=start, end=end, track_id=track_id)
         return str(reference_path)
 
@@ -257,7 +257,7 @@ def test_voice_reference_prefers_aligned_edited_speaker_and_returns_rate(monkeyp
     reference_path.write_bytes(b"reference audio")
     exported_bounds = {}
 
-    def fake_export(_waveform, start, end, *, track_id):
+    def fake_export(_waveform, start, end, *, track_id, workspace=None):
         exported_bounds.update(start=start, end=end, track_id=track_id)
         return str(reference_path)
 
@@ -312,7 +312,7 @@ def test_long_edit_uses_full_pacing_window_and_aligned_ten_second_clone(monkeypa
     reference_path.write_bytes(b"reference audio")
     observed = {}
 
-    def fake_export(_waveform, start, end, *, track_id):
+    def fake_export(_waveform, start, end, *, track_id, workspace=None):
         observed.update(reference_start=start, reference_end=end, track_id=track_id)
         return str(reference_path)
 

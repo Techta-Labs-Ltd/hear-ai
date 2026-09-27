@@ -4,10 +4,12 @@ All cleaner containers on a device must mount the same local lock directory.
 This is not a VRAM partition or admission for unrelated transcription/TTS actors.
 Never unlink a lock on release: replacement inodes would permit split ownership.
 """
+
 import fcntl
 import os
 import stat
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -73,16 +75,24 @@ class WorkerLease:
         """Retain ownership but stop admission; only process replacement recovers."""
         self._unhealthy = True
 
-    def close(self) -> None:
-        """Call only after worker/model teardown; never after each job."""
+    def retire(self, cleanup: Callable[[], None]) -> None:
         if not self._attempt_lock.acquire(blocking=False):
             raise CleanExecutionError(ErrorCode.RESOURCE_EXHAUSTED, "worker still has active work")
         try:
-            if self.fd is not None:
-                os.close(self.fd)
-                self.fd = None
+            if self.fd is None:
+                return
+            try:
+                cleanup()
+            except BaseException:
+                self._unhealthy = True
+                raise
+            os.close(self.fd)
+            self.fd = None
         finally:
             self._attempt_lock.release()
+
+    def close(self) -> None:
+        self.retire(lambda: None)
 
     def attempt(self, lane: str):
         return WorkerAttempt(self, lane)

@@ -1,9 +1,11 @@
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 from hear.bootstrap import RuntimeBootstrap
+from hear.runtime.roles import WorkerRole
 
 
 class TestRuntimeBootstrap:
@@ -37,3 +39,21 @@ class TestRuntimeBootstrap:
             check=False,
         )
         assert result.returncode == 0
+
+    def test_readiness_checks_required_scratch_capacity(self, monkeypatch, tmp_path):
+        bootstrap = RuntimeBootstrap(
+            {
+                "HEAR_TEMP_DIR": str(tmp_path / "scratch"),
+                "HEAR_MIN_FREE_SCRATCH_BYTES": "1024",
+            }
+        )
+        monkeypatch.setattr(
+            "hear.bootstrap.shutil.disk_usage",
+            lambda path: SimpleNamespace(total=4096, used=3073, free=1023),
+        )
+
+        readiness = bootstrap.readiness(WorkerRole.TRANSCRIPTION)
+        snapshot = readiness.snapshot()
+
+        assert snapshot["checks"]["scratch"] is False
+        assert (tmp_path / "scratch").is_dir()

@@ -64,10 +64,9 @@ class TranscriptionWorkflow:
         sequence += 1
         task: asyncio.Task | None = None
         try:
-            source = await self._audio.download_to_wav(
+            source = await self._audio.download_source(
                 str(envelope.source.url),
                 workspace,
-                preserve_channels=True,
             )
             yield self._event(
                 envelope,

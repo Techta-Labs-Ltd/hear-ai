@@ -1,74 +1,169 @@
-"""Concrete offline SAM factory; device admission is not serving certification."""
-
 import hashlib
-import importlib.metadata
+import importlib
 import json
+import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from hear.runtime.cleaner.longform_sam import SolverPolicy
+from hear.runtime.cleaner.asset_probe import PinnedAssetProbe
 from hear.runtime.cleaner.resampling import AudioResampler
 from hear.runtime.cleaner.resource_guard import ResourceGuard
-from hear.runtime.cleaner.sam_checkpoint import SamCheckpointLoader
-from hear.runtime.cleaner.sam_codec_loader import SamCodecBuilder
-from hear.runtime.cleaner.sam_core_loader import SamCoreBuilder
-from hear.runtime.cleaner.sam_noise import SamNoisePolicy
-from hear.runtime.cleaner.sam_pipeline import SamSeparationPipeline
-from hear.runtime.cleaner.sam_prompt_cache import SamPromptCache, SamPromptIdentity
+from hear.runtime.cleaner.sam_official import SamOfficialPipeline
+from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode, RuntimeIdentity
 
 
 @dataclass(frozen=True)
 class PinnedSamAssets:
-    sam_source: Path
-    codec_source: Path
     config: Path
     checkpoint: Path
-    optional_manifest: Path
+    text_directory: Path
+    text_hashes: tuple[tuple[str, str], ...]
+    ranker_checkpoint: Path
+    ranker_sha256: str
+    span_directory: Path
+    span_hashes: tuple[tuple[str, str], ...]
+    dependency_cache_directory: Path
+
+    @property
+    def text_identity(self) -> str:
+        return PinnedSamFactory._digest(
+            {
+                "version": "meta-sam-audio-local-t5-v1",
+                "files": dict(self.text_hashes),
+            }
+        )
+
+    @property
+    def quality_identity(self) -> str:
+        return PinnedSamFactory._digest(
+            {
+                "version": "meta-sam-audio-clap-pe-v1",
+                "ranker": self.ranker_sha256,
+                "span": dict(self.span_hashes),
+            }
+        )
+
+    def verify(self, guard: ResourceGuard) -> None:
+        self._verify_file(self.config, PinnedSamFactory.CONFIG_SHA256, guard)
+        self._verify_file(self.checkpoint, PinnedSamFactory.CHECKPOINT, guard)
+        for filename, digest in self.text_hashes:
+            self._verify_file(self.text_directory / filename, digest, guard)
+        self._verify_file(self.ranker_checkpoint, self.ranker_sha256, guard)
+        for filename, digest in self.span_hashes:
+            self._verify_file(self.span_directory / filename, digest, guard)
+        if not self.dependency_cache_directory.is_dir():
+            raise CleanExecutionError(
+                ErrorCode.ENGINE_UNAVAILABLE,
+                "SAM Audio dependency cache is unavailable",
+            )
+
+    @staticmethod
+    def _verify_file(path: Path, expected: str, guard: ResourceGuard) -> None:
+        PinnedAssetProbe.sha256(path, expected, check=guard.check)
+
+    def __post_init__(self) -> None:
+        expected = {"config.json", "tokenizer.json", "spiece.model", "model.safetensors"}
+        values = dict(self.text_hashes)
+        if set(values) != expected or len(values) != len(self.text_hashes):
+            raise ValueError("SAM text assets must be completely pinned")
+        if any(
+            len(value) != 64 or any(character not in "0123456789abcdef" for character in value)
+            for value in values.values()
+        ):
+            raise ValueError("SAM text asset digests must be SHA-256")
+        expected_span = {
+            "config.json",
+            "model.safetensors",
+            "preprocessor_config.json",
+            "special_tokens_map.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+        }
+        span_values = dict(self.span_hashes)
+        if set(span_values) != expected_span or len(span_values) != len(self.span_hashes):
+            raise ValueError("SAM span assets must be completely pinned")
+        quality_hashes = (self.ranker_sha256, *span_values.values())
+        if any(
+            len(value) != 64 or any(character not in "0123456789abcdef" for character in value)
+            for value in quality_hashes
+        ):
+            raise ValueError("SAM quality asset digests must be SHA-256")
 
 
 class LoadedSamBackend:
-    def __init__(self, core, codec, pipeline, prompt, cache):
-        self._core, self._codec = core, codec
-        self.pipeline, self.prompt, self.cache = pipeline, prompt, cache
+    def __init__(self, model, processor, pipeline):
+        self.model = model
+        self.processor = processor
+        self.pipeline = pipeline
+        self.closed = False
+
+    def borrow(self):
+        if self.closed or self.pipeline is None:
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM cached runtime is closed")
+        return BorrowedSamBackend(self)
 
     def close(self):
-        self.pipeline = None
-        try:
-            if self._codec is not None:
-                self._codec.close()
-        finally:
-            if self._core is not None:
-                self._core.close()
-        self._core = self._codec = None
-        # The immutable prompt cache is borrowed from the factory, not attempt-owned.
+        if self.closed:
+            return
+        self.closed = True
+        self.pipeline = self.processor = self.model = None
+
+
+class BorrowedSamBackend:
+    def __init__(self, owner: LoadedSamBackend):
+        self.owner = owner
+        self.closed = False
+
+    @property
+    def pipeline(self):
+        if self.closed or self.owner.closed or self.owner.pipeline is None:
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM attempt backend is closed")
+        return self.owner.pipeline
+
+    def close(self):
+        self.closed = True
 
 
 class PinnedSamFactory:
-    CHECKPOINT = "8c44fda9821fd9f2ec8977304e3c0f55290d9eacb6bbf25b4b8fb1f69c2a8c06"
-    OPTIONAL_MANIFEST = "df43a1d8d8306fab6d9e9d70c991eb364efbdacdddac51bdc2e981a914bbed7e"
-    PACKAGES = {"torch": "2.8.0+cu128", "numpy": "1.26.4", "einops": "0.8.2", "soundfile": "0.12.1"}
+    ENGINE = "sam_audio_base"
+    CHECKPOINT = "b5f3e29ea7a9e80e90a00da495a8aafe890571f371c4bfb88c052c65a5636839"
+    CONFIG_SHA256 = "b99a0ee6296edaeb8d355d41d365b33faa94b40af00b2c34d643a43617b10fb2"
+    META_SOURCE_COMMIT = "bb4c6999d2677c7402360e426afc01ddfad6dce0"
+    PACKAGES = {
+        "sam-audio": "0.1.0",
+        "einops": "0.8.2",
+        "safetensors": "0.8.0",
+        "sentencepiece": "0.2.2",
+        "torch": "2.8.0+cu128",
+        "torchaudio": "2.8.0+cu128",
+        "tokenizers": "0.22.2",
+        "transformers": "4.57.6",
+        "numpy": "1.26.4",
+        "laion-clap": "1.1.6",
+        "perception-models": "1.0.0",
+        "timm": "1.0.30",
+    }
 
     def __init__(
         self,
         assets: PinnedSamAssets,
-        prompt: SamPromptIdentity,
-        cache: SamPromptCache,
         *,
-        solver: SolverPolicy | None = None,
-        codec_tile_frames: int = 4096,
         device: str = "cpu",
+        text_encoder_identity: str,
     ):
-        solver = solver or SolverPolicy(250, 50, 16)
-        if solver.steps != 16 or solver.window_frames > 250:
-            raise ValueError("unsupported SAM solver policy")
-        if type(codec_tile_frames) is not int or not 1 <= codec_tile_frames <= 65536:
-            raise ValueError("invalid SAM codec tile policy")
         if device not in ("cpu", "cuda:0"):
             raise ValueError("unsupported SAM device")
+        if device == "cuda:0":
+            torch = importlib.import_module("torch")
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+        self.assets = assets
         self.device = device
-        self.assets, self.prompt, self.cache = assets, prompt, cache
-        self.solver, self.codec_tile_frames = solver, codec_tile_frames
+        self.text_encoder_identity = text_encoder_identity
+        self._cache_lock = threading.Lock()
+        self._loaded: LoadedSamBackend | None = None
 
     @staticmethod
     def _digest(value) -> str:
@@ -78,178 +173,158 @@ class PinnedSamFactory:
 
     @property
     def identity(self) -> RuntimeIdentity:
-        precision_policy = {
-            "device": self.device,
-            "dtype": "float32",
-            "autocast": False,
-            "mkldnn": True,
-            "mkldnn_deterministic": False,
-            "deterministic_algorithms": False,
-            "float32_matmul_precision": "highest",
+        precision = self._digest(
+            {
+                "device": self.device,
+                "dtype": "float32",
+                "autocast": False,
+                "tf32": False,
+            }
+        )
+        runtime_descriptor = {
+            "loader": "meta-sam-audio-official-api-v1",
+            "source_commit": self.META_SOURCE_COMMIT,
+            "checkpoint": self.CHECKPOINT,
+            "config": self.CONFIG_SHA256,
+            "packages": self.PACKAGES,
+            "audio_only": "vision-features-zeroed-by-upstream-no-video-path",
+            "quality_modules": "official-clap-ranker-and-pe-span-predictor",
+            "quality_assets": self.assets.quality_identity,
+            "ambient_reranking_candidates": SamOfficialPipeline.AMBIENT_RERANKING_CANDIDATES,
+            "event_reranking_candidates": SamOfficialPipeline.EVENT_RERANKING_CANDIDATES,
+            "precision": precision,
+            "channel_policy": SamOfficialPipeline.CHANNEL_POLICY,
+            "dual_mono_min_correlation": SamOfficialPipeline.DUAL_MONO_MIN_CORRELATION,
+            "resampling": AudioResampler.POLICY,
+            "subprocess_runner": CancellableProcessRunner.POLICY,
+            "subprocess_shutdown_seconds": (
+                CancellableProcessRunner.DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+            ),
+            "longform_policy": SamOfficialPipeline.POLICY,
+            "chunk_seconds": SamOfficialPipeline.CHUNK_SECONDS,
+            "overlap_seconds": SamOfficialPipeline.OVERLAP_SECONDS,
         }
-        if self.device == "cuda:0":
-            precision_policy.update(
-                tf32=False, cudnn=True, cudnn_benchmark=False, cudnn_deterministic=False
-            )
-        precision = self._digest(precision_policy)
-        longform = self._digest(
-            {
-                "version": "sam-file-pipeline-v1",
-                "solver": self.solver.digest,
-                "codec_tile_frames": self.codec_tile_frames,
-                "rng": SamNoisePolicy().digest,
-                "resampling": AudioResampler.POLICY,
-                "codec_mean_only": True,
-                "watermark": "retained-alpha0.25-two-stream-messages",
-                "channels": "mono-only",
-            }
-        )
-        runtime = self._digest(
-            {
-                "loader": (
-                    "sam-offline-meta-cpu-v3"
-                    if self.device == "cpu"
-                    else "sam-offline-meta-cuda-fp32-v1"
-                ),
-                "fault_policy": "native-oom-or-runtime-fault-requires-worker-restart",
-                "checkpoint": self.CHECKPOINT,
-                "config": SamCoreBuilder.CONFIG_SHA256,
-                "optional_manifest": self.OPTIONAL_MANIFEST,
-                "core_sources": SamCoreBuilder.SOURCES,
-                "codec_sources": SamCodecBuilder.SOURCES,
-                "packages": self.PACKAGES,
-                "prompt_cache_identity": self.prompt.digest,
-                "precision": precision,
-                "longform": longform,
-            }
-        )
+        runtime_descriptor["text_encoder_identity"] = self.text_encoder_identity
         return RuntimeIdentity(
-            engine="sam_audio_small",
+            engine=self.ENGINE,
             checkpoint_sha256=self.CHECKPOINT,
-            runtime_sha256=runtime,
+            runtime_sha256=self._digest(runtime_descriptor),
             precision_policy_sha256=precision,
-            longform_policy_sha256=longform,
+            longform_policy_sha256=self._digest(
+                {
+                    "policy": SamOfficialPipeline.POLICY,
+                    "channel_policy": SamOfficialPipeline.CHANNEL_POLICY,
+                    "dual_mono_min_correlation": (SamOfficialPipeline.DUAL_MONO_MIN_CORRELATION),
+                    "resampling": AudioResampler.POLICY,
+                    "subprocess_runner": CancellableProcessRunner.POLICY,
+                    "subprocess_shutdown_seconds": (
+                        CancellableProcessRunner.DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+                    ),
+                    "chunk_seconds": SamOfficialPipeline.CHUNK_SECONDS,
+                    "overlap_seconds": SamOfficialPipeline.OVERLAP_SECONDS,
+                    "ambient_reranking_candidates": (
+                        SamOfficialPipeline.AMBIENT_RERANKING_CANDIDATES
+                    ),
+                    "event_reranking_candidates": (SamOfficialPipeline.EVENT_RERANKING_CANDIDATES),
+                }
+            ),
         )
 
     def validate_identity(self, identity: RuntimeIdentity) -> None:
         if identity != self.identity:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM runtime identity mismatch")
-        for package, expected in self.PACKAGES.items():
-            try:
-                actual = importlib.metadata.version(package)
-            except importlib.metadata.PackageNotFoundError:
-                raise CleanExecutionError(
-                    ErrorCode.ENGINE_UNAVAILABLE, "SAM dependency missing"
-                ) from None
-            if actual != expected:
-                raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM dependency mismatch")
+        PinnedAssetProbe.packages(self.PACKAGES)
         torch = importlib.import_module("torch")
-        if (
-            torch.get_default_dtype() != torch.float32
-            or torch.get_default_device().type != "cpu"
-            or torch.is_autocast_enabled("cpu")
-            or not torch.backends.mkldnn.enabled
-            or torch.backends.mkldnn.deterministic
-            or torch.are_deterministic_algorithms_enabled()
-            or torch.get_float32_matmul_precision() != "highest"
-        ):
-            raise CleanExecutionError(
-                ErrorCode.ENGINE_UNAVAILABLE, "SAM CPU precision policy mismatch"
-            )
+        if torch.get_default_dtype() != torch.float32 or torch.is_autocast_enabled("cpu"):
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM FP32 policy mismatch")
         if self.device == "cuda:0" and (
-            torch.is_autocast_enabled("cuda")
+            not torch.cuda.is_available()
+            or torch.cuda.device_count() != 1
             or torch.backends.cuda.matmul.allow_tf32
             or torch.backends.cudnn.allow_tf32
-            or not torch.backends.cudnn.enabled
-            or torch.backends.cudnn.benchmark
-            or torch.backends.cudnn.deterministic
         ):
-            raise CleanExecutionError(
-                ErrorCode.ENGINE_UNAVAILABLE, "SAM CUDA precision policy mismatch"
-            )
+            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM CUDA policy mismatch")
 
-    def _place_modules(self, core, codec, guard: ResourceGuard) -> None:
-        """Transfer only admitted audio modules, with a cap before any transfer."""
-        if self.device == "cpu":
-            return
-        torch = importlib.import_module("torch")
-        guard.check()
-        if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
-            raise CleanExecutionError(
-                ErrorCode.ENGINE_UNAVAILABLE, "SAM requires one visible CUDA device"
-            )
-        total = torch.cuda.get_device_properties(0).total_memory
-        cap = guard.budget.allocator_cap_bytes
-        tensors = tuple(
-            tensor
-            for module in (core, codec)
-            for tensor in (*module.parameters(), *module.buffers())
-        )
-        if any(t.device.type != "cpu" for t in tensors):
-            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM CPU staging incomplete")
-        required = sum(t.numel() * t.element_size() for t in tensors)
-        if cap > total or required >= cap:
-            raise CleanExecutionError(
-                ErrorCode.RESOURCE_EXHAUSTED, "SAM weights exceed CUDA reservation"
-            )
-        # An allocator cap is not the aggregate NVML process-memory release limit.
-        torch.cuda.set_per_process_memory_fraction(cap / total, device=0)
-        del tensors
-        for module in (core, codec):
-            guard.check()
-            module.to(device=self.device, dtype=torch.float32)
-        if any(
-            t.device != torch.device(self.device) or t.dtype != torch.float32
-            for module in (core, codec)
-            for t in (*module.parameters(), *module.buffers())
-        ):
-            raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM CUDA transfer incomplete")
-        guard.check()
-
-    def open(self, guard: ResourceGuard) -> LoadedSamBackend:
+    def open(self, guard: ResourceGuard):
         guard.check()
         self.validate_identity(self.identity)
-        self.cache.get(self.prompt)
-        manifest = json.loads(
-            SamCoreBuilder._read(self.assets.optional_manifest, self.OPTIONAL_MANIFEST, guard)
-        )
-        if manifest["checkpoint_sha256"] != self.CHECKPOINT:
-            raise CleanExecutionError(
-                ErrorCode.ENGINE_UNAVAILABLE, "SAM manifest checkpoint mismatch"
+        with self._cache_lock:
+            if self._loaded is None or self._loaded.closed:
+                self._loaded = self._load(guard)
+            return self._loaded.borrow()
+
+    def close(self) -> None:
+        with self._cache_lock:
+            if self._loaded is not None:
+                self._loaded.close()
+                self._loaded = None
+
+    def _load(self, guard: ResourceGuard) -> LoadedSamBackend:
+        guard.check()
+        self.validate_identity(self.identity)
+        if type(self) is PinnedSamFactory:
+            self.assets.verify(guard)
+        else:
+            self.assets._verify_file(self.assets.config, self.CONFIG_SHA256, guard)
+            self.assets._verify_file(self.assets.checkpoint, self.CHECKPOINT, guard)
+            for filename, digest in self.assets.text_hashes:
+                self.assets._verify_file(self.assets.text_directory / filename, digest, guard)
+            self.assets._verify_file(
+                self.assets.ranker_checkpoint,
+                self.assets.ranker_sha256,
+                guard,
             )
-        core = codec = None
+            for filename, digest in self.assets.span_hashes:
+                self.assets._verify_file(self.assets.span_directory / filename, digest, guard)
         try:
-            core = SamCoreBuilder.build(self.assets.sam_source, self.assets.config, guard)
-            codec = SamCodecBuilder.build(self.assets.codec_source, self.assets.config, guard)
-            counts = SamCheckpointLoader.load(
-                self.assets.checkpoint,
-                sha256=self.CHECKPOINT,
-                core=core.core,
-                codec=codec.codec,
-                optional_keys=frozenset(manifest["excluded_keys"]),
-                guard=guard,
+            os.environ["HF_HOME"] = str(self.assets.dependency_cache_directory)
+            os.environ["HF_HUB_CACHE"] = str(self.assets.dependency_cache_directory / "hub")
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
+            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+            torch = importlib.import_module("torch")
+            sam_audio = importlib.import_module("sam_audio")
+            SAMAudio = sam_audio.SAMAudio
+            SAMAudioProcessor = sam_audio.SAMAudioProcessor
+
+            model_directory = self.assets.config.parent
+            model = SAMAudio.from_pretrained(
+                str(model_directory),
+                local_files_only=True,
+                text_encoder={"name": str(self.assets.text_directory)},
+                visual_ranker=None,
+                text_ranker={
+                    "kind": "clap",
+                    "checkpoint": str(self.assets.ranker_checkpoint),
+                },
+                span_predictor=str(self.assets.span_directory),
             )
-            if counts != (247, 317):
-                raise CleanExecutionError(
-                    ErrorCode.ENGINE_UNAVAILABLE, "SAM module inventory mismatch"
-                )
-            if any(
-                t.device.type != "cpu"
-                for module in (core.core, codec.codec)
-                for t in module.state_dict().values()
-            ):
-                raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "SAM CPU load incomplete")
-            self._place_modules(core.core, codec.codec, guard)
-            pipeline = SamSeparationPipeline(
-                core.core, codec.codec, codec_tile_frames=self.codec_tile_frames, policy=self.solver
-            )
+            processor = SAMAudioProcessor.from_pretrained(str(model_directory))
+
+            vision_dim = model.vision_encoder.dim
+            del model.vision_encoder
+            model._vision_encoder_dim = vision_dim
+
+            def audio_only_video_features(_video, audio_features):
+                batch, frames, _ = audio_features.shape
+                return audio_features.new_zeros(batch, model._vision_encoder_dim, frames)
+
+            model._get_video_features = audio_only_video_features
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+            model.eval().to(device=self.device, dtype=torch.float32)
+            if self.device == "cuda:0":
+                model.span_predictor.to(device="cpu", dtype=torch.float32)
             guard.check()
-            return LoadedSamBackend(core, codec, pipeline, self.prompt, self.cache)
-        except BaseException:
-            try:
-                if codec is not None:
-                    codec.close()
-            finally:
-                if core is not None:
-                    core.close()
+            pipeline = SamOfficialPipeline(model, processor)
+            return LoadedSamBackend(model, processor, pipeline)
+        except CleanExecutionError:
             raise
+        except Exception as exc:
+            raise CleanExecutionError(
+                ErrorCode.ENGINE_UNAVAILABLE,
+                f"official SAM Audio initialization failed ({type(exc).__name__})",
+            ) from None
+
+
+PinnedSamBaseFactory = PinnedSamFactory

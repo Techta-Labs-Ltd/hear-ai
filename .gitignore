@@ -25,6 +25,8 @@ build/
 /hear_model/
 /models/
 /checkpoints/
+/deepfilternet3-cleaned/
+/DeepFilterNet*/
 *.pt
 *.pth
 *.ckpt

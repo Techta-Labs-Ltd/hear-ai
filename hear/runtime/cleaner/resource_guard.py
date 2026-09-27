@@ -13,21 +13,10 @@ class ResourceBudget:
     scratch_bytes: int
     max_input_bytes: int
     max_frames: int
-    gpu_limit_bytes: int = 12_000_000_000
-    gpu_target_bytes: int = 10_000_000_000
-    allocator_cap_bytes: int = 9_000_000_000
 
     def __post_init__(self):
         if min(self.scratch_bytes, self.max_input_bytes, self.max_frames) <= 0:
             raise ValueError("host budgets must be positive")
-        if (
-            not 0
-            < self.allocator_cap_bytes
-            <= self.gpu_target_bytes
-            < self.gpu_limit_bytes
-            <= 12_000_000_000
-        ):
-            raise ValueError("invalid cleaner GPU budgets")
 
 
 class ResourceGuard:
@@ -45,6 +34,23 @@ class ResourceGuard:
         self.deadline = deadline_monotonic
         self.cancelled = cancelled
         self.wall_deadline: datetime | None = None
+        self._scratch_peak_bytes = 0
+
+    @property
+    def scratch_peak_bytes(self) -> int:
+        return self._scratch_peak_bytes
+
+    def _scratch_bytes(self) -> int:
+        size = 0
+        for path in self.workspace.rglob("*"):
+            if path.is_symlink():
+                raise CleanExecutionError(
+                    ErrorCode.RESOURCE_EXHAUSTED, "workspace contains a symlink"
+                )
+            if path.is_file():
+                size += path.stat().st_size
+        self._scratch_peak_bytes = max(self._scratch_peak_bytes, size)
+        return size
 
     def bind_deadline(self, deadline: datetime) -> None:
         """Only tighten the worker timeout to an authenticated attempt deadline.
@@ -66,19 +72,28 @@ class ResourceGuard:
             self.wall_deadline is not None and datetime.now(UTC) >= self.wall_deadline
         ):
             raise CleanExecutionError(ErrorCode.DEADLINE_EXCEEDED, "attempt deadline exceeded")
-        size = 0
-        for path in self.workspace.rglob("*"):
-            if path.is_symlink():
-                raise CleanExecutionError(
-                    ErrorCode.RESOURCE_EXHAUSTED, "workspace contains a symlink"
-                )
-            if path.is_file():
-                size += path.stat().st_size
+
+    def check_scratch(self) -> int:
+        self.check()
+        size = self._scratch_bytes()
         if size > self.budget.scratch_bytes:
             raise CleanExecutionError(ErrorCode.RESOURCE_EXHAUSTED, "scratch budget exceeded")
+        return size
+
+    def reserve_scratch(self, additional_bytes: int) -> int:
+        self.check()
+        if type(additional_bytes) is not int or additional_bytes < 0:
+            raise ValueError("scratch reservation must be a non-negative integer")
+        required = self._scratch_bytes() + additional_bytes
+        if required > self.budget.scratch_bytes:
+            raise CleanExecutionError(
+                ErrorCode.RESOURCE_EXHAUSTED, "insufficient scratch reservation"
+            )
+        self._scratch_peak_bytes = max(self._scratch_peak_bytes, required)
+        return required
 
     def preflight_pcm(self, frames: int, channels: int, copies: int, output_bytes: int) -> int:
-        self.check()
+        self.check_scratch()
         if (
             not 0 < frames <= self.budget.max_frames
             or channels not in (1, 2)
@@ -89,8 +104,4 @@ class ResourceGuard:
                 ErrorCode.RESOURCE_EXHAUSTED, "unsupported decode reservation"
             )
         required = frames * channels * 4 * copies + output_bytes
-        if required > self.budget.scratch_bytes:
-            raise CleanExecutionError(
-                ErrorCode.RESOURCE_EXHAUSTED, "insufficient scratch reservation"
-            )
-        return required
+        return self.reserve_scratch(required)

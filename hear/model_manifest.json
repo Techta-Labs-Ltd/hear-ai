@@ -1,7 +1,8 @@
 {
+  "manifest_version": 1,
   "models": [
     {
-      "name": "qwen3-asr-1.7b",
+      "logical_name": "qwen3-asr-1.7b",
       "repo_id": "Qwen/Qwen3-ASR-1.7B",
       "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
       "relative_path": "qwen3-asr-1.7b",
@@ -12,12 +13,21 @@
       "required_files": [
         "config.json",
         "model.safetensors.index.json",
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors",
+        "merges.txt",
         "preprocessor_config.json",
-        "tokenizer_config.json"
-      ]
+        "tokenizer_config.json",
+        "vocab.json"
+      ],
+      "engine_adapter": "qwen3_asr",
+      "provenance_url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/tree/7278e1e70fe206f11671096ffdd38061171dd6e5",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/tree/7278e1e70fe206f11671096ffdd38061171dd6e5"
     },
     {
-      "name": "qwen3-forced-aligner",
+      "logical_name": "qwen3-forced-aligner",
       "repo_id": "Qwen/Qwen3-ForcedAligner-0.6B",
       "revision": "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
       "relative_path": "qwen3-forced-aligner",
@@ -28,12 +38,19 @@
       "required_files": [
         "config.json",
         "model.safetensors",
+        "merges.txt",
         "preprocessor_config.json",
-        "tokenizer_config.json"
-      ]
+        "tokenizer_config.json",
+        "vocab.json"
+      ],
+      "engine_adapter": "qwen3_forced_aligner",
+      "provenance_url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/tree/c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/tree/c7cbfc2048c462b0d63a45797104fc9db3ad62b7"
     },
     {
-      "name": "toxic-bert",
+      "logical_name": "toxic-bert",
       "repo_id": "unitary/toxic-bert",
       "revision": "4d6c22e74ba2fdd26bc4f7238f50766b045a0d94",
       "relative_path": "toxic-bert",
@@ -43,11 +60,18 @@
       "required_files": [
         "config.json",
         "model.safetensors",
-        "tokenizer_config.json"
-      ]
+        "special_tokens_map.json",
+        "tokenizer_config.json",
+        "vocab.txt"
+      ],
+      "engine_adapter": "transformers_toxicity_classifier",
+      "provenance_url": "https://huggingface.co/unitary/toxic-bert/tree/4d6c22e74ba2fdd26bc4f7238f50766b045a0d94",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/unitary/toxic-bert/tree/4d6c22e74ba2fdd26bc4f7238f50766b045a0d94"
     },
     {
-      "name": "twitter-roberta-sentiment",
+      "logical_name": "twitter-roberta-sentiment",
       "repo_id": "cardiffnlp/twitter-roberta-base-sentiment-latest",
       "revision": "3216a57f2a0d9c45a2e6c20157c20c49fb4bf9c7",
       "relative_path": "twitter-roberta-sentiment",
@@ -55,11 +79,20 @@
         "pipeline"
       ],
       "required_files": [
-        "config.json"
-      ]
+        "config.json",
+        "pytorch_model.bin",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json"
+      ],
+      "engine_adapter": "transformers_sentiment_classifier",
+      "provenance_url": "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/tree/3216a57f2a0d9c45a2e6c20157c20c49fb4bf9c7",
+      "license_name": "CC-BY-4.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest/tree/3216a57f2a0d9c45a2e6c20157c20c49fb4bf9c7"
     },
     {
-      "name": "nli-distilroberta",
+      "logical_name": "nli-distilroberta",
       "repo_id": "cross-encoder/nli-distilroberta-base",
       "revision": "b14d131f9d32668a5e6a982729b57ff6ed5dfcbd",
       "relative_path": "nli-distilroberta",
@@ -69,11 +102,20 @@
       "required_files": [
         "config.json",
         "model.safetensors",
-        "tokenizer_config.json"
-      ]
+        "merges.txt",
+        "special_tokens_map.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json"
+      ],
+      "engine_adapter": "transformers_nli_classifier",
+      "provenance_url": "https://huggingface.co/cross-encoder/nli-distilroberta-base/tree/b14d131f9d32668a5e6a982729b57ff6ed5dfcbd",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/cross-encoder/nli-distilroberta-base/tree/b14d131f9d32668a5e6a982729b57ff6ed5dfcbd"
     },
     {
-      "name": "qwen2.5-7b-instruct",
+      "logical_name": "qwen2.5-7b-instruct",
       "repo_id": "Qwen/Qwen2.5-7B-Instruct",
       "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
       "relative_path": "qwen2.5-7b-instruct",
@@ -83,13 +125,22 @@
       "required_files": [
         "config.json",
         "model.safetensors.index.json",
+        "model-00001-of-00004.safetensors",
+        "model-00002-of-00004.safetensors",
+        "model-00003-of-00004.safetensors",
+        "model-00004-of-00004.safetensors",
         "tokenizer.json",
         "tokenizer_config.json"
       ],
+      "engine_adapter": "vllm_text_generation",
+      "provenance_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/tree/a09a35458c702b33eeacc393d103063234e8bc28",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/tree/a09a35458c702b33eeacc393d103063234e8bc28",
       "feature": "qwen_llm"
     },
     {
-      "name": "fish-speech-s2-pro",
+      "logical_name": "fish-speech-s2-pro",
       "repo_id": "fishaudio/s2-pro",
       "revision": "1de9996b6be38b745688de084d87a5633f714e4e",
       "relative_path": "fish-speech/s2-pro",
@@ -102,10 +153,15 @@
         "model.safetensors.index.json",
         "tokenizer.json",
         "tokenizer_config.json"
-      ]
+      ],
+      "engine_adapter": "fish_speech_s2_pro",
+      "provenance_url": "https://huggingface.co/fishaudio/s2-pro/tree/1de9996b6be38b745688de084d87a5633f714e4e",
+      "license_name": "Fish Audio Research License",
+      "license_status": "permission_required",
+      "license_url": "https://huggingface.co/fishaudio/s2-pro/blob/1de9996b6be38b745688de084d87a5633f714e4e/LICENSE.md"
     },
     {
-      "name": "dnsmos",
+      "logical_name": "dnsmos",
       "source_type": "url",
       "download_url": "https://raw.githubusercontent.com/microsoft/DNS-Challenge/master/DNSMOS/DNSMOS/sig_bak_ovr.onnx",
       "sha256": "269fbebdb513aa23cddfbb593542ecc540284a91849ac50516870e1ac78f6edd",
@@ -116,7 +172,62 @@
       ],
       "required_files": [
         "sig_bak_ovr.onnx"
-      ]
+      ],
+      "engine_adapter": "onnx_dnsmos",
+      "provenance_url": "https://github.com/microsoft/DNS-Challenge",
+      "license_name": "DNS-Challenge model license",
+      "license_status": "review_required",
+      "license_url": "https://github.com/microsoft/DNS-Challenge/blob/master/LICENSE-CODE"
+    },
+    {
+      "logical_name": "sam-audio-base",
+      "repo_id": "facebook/sam-audio-base",
+      "revision": "81f64008f9f957c2b57a45923fb5299c66e9d186",
+      "relative_path": "magic-clean/sam-audio-base",
+      "roles": [
+        "magic_clean_sam_audio"
+      ],
+      "required_files": [
+        "LICENSE",
+        "checkpoint.pt",
+        "config.json"
+      ],
+      "engine_adapter": "meta_sam_audio_base",
+      "provenance_url": "https://huggingface.co/facebook/sam-audio-base/tree/81f64008f9f957c2b57a45923fb5299c66e9d186",
+      "license_name": "SAM License",
+      "license_status": "review_required",
+      "license_url": "https://github.com/facebookresearch/sam-audio/blob/bb4c6999d2677c7402360e426afc01ddfad6dce0/LICENSE",
+      "file_hashes": {
+        "LICENSE": "4dea99bfaa016e21bc860d73f344236bd1e5c4977d1a9a8fd32f822b500ae1be",
+        "checkpoint.pt": "b5f3e29ea7a9e80e90a00da495a8aafe890571f371c4bfb88c052c65a5636839",
+        "config.json": "b99a0ee6296edaeb8d355d41d365b33faa94b40af00b2c34d643a43617b10fb2"
+      }
+    },
+    {
+      "logical_name": "sam-audio-base-text-encoder",
+      "repo_id": "google-t5/t5-base",
+      "revision": "a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1",
+      "relative_path": "magic-clean/t5-base",
+      "roles": [
+        "magic_clean_sam_audio"
+      ],
+      "required_files": [
+        "config.json",
+        "model.safetensors",
+        "spiece.model",
+        "tokenizer.json"
+      ],
+      "engine_adapter": "meta_sam_audio_t5_base",
+      "provenance_url": "https://huggingface.co/google-t5/t5-base/tree/a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/google-t5/t5-base",
+      "file_hashes": {
+        "config.json": "46dd7cb62d29c81fb551e0ef1ea274c24a46ba441eeb948897706252933df033",
+        "model.safetensors": "a90903540cc02cbeb7ff9f823f1a80eb778c7e22426a0e620b01c77a5ec8f5b4",
+        "spiece.model": "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86",
+        "tokenizer.json": "d2acde0d8d71dd30a711834b07781b9c89feaac33fd332f60507699282740066"
+      }
     }
   ]
 }

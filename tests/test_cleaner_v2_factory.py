@@ -3,6 +3,7 @@ import json
 import pytest
 
 from hear.runtime.cleaner.factory import CleanerWorkerFactory
+from hear.runtime.cleaner.gpu_admission import DeviceMemorySnapshot, GpuAdmissionController
 from hear.runtime.cleaner.model_registry import CertifiedRuntime
 from hear.runtime.cleaner.worker_lease import WorkerLease
 from hear.services.magic_clean.contracts import AttemptTicket, CleanExecutionError
@@ -12,16 +13,26 @@ from tests.test_cleaner_v2_contracts import ticket as ticket_fixture
 ticket = ticket_fixture
 
 
+class AvailableGpuProbe:
+    def snapshot(self, device_index):
+        return DeviceMemorySnapshot(24_000_000_000, 0, 24_000_000_000)
+
+
 @pytest.fixture
 def configuration(tmp_path, ticket):
     runtime = AttemptTicket.model_validate_json(json.dumps(ticket)).plan.runtime
     return {
         "lock_directory": tmp_path,
         "lane": "gpu",
-        "runtimes": (CertifiedRuntime(runtime, "c" * 64, 48000, 1000000, (48000,), (2,), "gpu"),),
+        "runtimes": (
+            CertifiedRuntime(
+                runtime, "c" * 64, 48000, 1000000, (48000,), (2,), "gpu", 1_000_000_000
+            ),
+        ),
         "loaders": {"deepfilternet3": lambda: pytest.fail("must not allocate a model")},
         "readiness": {"deepfilternet3": lambda _: True},
         "store": MemoryStore(),
+        "gpu_admission": GpuAdmissionController(AvailableGpuProbe(), safety_reserve_bytes=0),
     }
 
 
@@ -35,7 +46,7 @@ def test_factory_does_not_probe_load_or_contact_store(configuration):
 def test_readiness_tracks_worker_retirement_and_close(configuration):
     worker = CleanerWorkerFactory.build(**configuration)
     try:
-        assert [p["ready"] for p in worker.capabilities()["profiles"]] == [True, False, False]
+        assert [p["ready"] for p in worker.capabilities()["profiles"]] == [True, False]
         worker.executor.worker_lease.mark_unhealthy()
         profile = worker.capabilities()["profiles"][0]
         assert not profile["ready"]

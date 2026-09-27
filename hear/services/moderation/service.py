@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 
-from hear.core.keyword_loader import harm_keyword_loader
 from hear.inference.client import LocalInferenceClient
 from hear.services.llm import LLMService
 
@@ -44,7 +43,9 @@ class ModerationService:
     ) -> None:
         self._model_client = model_client
         self._llm = llm or LLMService(enabled=False)
-        self._harm_keywords = harm_keywords or harm_keyword_loader
+        self._harm_keywords = tuple(
+            getattr(harm_keywords, "harm_keywords", harm_keywords) or ()
+        )
 
     def _models(self) -> LocalInferenceClient:
         return self._model_client
@@ -63,7 +64,7 @@ class ModerationService:
                 "blocked_words_found": [],
             }
         text_lower = text.lower()
-        built_in_keywords = self._harm_keywords.harm_keywords
+        built_in_keywords = self._harm_keywords
         loop = asyncio.get_event_loop()
         built_in_hits = [kw for kw in built_in_keywords if self._contains_keyword(text_lower, kw)]
         if built_in_hits:

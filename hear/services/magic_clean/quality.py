@@ -1,9 +1,3 @@
-"""Bounded integrity and conservative content-risk screening for v2.
-
-Signal comparisons are warnings, not proof that every word is preserved.
-Perceptual certification and target-speech analysis remain separate gates.
-"""
-
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -45,7 +39,7 @@ class AudioQualityGate:
         intervals: list[ContentWarningInterval] = []
         truncated = False
         with sf.SoundFile(source) as original, sf.SoundFile(processed) as output:
-            expected_channels = 1 if plan.profile == "voice_focus" else original.channels
+            expected_channels = 1 if plan.profile == "sam_audio" else original.channels
             if (
                 output.frames != original.frames
                 or output.samplerate != original.samplerate
@@ -81,7 +75,7 @@ class AudioQualityGate:
                     raise CleanExecutionError(
                         ErrorCode.INVALID_AUDIO, "generated content on silent source"
                     )
-                if plan.profile != "voice_focus":
+                if plan.profile == "natural":
                     active = original_rms > 1e-4
                     if np.any(active & (output_rms < original_rms * 0.01)):
                         raise CleanExecutionError(
@@ -89,21 +83,34 @@ class AudioQualityGate:
                         )
                     if np.any(active & (output_rms < original_rms * 0.5)):
                         warnings.add("possible_wanted_content_loss")
-                elif np.max(original_rms) > 1e-4 and np.max(output_rms) < 1e-8:
-                    warnings.add("no_speech_target_detected")
-                code: Literal[
-                    "possible_wanted_content_loss",
-                    "no_speech_target_detected",
-                ] | None = None
+                elif (
+                    plan.profile == "sam_audio"
+                    and plan.prompt_action == "isolate"
+                    and np.max(original_rms) > 1e-4
+                    and np.max(output_rms) < 1e-8
+                ):
+                    warnings.add("sam_audio_target_not_detected")
+                code: (
+                    Literal[
+                        "possible_wanted_content_loss",
+                        "sam_audio_target_not_detected",
+                    ]
+                    | None
+                ) = None
                 ratio = 1.0
-                if plan.profile != "voice_focus":
+                if plan.profile == "natural":
                     if np.any(active):
                         ratio = float(np.min(output_rms[active] / original_rms[active]))
                         if ratio < 0.5:
                             code = "possible_wanted_content_loss"
-                elif np.max(original_rms) > 1e-4 and np.max(output_rms) < 1e-8:
+                elif (
+                    plan.profile == "sam_audio"
+                    and plan.prompt_action == "isolate"
+                    and np.max(original_rms) > 1e-4
+                    and np.max(output_rms) < 1e-8
+                ):
                     ratio = float(np.max(output_rms) / np.max(original_rms))
-                    code = "no_speech_target_detected"
+                    code = "sam_audio_target_not_detected"
                 if code:
                     start = frames - len(before)
                     if (
@@ -133,8 +140,12 @@ class AudioQualityGate:
                         truncated = True
             if frames != original.frames:
                 raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "engine decode is incomplete")
-            if plan.profile == "voice_focus" and not target_detected:
-                raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "no speech target detected")
+            if (
+                plan.profile == "sam_audio"
+                and plan.prompt_action == "isolate"
+                and not target_detected
+            ):
+                raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "no SAM Audio target detected")
         speech = None
         if self.speech is None:
             warnings.add("speech_activity_unavailable")
@@ -159,7 +170,7 @@ class AudioQualityGate:
                     if len(speech.output_active_frames) == len(speech.source_active_frames)
                     else 0
                 ]
-                if active and target < active * 0.5:
+                if active and target < active * 0.95:
                     warnings.add("possible_speech_loss")
             if speech.evidence_truncated:
                 warnings.add("speech_evidence_incomplete")

@@ -1,3 +1,3 @@
-from .catalog import PipelineCatalog, PipelineCatalogClient, PipelineCatalogSnapshot
+from .configuration import PipelineCatalog, PipelineConfiguration, PipelineConfigurationLoader
 
-__all__ = ["PipelineCatalog", "PipelineCatalogClient", "PipelineCatalogSnapshot"]
+__all__ = ["PipelineCatalog", "PipelineConfiguration", "PipelineConfigurationLoader"]

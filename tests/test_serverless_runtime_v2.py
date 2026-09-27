@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from runpod.serverless.modules.rp_job import run_job_generator
 
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptClaim, ClaimDecision, JobType
@@ -53,6 +54,7 @@ class TestServerlessRuntime:
             Provider(),
         )
         job = {
+            "id": "runpod-job-1",
             "input": {
                 "job_id": "job-1",
                 "run_id": "run-1",
@@ -76,6 +78,43 @@ class TestServerlessRuntime:
                 "backend_base_url": "https://api.example.com",
             }
         }
-        events = [event async for event in runtime.handler(job)]
-        assert events[0]["event"] == "progress"
+        events = [event async for event in run_job_generator(runtime.handler, job)]
+        assert events[0]["output"]["event"] == "progress"
         assert updates == ["transcribing:20.0"]
+
+    def test_start_registers_readiness_and_streaming_handler(self):
+        registered = []
+        started = []
+
+        class Serverless:
+            @staticmethod
+            def register_fitness_check(check):
+                registered.append(check)
+                return check
+
+            @staticmethod
+            def start(config):
+                started.append(config)
+
+        class Provider:
+            serverless = Serverless()
+
+        class Readiness:
+            @staticmethod
+            def is_ready():
+                return True
+
+        runtime = ServerlessRuntime(
+            WorkerRole.TRANSCRIPTION,
+            JobExecutor({JobType.TRANSCRIPTION: FakeWorkflow()}),
+            FakeBackend(),
+            Provider(),
+            readiness=Readiness(),
+        )
+
+        runtime.start()
+
+        assert registered == [runtime._check_readiness]
+        assert registered[0]() is None
+        assert started[0]["handler"] == runtime.handler
+        assert started[0]["return_aggregate_stream"] is False

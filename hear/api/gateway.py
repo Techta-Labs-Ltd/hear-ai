@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import asyncio
+import hmac
+import json
+import os
+import shutil
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+from fastapi import APIRouter, Header, HTTPException, status
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from starlette.background import BackgroundTask
+
+from hear.contracts.jobs import AttemptEnvelope
+from hear.runtime.gateway import (
+    GatewayAttempt,
+    GatewayDeadlineExpired,
+    GatewayQueueFull,
+    GatewayUnavailable,
+    RabbitMQGateway,
+)
+
+
+class PodGateway:
+    def __init__(
+        self,
+        runtime: RabbitMQGateway,
+        api_key: str,
+        *,
+        enable_docs: bool = False,
+    ) -> None:
+        self._runtime = runtime
+        self._api_key = api_key.strip()
+        self.enable_docs = enable_docs
+        self.router = APIRouter(tags=["gateway"])
+        self.router.add_api_route("/v1/attempts/stream", self.stream_attempt, methods=["POST"])
+        self.router.add_api_route("/healthz", self.healthz, methods=["GET"])
+        self.router.add_api_route("/readyz", self.readyz, methods=["GET"])
+        self.router.add_api_route("/capabilities", self.capabilities, methods=["GET"])
+        self.router.add_api_route("/metrics", self.metrics, methods=["GET"])
+        self.router.add_api_route("/drain", self.drain, methods=["POST"])
+
+    async def healthz(self) -> dict[str, str]:
+        return {"status": "healthy"}
+
+    async def readyz(self):
+        lanes = await self._runtime.lane_status()
+        ready = bool(lanes) and all(item["status"] == "ready" for item in lanes.values())
+        return JSONResponse(
+            {"status": "ready" if ready else "loading", "lanes": lanes},
+            status_code=200 if ready else 503,
+        )
+
+    async def capabilities(self) -> dict:
+        lanes = await self._runtime.lane_status()
+        ready = bool(lanes) and all(item["status"] == "ready" for item in lanes.values())
+        return {
+            "status": "ready" if ready else "loading",
+            "lanes": lanes,
+            "magic_clean": {
+                "profiles": {
+                    "natural": {
+                        "engine": "deepfilternet3",
+                        "use_for": [
+                            "recording hiss",
+                            "steady background noise",
+                            "speech denoising",
+                        ],
+                        "options": {
+                            "attenuation_limit_db": [12, 18, 24],
+                        },
+                    },
+                    "sam_audio": {
+                        "engine": "sam_audio_base",
+                        "use_for": ["music", "speech", "speaker", "sound events"],
+                        "semantics": {
+                            "remove": "returns everything except the prompted sound",
+                            "isolate": "returns only the prompted sound",
+                            "target_not_detected": "no output artifact is published",
+                        },
+                        "quality": {
+                            "ambient": "two candidates ranked by official CLAP",
+                            "event": "official PE span prediction",
+                        },
+                        "options": {
+                            "prompt": "required lowercase sound description",
+                            "action": ["remove", "isolate"],
+                            "prompt_mode": ["ambient", "event"],
+                            "default_prompt_mode": "ambient",
+                            "default_action": "remove",
+                            "seed": "integer from 0 to 9223372036854775807",
+                        },
+                    },
+                }
+            },
+        }
+
+    async def drain(self, authorization: str | None = Header(default=None)) -> dict[str, str]:
+        self._authenticate(authorization)
+        await self._runtime.drain()
+        return {"status": "draining"}
+
+    async def metrics(self) -> PlainTextResponse:
+        lanes = await self._runtime.lane_status()
+        lines = ["# TYPE hear_gateway_ready gauge"]
+        ready = bool(lanes) and all(item["status"] == "ready" for item in lanes.values())
+        lines.append(f"hear_gateway_ready {int(ready)}")
+        lines.append("# TYPE hear_queue_messages gauge")
+        for role, item in lanes.items():
+            lines.append(f'hear_queue_messages{{role="{role}"}} {int(item["queued"])}')
+        lines.append("# TYPE hear_queue_consumers gauge")
+        for role, item in lanes.items():
+            lines.append(f'hear_queue_consumers{{role="{role}"}} {int(item["consumers"])}')
+        scratch = Path(os.environ.get("HEAR_TEMP_DIR", "/tmp"))
+        try:
+            free_bytes = shutil.disk_usage(scratch).free
+        except OSError:
+            free_bytes = 0
+        lines.extend(
+            ("# TYPE hear_scratch_free_bytes gauge", f"hear_scratch_free_bytes {free_bytes}")
+        )
+        gpu = await self._gpu_memory()
+        if gpu is not None:
+            used, free = gpu
+            lines.extend(
+                (
+                    "# TYPE hear_gpu_memory_used_bytes gauge",
+                    f"hear_gpu_memory_used_bytes {used}",
+                    "# TYPE hear_gpu_memory_free_bytes gauge",
+                    f"hear_gpu_memory_free_bytes {free}",
+                )
+            )
+        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
+    @staticmethod
+    async def _gpu_memory() -> tuple[int, int] | None:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "nvidia-smi",
+                "--query-gpu=memory.used,memory.free",
+                "--format=csv,noheader,nounits",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=2.0)
+            if process.returncode != 0:
+                return None
+            first = stdout.decode().splitlines()[0]
+            used_mib, free_mib = (int(value.strip()) for value in first.split(",", 1))
+            return used_mib * 1024 * 1024, free_mib * 1024 * 1024
+        except (OSError, ValueError, IndexError, TimeoutError):
+            return None
+
+    async def stream_attempt(
+        self,
+        envelope: AttemptEnvelope,
+        authorization: str | None = Header(default=None),
+    ) -> StreamingResponse:
+        self._authenticate(authorization)
+        try:
+            attempt = await self._runtime.enqueue(envelope)
+        except GatewayQueueFull as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+                headers={"Retry-After": "5"},
+            ) from exc
+        except GatewayDeadlineExpired as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except GatewayUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+        return StreamingResponse(
+            self._events(attempt),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+            background=BackgroundTask(attempt.close),
+        )
+
+    def _authenticate(self, authorization: str | None) -> None:
+        scheme, _, token = (authorization or "").partition(" ")
+        if not self._api_key:
+            raise HTTPException(status_code=503, detail="pod_api_key_not_configured")
+        if scheme.lower() != "bearer" or not token or not hmac.compare_digest(token, self._api_key):
+            raise HTTPException(
+                status_code=401,
+                detail="invalid_pod_api_key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    async def _events(self, attempt: GatewayAttempt) -> AsyncIterator[str]:
+        yield self._encode(
+            "queued",
+            {
+                "job_id": attempt.envelope.job_id,
+                "attempt_id": attempt.envelope.attempt_id,
+                "track_id": attempt.envelope.track_id,
+                "queue": "accepted",
+            },
+        )
+        iterator = self._runtime.stream(attempt).__aiter__()
+        next_event = asyncio.ensure_future(iterator.__anext__())
+        try:
+            while True:
+                done, _ = await asyncio.wait({next_event}, timeout=15.0)
+                if not done:
+                    yield ": keep-alive\n\n"
+                    continue
+                try:
+                    payload = next_event.result()
+                except StopAsyncIteration:
+                    return
+                if payload.get("kind") == "event":
+                    event = payload["data"]
+                    yield self._encode(event["event"], event, event.get("event_id"))
+                else:
+                    yield self._encode(payload.get("event", "error"), payload.get("data", {}))
+                next_event = asyncio.ensure_future(iterator.__anext__())
+        finally:
+            if not next_event.done():
+                next_event.cancel()
+                await asyncio.gather(next_event, return_exceptions=True)
+            await iterator.aclose()
+            await attempt.close()
+
+    @staticmethod
+    def _encode(event_name: str, data: dict, event_id: str | None = None) -> str:
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        lines = []
+        if event_id:
+            lines.append(f"id: {event_id}")
+        lines.append(f"event: {event_name}")
+        lines.append(f"data: {payload}")
+        return "\n".join(lines) + "\n\n"

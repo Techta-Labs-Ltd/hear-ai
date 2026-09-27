@@ -92,6 +92,7 @@ class S3BundleVerifier:
                 digest.update(chunk)
                 if sink is not None:
                     sink.write(chunk)
+                    guard.check_scratch()
                 if collect:
                     chunks.append(chunk)
             guard.check()
@@ -135,14 +136,18 @@ class S3SourceStager:
         if destination.exists():
             raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "source destination exists")
         source = ticket.input
-        occupied = sum(path.stat().st_size for path in guard.workspace.rglob("*") if path.is_file())
-        if (
-            source.size_bytes > guard.budget.max_input_bytes
-            or occupied + source.size_bytes > guard.budget.scratch_bytes
-        ):
+        if source.size_bytes > guard.budget.max_input_bytes:
             raise CleanExecutionError(
                 ErrorCode.RESOURCE_EXHAUSTED, "source exceeds download budget"
             )
+        try:
+            guard.reserve_scratch(source.size_bytes)
+        except CleanExecutionError as exc:
+            if exc.code != ErrorCode.RESOURCE_EXHAUSTED:
+                raise
+            raise CleanExecutionError(
+                ErrorCode.RESOURCE_EXHAUSTED, "source exceeds download budget"
+            ) from exc
         reference = StoredObject(
             source.object_key, source.object_version, source.sha256, source.size_bytes
         )

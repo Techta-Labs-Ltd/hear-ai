@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import importlib
 import os
 import tempfile
 from dataclasses import dataclass
@@ -9,9 +10,6 @@ from typing import Any
 
 import numpy as np
 import torch
-import whisperx
-from silero_vad import get_speech_timestamps, load_silero_vad
-from whisperx.asr_qwen import load_model as load_qwen_asr_model
 
 from hear.execution.native import NativeExecutor
 from hear.utils.transcription_chunks import (
@@ -30,6 +28,10 @@ class SpeechSegment:
 
 
 class LocalSileroVad:
+    @staticmethod
+    def _silero_vad_api():
+        return importlib.import_module("silero_vad")
+
     def __init__(self, vad_onset: float, chunk_size: int) -> None:
         if not 0 < vad_onset < 1:
             raise ValueError("invalid_vad_onset")
@@ -37,7 +39,9 @@ class LocalSileroVad:
             raise ValueError("invalid_vad_chunk_size")
         self._vad_onset = vad_onset
         self._chunk_size = chunk_size
-        self._model = load_silero_vad(onnx=False)
+        vad = self._silero_vad_api()
+        self._get_speech_timestamps = vad.get_speech_timestamps
+        self._model = vad.load_silero_vad(onnx=False)
 
     @staticmethod
     def preprocess_audio(audio):
@@ -82,7 +86,7 @@ class LocalSileroVad:
         if isinstance(waveform, np.ndarray):
             waveform = torch.from_numpy(waveform.astype(np.float32, copy=False))
         waveform = waveform.float().reshape(-1)
-        timestamps = get_speech_timestamps(
+        timestamps = self._get_speech_timestamps(
             waveform,
             self._model,
             threshold=self._vad_onset,
@@ -120,6 +124,9 @@ class QwenAsrEngine:
         self._long_audio_batch_size = long_audio_batch_size
         self._chunk_seconds = chunk_seconds
         self._cuda_healthy = True
+        whisperx = importlib.import_module("whisperx")
+        load_qwen_asr_model = importlib.import_module("whisperx.asr_qwen").load_model
+        self._whisperx = whisperx
         vad_model = LocalSileroVad(vad_onset, chunk_seconds)
         self._asr = load_qwen_asr_model(
             str(model_path),
@@ -205,7 +212,7 @@ class QwenAsrEngine:
             stream.write(audio_bytes)
             path = stream.name
         try:
-            audio = whisperx.load_audio(path)
+            audio = self._whisperx.load_audio(path)
             duration = len(audio) / 16000
             effective_batch = adaptive_batch_size(
                 duration,

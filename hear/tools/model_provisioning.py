@@ -38,10 +38,13 @@ class ModelProvisioner:
         *,
         enabled_features: frozenset[str] = frozenset(),
     ) -> tuple[str, ...]:
-        return self._manifest.validate_local(
-            self._model_root,
-            role,
-            enabled_features=enabled_features,
+        return (
+            *self._manifest.license_blockers(role, enabled_features=enabled_features),
+            *self._manifest.validate_local(
+                self._model_root,
+                role,
+                enabled_features=enabled_features,
+            ),
         )
 
     @classmethod
@@ -66,7 +69,7 @@ class ModelProvisioner:
                 enabled_features=features,
             )
             if missing:
-                raise RuntimeError("missing required model files: " + ", ".join(missing))
+                raise RuntimeError("model verification failed: " + ", ".join(missing))
             return 0
         instance.provision(
             WorkerRole(args.role),
@@ -77,7 +80,7 @@ class ModelProvisioner:
             enabled_features=features,
         )
         if missing:
-            raise RuntimeError("missing required model files: " + ", ".join(missing))
+            raise RuntimeError("model verification failed: " + ", ".join(missing))
         return 0
 
 

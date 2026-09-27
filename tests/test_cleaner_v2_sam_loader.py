@@ -1,227 +1,297 @@
-from pathlib import Path
+import hashlib
+import importlib.metadata
+import threading
+import time
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import soundfile as sf
 import torch
 
-import hear.runtime.cleaner.sam_loader as loader
-from hear.runtime.cleaner.longform_sam import SolverPolicy
+from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
 from hear.runtime.cleaner.sam_loader import PinnedSamAssets, PinnedSamFactory
-from hear.services.magic_clean.contracts import CleanExecutionError
-from tests.test_cleaner_v2_sam_plan import binding as binding_fixture
-
-binding = binding_fixture
-
-
-@pytest.fixture
-def factory(binding):
-    _, prompt, cache, guard = binding
-    root = Path(__file__).resolve().parents[1]
-    assets = PinnedSamAssets(
-        guard.workspace,
-        guard.workspace,
-        guard.workspace / "config",
-        guard.workspace / "weights",
-        root / "deploy/cleaner/sam-small-optional-keys.json",
-    )
-    return PinnedSamFactory(assets, prompt, cache), guard
-
-
-def test_policy_changes_change_identity(factory):
-    value, _ = factory
-    different_tile = PinnedSamFactory(
-        value.assets, value.prompt, value.cache, codec_tile_frames=257
-    )
-    different_solver = PinnedSamFactory(
-        value.assets, value.prompt, value.cache, solver=SolverPolicy(200, 40, 16)
-    )
-    assert value.identity != different_tile.identity != different_solver.identity
-    with pytest.raises(CleanExecutionError):
-        value.validate_identity(different_tile.identity)
-
-
-@pytest.mark.parametrize("failure", [None, "codec", "checkpoint", "postload"])
-def test_factory_owns_partial_loading_and_borrows_cache(factory, monkeypatch, failure):
-    value, guard = factory
-    closed = []
-    core = SimpleNamespace(core=torch.nn.Linear(1, 1), close=lambda: closed.append("core"))
-    codec = SimpleNamespace(codec=torch.nn.Linear(1, 1), close=lambda: closed.append("codec"))
-    monkeypatch.setattr(loader.SamCoreBuilder, "build", lambda *args: core)
-
-    def build(*args):
-        if failure == "codec":
-            raise RuntimeError("fixture codec construction")
-        return codec
-
-    def load(*args, **kwargs):
-        assert kwargs["sha256"] == value.CHECKPOINT
-        assert len(kwargs["optional_keys"]) == 601
-        if failure == "checkpoint":
-            raise RuntimeError("fixture checkpoint failure")
-        if failure == "postload":
-            guard.cancelled.set()
-        return (247, 317)
-
-    monkeypatch.setattr(loader.SamCodecBuilder, "build", build)
-    monkeypatch.setattr(loader.SamCheckpointLoader, "load", load)
-    if failure:
-        with pytest.raises((RuntimeError, CleanExecutionError)):
-            value.open(guard)
-        assert closed == (["core"] if failure == "codec" else ["codec", "core"])
-    else:
-        backend = value.open(guard)
-        assert backend.pipeline.core is core.core and backend.pipeline.codec is codec.codec
-        backend.close()
-        backend.close()
-        assert closed == ["codec", "core"] and backend.pipeline is None
-    assert value.cache.get(value.prompt)[0].shape == (1, 2, 768)
-
-
-def test_missing_prompt_fails_before_construction(factory, monkeypatch):
-    value, guard = factory
-    value.cache.close()
-
-    def forbidden(*args):
-        pytest.fail("constructed before cache admission")
-
-    monkeypatch.setattr(loader.SamCoreBuilder, "build", forbidden)
-    with pytest.raises(CleanExecutionError):
-        value.open(guard)
-
-
-def test_cpu_autocast_rejected_before_construction_without_mutating_context(factory, monkeypatch):
-    value, guard = factory
-
-    def forbidden(*args):
-        pytest.fail("constructed under unsupported autocast")
-
-    monkeypatch.setattr(loader.SamCoreBuilder, "build", forbidden)
-    assert not torch.is_autocast_enabled("cpu")
-    with torch.autocast("cpu", dtype=torch.bfloat16):
-        with pytest.raises(CleanExecutionError, match="precision policy mismatch"):
-            value.open(guard)
-        assert torch.is_autocast_enabled("cpu")
-        assert torch.get_autocast_dtype("cpu") == torch.bfloat16
-    assert not torch.is_autocast_enabled("cpu")
-    value.validate_identity(value.identity)
-
-
-@pytest.mark.parametrize(
-    "setting", ["mkldnn", "mkldnn_deterministic", "deterministic", "matmul", "dtype", "device"]
+from hear.runtime.cleaner.sam_official import SamOfficialPipeline
+from hear.services.magic_clean.contracts import (
+    CleanExecutionError,
+    CleanPlan,
+    ErrorCode,
+    RuntimeIdentity,
 )
-def test_cpu_policy_mismatch_rejected_without_changing_settings(factory, monkeypatch, setting):
-    value, _ = factory
-    if setting == "mkldnn":
-        monkeypatch.setattr(torch.backends.mkldnn, "enabled", False)
-    elif setting == "mkldnn_deterministic":
-        monkeypatch.setattr(torch.backends.mkldnn, "deterministic", True)
-    elif setting == "deterministic":
-        monkeypatch.setattr(torch, "are_deterministic_algorithms_enabled", lambda: True)
-    elif setting == "matmul":
-        monkeypatch.setattr(torch, "get_float32_matmul_precision", lambda: "medium")
-    elif setting == "dtype":
-        monkeypatch.setattr(torch, "get_default_dtype", lambda: torch.float64)
-    else:
-        monkeypatch.setattr(torch, "get_default_device", lambda: torch.device("meta"))
-    before = (
-        torch.backends.mkldnn.enabled,
-        torch.backends.mkldnn.deterministic,
-        torch.are_deterministic_algorithms_enabled(),
-        torch.get_float32_matmul_precision(),
-        torch.get_default_dtype(),
-        torch.get_default_device(),
-    )
-    with pytest.raises(CleanExecutionError, match="precision policy mismatch"):
-        value.validate_identity(value.identity)
-    assert before == (
-        torch.backends.mkldnn.enabled,
-        torch.backends.mkldnn.deterministic,
-        torch.are_deterministic_algorithms_enabled(),
-        torch.get_float32_matmul_precision(),
-        torch.get_default_dtype(),
-        torch.get_default_device(),
+from hear.services.magic_clean.engines.sam_audio import SamEngine
+
+
+def _guard(path):
+    return ResourceGuard(
+        ResourceBudget(128_000_000, 32_000_000, 100_000),
+        path,
+        time.monotonic() + 30,
+        threading.Event(),
     )
 
 
-def test_cuda_identity_is_distinct_and_device_is_explicit(factory):
-    value, _ = factory
-    cuda = PinnedSamFactory(value.assets, value.prompt, value.cache, device="cuda:0")
-    assert cuda.identity != value.identity
-    assert cuda.identity.precision_policy_sha256 != value.identity.precision_policy_sha256
-    assert cuda.identity.longform_policy_sha256 == value.identity.longform_policy_sha256
-    for device in ("cuda", "cuda:1", "mps", "meta"):
-        with pytest.raises(ValueError, match="unsupported SAM device"):
-            PinnedSamFactory(value.assets, value.prompt, value.cache, device=device)
+def test_factory_uses_official_sam_audio_api_and_drops_video_weights(tmp_path, monkeypatch):
+    monkeypatch.setattr(PinnedSamAssets, "verify", lambda self, guard: None)
+    config = tmp_path / "sam" / "config.json"
+    config.parent.mkdir()
+    config.write_text("{}")
+    checkpoint = config.with_name("checkpoint.pt")
+    checkpoint.write_bytes(b"checkpoint")
+    text = tmp_path / "t5"
+    text.mkdir()
+    ranker = tmp_path / "clap.pt"
+    span = tmp_path / "pe"
+    cache = tmp_path / "cache"
+    span.mkdir()
+    cache.mkdir()
+    calls = []
 
+    class FakeModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(()))
+            self.vision_encoder = SimpleNamespace(dim=13)
 
-@pytest.mark.parametrize("flag", ["tf32", "benchmark", "deterministic", "disabled"])
-def test_cuda_backend_policy_rejected_without_initialization(factory, monkeypatch, flag):
-    value, _ = factory
-    cuda = PinnedSamFactory(value.assets, value.prompt, value.cache, device="cuda:0")
-    monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
-    monkeypatch.setattr(torch.backends.cudnn, "benchmark", False)
-    monkeypatch.setattr(torch.backends.cudnn, "deterministic", False)
-    monkeypatch.setattr(torch.backends.cudnn, "enabled", True)
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: pytest.fail("premature CUDA probe"))
-    cuda.validate_identity(cuda.identity)
-    attribute = {
-        "tf32": "allow_tf32",
-        "benchmark": "benchmark",
-        "deterministic": "deterministic",
-        "disabled": "enabled",
-    }[flag]
-    changed = flag != "disabled"
-    monkeypatch.setattr(torch.backends.cudnn, attribute, changed)
-    with pytest.raises(CleanExecutionError, match="CUDA precision policy mismatch"):
-        cuda.validate_identity(cuda.identity)
-    assert getattr(torch.backends.cudnn, attribute) == changed
+    class FakeSAMAudio:
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            calls.append(("model", model_id, kwargs))
+            return FakeModel()
 
+    class FakeProcessor:
+        audio_sampling_rate = 48_000
 
-@pytest.mark.parametrize("failure", [None, "unavailable", "multiple", "budget", "transfer"])
-def test_cuda_cap_precedes_required_module_transfer(factory, monkeypatch, failure):
-    value, guard = factory
-    cuda = PinnedSamFactory(value.assets, value.prompt, value.cache, device="cuda:0")
-    events = []
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: failure != "unavailable")
-    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2 if failure == "multiple" else 1)
+        @classmethod
+        def from_pretrained(cls, model_id):
+            calls.append(("processor", model_id))
+            return cls()
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "sam_audio",
+        SimpleNamespace(SAMAudio=FakeSAMAudio, SAMAudioProcessor=FakeProcessor),
+    )
     monkeypatch.setattr(
-        torch.cuda,
-        "get_device_properties",
-        lambda index: SimpleNamespace(total_memory=1 if failure == "budget" else 18_000_000_000),
+        importlib.metadata,
+        "version",
+        lambda name: PinnedSamFactory.PACKAGES[name],
+    )
+    factory = PinnedSamFactory(
+        PinnedSamAssets(
+            config,
+            checkpoint,
+            text,
+            tuple(
+                (name, "a" * 64)
+                for name in (
+                    "config.json",
+                    "tokenizer.json",
+                    "spiece.model",
+                    "model.safetensors",
+                )
+            ),
+            ranker,
+            "b" * 64,
+            span,
+            tuple(
+                (name, "c" * 64)
+                for name in (
+                    "config.json",
+                    "model.safetensors",
+                    "preprocessor_config.json",
+                    "special_tokens_map.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                )
+            ),
+            cache,
+        ),
+        device="cpu",
+        text_encoder_identity="a" * 64,
+    )
+    backend = factory.open(_guard(tmp_path))
+
+    assert calls[0][0] == "model"
+    assert calls[0][1] == str(config.parent)
+    assert calls[0][2]["local_files_only"] is True
+    assert calls[0][2]["text_encoder"] == {"name": str(text)}
+    assert calls[0][2]["visual_ranker"] is None
+    assert calls[0][2]["text_ranker"] == {
+        "kind": "clap",
+        "checkpoint": str(ranker),
+    }
+    assert calls[0][2]["span_predictor"] == str(span)
+    assert calls[1] == ("processor", str(config.parent))
+    assert not hasattr(backend.pipeline.model, "vision_encoder")
+    audio_features = torch.ones(2, 5, 9)
+    video_features = backend.pipeline.model._get_video_features(None, audio_features)
+    assert video_features.shape == (2, 13, 5)
+    assert torch.count_nonzero(video_features) == 0
+    backend.close()
+    factory.close()
+
+
+def test_official_pipeline_overlap_keeps_every_frame(tmp_path, monkeypatch):
+    monkeypatch.setattr(SamOfficialPipeline, "CHUNK_SECONDS", 4)
+    monkeypatch.setattr(SamOfficialPipeline, "OVERLAP_SECONDS", 1)
+
+    class FakeBatch:
+        def to(self, device):
+            return self
+
+    class FakeProcessor:
+        audio_sampling_rate = 48_000
+        audio_hop_length = 997
+
+        def __call__(self, *, audios, descriptions):
+            assert descriptions == ["background noise"]
+            self.waveform = audios[0]
+            return FakeBatch()
+
+    class FakeModel:
+        device = torch.device("cpu")
+
+        def parameters(self):
+            return iter((torch.nn.Parameter(torch.ones(())),))
+
+        def __init__(self, processor):
+            self.processor = processor
+            self.calls = 0
+
+        def separate(self, batch, *, predict_spans, reranking_candidates):
+            assert predict_spans is False
+            assert reranking_candidates == 2
+            self.calls += 1
+            wave = self.processor.waveform[0]
+            padded = (
+                (wave.shape[-1] + self.processor.audio_hop_length - 1)
+                // self.processor.audio_hop_length
+            ) * self.processor.audio_hop_length
+            wave = torch.nn.functional.pad(wave, (0, padded - wave.shape[-1]))
+            return SimpleNamespace(
+                target=[wave + self.calls],
+                residual=[wave - self.calls],
+            )
+
+    sample_rate = 48_000
+    values = np.linspace(-0.1, 0.1, sample_rate * 7, dtype=np.float32)
+    source = tmp_path / "source.wav"
+    destination = tmp_path / "separated.wav"
+    sf.write(source, values, sample_rate, subtype="FLOAT")
+    processor = FakeProcessor()
+    model = FakeModel(processor)
+    pipeline = SamOfficialPipeline(model, processor)
+    pipeline._separate_48k(
+        source,
+        destination,
+        description="background noise",
+        stream="residual",
+        seed=5,
+        predict_spans=False,
+        guard=_guard(tmp_path),
     )
 
-    def cap(fraction, device):
-        assert fraction == 0.5 and device == 0
-        events.append("cap")
+    output, rate = sf.read(destination, dtype="float32")
+    assert rate == sample_rate
+    assert output.shape == values.shape
+    assert model.calls == 3
+    assert np.isfinite(output).all()
 
-    monkeypatch.setattr(torch.cuda, "set_per_process_memory_fraction", cap)
-    modules = []
-    for name in ("core", "codec"):
-        tensor = SimpleNamespace(
-            device=torch.device("cpu"),
-            dtype=torch.float32,
-            numel=lambda: 4,
-            element_size=lambda: 4,
-        )
 
-        def transfer(*, device, dtype, tensor=tensor, name=name):
-            assert events[0] == "cap"
-            assert dtype == torch.float32 and device == "cuda:0"
-            events.append(name)
-            if failure != "transfer":
-                tensor.device = torch.device(device)
+def test_sam_residual_rejects_contiguous_active_audio_collapse():
+    source = np.full(48_000 * 4, 0.25, dtype=np.float32)
+    residual = source.copy()
+    residual[48_000 : 48_000 * 3] = 0
 
-        modules.append(
-            SimpleNamespace(
-                parameters=lambda tensor=tensor: iter((tensor,)),
-                buffers=lambda: iter(()),
-                to=transfer,
-            )
-        )
-    if failure:
-        with pytest.raises(CleanExecutionError):
-            cuda._place_modules(*modules, guard)
-        assert events == (["cap", "core", "codec"] if failure == "transfer" else [])
-    else:
-        cuda._place_modules(*modules, guard)
-        assert events == ["cap", "core", "codec"]
+    with pytest.raises(CleanExecutionError, match="residual collapsed") as error:
+        SamOfficialPipeline._validate_residual(source, residual)
+
+    assert error.value.code == ErrorCode.INVALID_AUDIO
+
+
+def test_sam_residual_accepts_bounded_attenuation():
+    source = np.full(48_000 * 4, 0.25, dtype=np.float32)
+    residual = source * 0.25
+
+    SamOfficialPipeline._validate_residual(source, residual)
+
+
+def test_sam_target_rejects_inaudible_output():
+    source = np.full(48_000 * 3, 0.1, dtype=np.float32)
+    target = np.full_like(source, 1e-4)
+
+    assert not SamOfficialPipeline._target_detected(source, target)
+
+
+def test_sam_target_accepts_audible_event():
+    source = np.full(48_000 * 3, 0.1, dtype=np.float32)
+    target = np.zeros_like(source)
+    target[48_000:96_000] = 0.01
+
+    assert SamOfficialPipeline._target_detected(source, target)
+
+
+def test_sam_target_rejects_generated_sound_on_silent_source():
+    source = np.zeros(48_000, dtype=np.float32)
+    target = np.full_like(source, 0.01)
+
+    assert not SamOfficialPipeline._target_detected(source, target)
+
+
+def test_sam_engine_passes_user_prompt_and_releases_session(tmp_path):
+    identity = RuntimeIdentity(
+        engine="sam_audio_base",
+        runtime_sha256="1" * 64,
+        checkpoint_sha256="2" * 64,
+        precision_policy_sha256="3" * 64,
+        longform_policy_sha256="4" * 64,
+    )
+    description = "background noise"
+    plan = CleanPlan(
+        profile="sam_audio",
+        profile_version="v1",
+        catalogue_sha256="5" * 64,
+        runtime=identity,
+        attenuation_limit_db=None,
+        prompt_sha256=hashlib.sha256(description.encode()).hexdigest(),
+        prompt_text=description,
+        channel_policy="mono",
+        mono_acknowledged=True,
+        adjust_loudness=False,
+        match_comparison_loudness=True,
+        shorten_pauses=False,
+        seed=7,
+    )
+    guard = _guard(tmp_path)
+    calls, closed = [], []
+
+    class Backend:
+        pipeline = SimpleNamespace(separate_plan=lambda *args, **kwargs: calls.append(kwargs))
+
+        def close(self):
+            closed.append(True)
+
+    class Factory:
+        def validate_identity(self, supplied):
+            assert supplied == identity
+
+        def open(self, _guard):
+            assert _guard is guard
+            return Backend()
+
+        def close(self):
+            pass
+
+    engine = SamEngine(identity, Factory())
+    session = engine.open_session(plan, guard)
+    assert plan.prompt_action == "remove"
+    with pytest.raises(CleanExecutionError) as occupied:
+        engine.open_session(plan, guard)
+    assert occupied.value.code == ErrorCode.RESOURCE_EXHAUSTED
+    session.process(tmp_path / "source.wav", tmp_path / "target.wav", plan, guard)
+    assert calls[0]["plan"].prompt_text == description
+    assert calls[0]["plan"].prompt_action == "remove"
+    assert calls[0]["expected_runtime"] == identity
+    session.close()
+    assert closed == [True]
+    engine.close()

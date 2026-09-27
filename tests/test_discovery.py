@@ -1,23 +1,29 @@
 import pytest
 
 from hear.config import settings
-from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
 from hear.services.categorization.discovery import DiscoveryService
 from hear.services.categorization.service import CategorizationService
 from hear.services.llm import LLMService
+from hear.services.pipeline.configuration import PipelineConfiguration, PipelineTaxonomy
 
 
 @pytest.fixture
-def taxonomy_loader(tmp_path):
-    path = tmp_path / "taxonomy.txt"
-    path.write_text(
-        "[TAXONOMY]\nAccessibility > Visual impairment\nAccessibility > Guide dogs\nAI and smart glasses\n",
-        encoding="utf-8",
+def taxonomy_loader():
+    return PipelineTaxonomy(
+        PipelineConfiguration(
+            version=1,
+            categories=(),
+            tags=(),
+            keyword_rules={},
+            harm_keywords=(),
+            taxonomy_paths=(
+                "Accessibility > Visual impairment",
+                "Accessibility > Guide dogs",
+                "AI and smart glasses",
+            ),
+        )
     )
-    loader = DiscoveryTaxonomyLoader()
-    loader.load(str(path))
-    return loader
 
 
 def test_taxonomy_matches_topics(taxonomy_loader):
@@ -100,11 +106,8 @@ def test_flatten_entities():
     assert DiscoverySerialization.flatten_entities(ents) == ["A", "Meta Ray-Ban"]
 
 
-def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader, monkeypatch):
-    svc = DiscoveryService()
-    monkeypatch.setattr(
-        "hear.services.categorization.discovery.discovery_taxonomy_loader", taxonomy_loader
-    )
+def test_qwen_controlled_tags_preserved_and_enriched(taxonomy_loader):
+    svc = DiscoveryService(taxonomy=taxonomy_loader)
     profile = ContentDiscoveryProfile(main_topic="guide dogs", secondary_topics=["independence"])
     cat = {"categories": ["Personal lived experience"], "tags": ["#Blindness"]}
     qwen_tags = ["Accessibility > Guide dogs", "Human connection"]

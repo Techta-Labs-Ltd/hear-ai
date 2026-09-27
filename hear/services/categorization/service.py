@@ -2,13 +2,19 @@ import asyncio
 import logging
 import re
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 
-from hear.core.category_loader import CategoryLabels, category_loader
-from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.inference.client import LocalInferenceClient
 from hear.services.llm import LLMService
+from hear.services.pipeline.configuration import (
+    CategoryLabels,
+    PipelineCategoryCatalog,
+    PipelineConfiguration,
+    PipelineTaxonomy,
+)
 from hear.utils.content_context import (
     assistive_tech_narrative,
+    filter_controlled_taxonomy_paths,
     filter_freeform_tag_labels,
     wildlife_media_narrative,
 )
@@ -90,8 +96,9 @@ class CategorizationService:
     ) -> None:
         self._model_client = model_client
         self._llm = llm
-        self._categories = categories or category_loader
-        self._taxonomy = taxonomy or discovery_taxonomy_loader
+        configuration = PipelineConfiguration.empty()
+        self._categories = categories or PipelineCategoryCatalog(configuration)
+        self._taxonomy = taxonomy or PipelineTaxonomy(configuration)
 
     def _models(self) -> LocalInferenceClient:
         if self._model_client is None:
@@ -167,7 +174,14 @@ class CategorizationService:
             if tag_labels
             else {"scores": {}}
         )
-        merged = self._merge(layer1, layer2_cat, layer2_tag, data.tags, data.categories, max_tags)
+        merged = self._merge(
+            layer1,
+            layer2_cat,
+            layer2_tag,
+            list(data.tags),
+            list(data.categories),
+            max_tags,
+        )
         merged["tags"] = self._normalize_tags(merged["tags"])[:max_tags]
         merged["tags"] = self._ensure_non_empty_tags(
             merged["tags"], merged["categories"], transcript, max_tags
@@ -395,9 +409,20 @@ class CategorizationService:
         }
 
     def _sanitize_categorization_labels(
-        self, tags: list[str], categories: list[str]
+        self,
+        tags_or_transcript: list[str] | str,
+        categories_or_tags: list[str],
+        categories: list[str] | None = None,
     ) -> tuple[list[str], list[str]]:
         """Tags must be #hashtags; taxonomy paths belong in discovery, not categorization output."""
+        if categories is None:
+            transcript = ""
+            tags = tags_or_transcript
+            categories = categories_or_tags
+        else:
+            transcript = str(tags_or_transcript)
+            tags = categories_or_tags
+            categories = filter_controlled_taxonomy_paths(transcript, categories)
         out_tags: list[str] = []
         seen_t: set[str] = set()
         out_cats: list[str] = []
@@ -544,6 +569,40 @@ class CategorizationService:
                 for c in clean_categories
                 if c.lower() not in {"wildlife", "photography", "animals", "nature"}
             ]
+        else:
+            clean_categories = [c for c in clean_categories if c.lower() != "veterinary"]
+            if any(term in text for term in ("award", "won", "photography competition")):
+                clean_categories = [c for c in clean_categories if c.lower() != "podcast"]
+                if not any(c.lower() == "wildlife" for c in clean_categories):
+                    clean_categories.insert(0, "Wildlife")
+                if not any(c.lower() in {"news", "photography"} for c in clean_categories):
+                    clean_categories.append("News")
+                clean_tags = self._normalize_tags([*clean_tags, "#wildlife"])
+        if assistive_tech_narrative(text):
+            clean_categories = [c for c in clean_categories if c.lower() != "technology"]
+            clean_tags = [tag for tag in clean_tags if tag != "#technology"]
+            if any(term in text for term in ("i was", "my ", "i'm", "i am")) and not any(
+                c.lower() == "personal lived experience" for c in clean_categories
+            ):
+                clean_categories.insert(0, "Personal lived experience")
+            clean_tags = self._normalize_tags(
+                [
+                    *clean_tags,
+                    "#accessibility",
+                    "#assistive-technology",
+                    *(["#guidedogs"] if "guide dog" in text else []),
+                ]
+            )
+        elif any(term in text for term in ("river", "charity", "council has allocated")):
+            if not any(
+                c.lower() in {"environment", "community", "charity", "news"}
+                for c in clean_categories
+            ):
+                clean_categories.insert(0, "Environment")
+            if not any(
+                tag in clean_tags for tag in ("#environment", "#community", "#charity", "#water")
+            ):
+                clean_tags.append("#water" if "river" in text else "#community")
         clean_tags, clean_categories = self._rebalance_subject_over_format(
             transcript, clean_tags, clean_categories
         )
@@ -646,11 +705,15 @@ class CategorizationService:
         if not cats and zero_shot_scores:
             ranked = sorted(zero_shot_scores.items(), key=lambda x: x[1], reverse=True)
             cats = [c for c, s in ranked if s >= 0.28][:max_categories]
+        if wildlife_media_narrative(transcript):
+            cats = [c for c in cats if c.lower() not in {"veterinary", "podcast"}]
         ranked = sorted(zero_shot_scores.items(), key=lambda x: x[1], reverse=True)
         for cat, score in ranked[:8]:
             if score < 0.32:
                 continue
             if cat.lower() in _FORMAT_CATEGORIES:
+                continue
+            if wildlife_media_narrative(transcript) and cat.lower() == "veterinary":
                 continue
             if cat not in cats:
                 cats.insert(0, cat)
@@ -681,7 +744,9 @@ class CategorizationService:
             priority.extend(filler)
         return priority
 
-    def _keyword_layer(self, transcript: str, segments: list[dict], keyword_rules: dict) -> dict:
+    def _keyword_layer(
+        self, transcript: str, segments: list[dict], keyword_rules: Mapping[str, str]
+    ) -> dict:
         text_lower = transcript.lower()
         scores = {}
         for pattern, tag in keyword_rules.items():

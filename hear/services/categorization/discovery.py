@@ -4,9 +4,9 @@ import asyncio
 import re
 
 from hear.config import settings
-from hear.core.discovery_taxonomy import discovery_taxonomy_loader
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
 from hear.services.llm import LLMService
+from hear.services.pipeline.configuration import PipelineConfiguration, PipelineTaxonomy
 from hear.utils.content_context import (
     assistive_tech_narrative,
     filter_controlled_taxonomy_paths,
@@ -55,8 +55,6 @@ _SPEAKER_CAPTURE_STOP = frozenset(
 
 
 class DiscoverySupport:
-    _service = None
-
     @staticmethod
     def _norm_label(s: str) -> str:
         return re.sub("\\s+", " ", (s or "").strip().lower())
@@ -74,11 +72,10 @@ class DiscoverySupport:
             parts.extend(str(c) for c in cats[:10])
         return ", ".join(parts)[:500]
 
-    @classmethod
-    def get_discovery_service(cls):
-        if cls._service is None:
-            cls._service = DiscoveryService()
-        return cls._service
+    @staticmethod
+    def get_discovery_service():
+        configuration = PipelineConfiguration.empty()
+        return DiscoveryService(taxonomy=PipelineTaxonomy(configuration))
 
     @staticmethod
     def discovery_result_bundle(
@@ -113,7 +110,9 @@ class DiscoverySupport:
 class DiscoveryService:
     def __init__(self, llm: LLMService | None = None, taxonomy=None) -> None:
         self._llm = llm or LLMService(enabled=False)
-        self._taxonomy = taxonomy or discovery_taxonomy_loader
+        if taxonomy is None:
+            taxonomy = PipelineTaxonomy(PipelineConfiguration.empty())
+        self._taxonomy = taxonomy
 
     def _llm_service(self) -> LLMService:
         return self._llm

@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 
 import pytest
@@ -115,14 +116,16 @@ def test_sample_cannot_replace_full_candidate(ticket):
         AttemptTicket.model_validate_json(json.dumps(ticket))
 
 
-def test_voice_focus_cannot_silently_downmix_stereo(ticket):
+def test_sam_audio_cannot_silently_downmix_stereo(ticket):
+    prompt = "background noise"
     ticket["plan"].update(
-        profile="voice_focus",
+        profile="sam_audio",
         attenuation_limit_db=None,
-        prompt_sha256="b" * 64,
+        prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+        prompt_text=prompt,
         channel_policy="mono",
     )
-    ticket["plan"]["runtime"]["engine"] = "sam_audio_small"
+    ticket["plan"]["runtime"]["engine"] = "sam_audio_base"
     with pytest.raises(ValidationError):
         AttemptTicket.model_validate_json(json.dumps(ticket))
     ticket["plan"].update(channel_policy="validated_dual_mono", mono_acknowledged=True)
@@ -140,7 +143,9 @@ def test_uncertified_engine_never_loads(ticket):
 
 def test_runtime_mismatch_and_oversized_input_rejected_before_loading(ticket):
     plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
-    certification = CertifiedRuntime(plan.runtime, "c" * 64, 48000, 100, (48000,), (1, 2), "gpu")
+    certification = CertifiedRuntime(
+        plan.runtime, "c" * 64, 48000, 100, (48000,), (1, 2), "gpu", 1_000_000_000
+    )
 
     def loader():
         pytest.fail("rejected request must never allocate a model")

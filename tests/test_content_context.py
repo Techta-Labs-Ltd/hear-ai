@@ -1,5 +1,5 @@
-from hear.core.discovery_taxonomy import DiscoveryTaxonomyLoader
 from hear.services.categorization.service import CategorizationService
+from hear.services.pipeline.configuration import PipelineConfiguration, PipelineTaxonomy
 from hear.utils.content_context import (
     assistive_tech_narrative,
     filter_controlled_taxonomy_paths,
@@ -15,8 +15,19 @@ MINIDISC_SNIPPET = (
 
 
 def test_technology_topic_does_not_match_assistive_taxonomy_path():
-    loader = DiscoveryTaxonomyLoader()
-    loader.load("data/discovery_taxonomy.txt")
+    loader = PipelineTaxonomy(
+        PipelineConfiguration(
+            version=1,
+            categories=(),
+            tags=(),
+            keyword_rules={},
+            harm_keywords=(),
+            taxonomy_paths=(
+                "Accessibility > Visual impairment > Assistive technology > Smart glasses",
+                "Product experience > Informal review",
+            ),
+        )
+    )
     paths = loader.match_paths_for_topics(["Technology", "Main topic Technology"])
     assert not any("Smart glasses" in p for p in paths)
     assert loader.canonicalize_path("Technology") == "Technology"

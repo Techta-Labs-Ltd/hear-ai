@@ -4,6 +4,7 @@ Tickets must be authenticated by the ingress before these values are used.
 Schema validation is not authorization. No profile options are inferred here.
 """
 
+import hashlib
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -22,6 +23,7 @@ class ErrorCode(StrEnum):
     ENGINE_UNAVAILABLE = "engine_unavailable"
     SOURCE_MISMATCH = "source_mismatch"
     INVALID_AUDIO = "invalid_audio"
+    TARGET_NOT_DETECTED = "target_not_detected"
     PROCESS_FAILED = "process_failed"
     ARTIFACT_CONFLICT = "artifact_conflict"
     STORAGE_FAILED = "storage_failed"
@@ -34,8 +36,6 @@ class CleanExecutionError(RuntimeError):
         self.worker_restart_required = worker_restart_required
 
     def __reduce__(self):
-        # Preserve typed control state across trusted Python worker/Ray boundaries.
-        # Exception.args contains only the display message, not the required code.
         return type(self), (self.code, str(self)), self.__dict__
 
 
@@ -56,7 +56,7 @@ class SourceIdentity(Contract):
 
 
 class RuntimeIdentity(Contract):
-    engine: Literal["deepfilternet3", "sam_audio_small", "noise_profile"]
+    engine: Literal["deepfilternet3", "sam_audio_base"]
     runtime_sha256: Digest
     checkpoint_sha256: Digest | None
     precision_policy_sha256: Digest
@@ -64,10 +64,8 @@ class RuntimeIdentity(Contract):
 
     @model_validator(mode="after")
     def validate_checkpoint(self):
-        if self.engine != "noise_profile" and self.checkpoint_sha256 is None:
+        if self.checkpoint_sha256 is None:
             raise ValueError("model engines require a pinned checkpoint digest")
-        if self.engine == "noise_profile" and self.checkpoint_sha256 is not None:
-            raise ValueError("CPU noise-profile processing has no model checkpoint")
         return self
 
 
@@ -82,24 +80,16 @@ class SampleInterval(Contract):
         return self
 
 
-class NoiseReferenceSelection(SampleInterval):
-    revision_id: Identity
-
-
-class NoiseReference(NoiseReferenceSelection):
-    confirmed_noise_only: bool
-    analysis_sha256: Digest
-
-
 class CleanPlan(Contract):
-    profile: Literal["natural", "voice_focus", "music_atmosphere"]
+    profile: Literal["natural", "sam_audio"]
     profile_version: Identity
     catalogue_sha256: Digest
     runtime: RuntimeIdentity
     attenuation_limit_db: Literal[12, 18, 24] | None
-    noise_reduction_db: Literal[3, 6] | None = None
-    noise_reference: NoiseReference | None = None
     prompt_sha256: Digest | None
+    prompt_text: str | None = Field(default=None, min_length=1, max_length=160)
+    prompt_action: Literal["isolate", "remove"] = "isolate"
+    prompt_mode: Literal["ambient", "event"] | None = None
     channel_policy: Literal["preserve", "mono", "validated_dual_mono"]
     mono_acknowledged: bool
     adjust_loudness: bool
@@ -107,34 +97,65 @@ class CleanPlan(Contract):
     shorten_pauses: Literal[False]
     seed: int = Field(ge=0, le=2**63 - 1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_prompt_action_for_cleaning(cls, value):
+        if (
+            isinstance(value, dict)
+            and value.get("profile") == "sam_audio"
+            and value.get("prompt_text") is not None
+            and ("prompt_action" not in value or value.get("prompt_action") is None)
+        ):
+            value = dict(value)
+            value["prompt_action"] = "remove"
+        if (
+            isinstance(value, dict)
+            and value.get("profile") == "sam_audio"
+            and value.get("prompt_text") is not None
+            and ("prompt_mode" not in value or value.get("prompt_mode") is None)
+        ):
+            value = dict(value)
+            value["prompt_mode"] = "ambient"
+        return value
+
     @model_validator(mode="after")
     def validate_profile(self):
         expected = {
-            "natural": "deepfilternet3",
-            "voice_focus": "sam_audio_small",
-            "music_atmosphere": "noise_profile",
+            "natural": {"deepfilternet3"},
+            "sam_audio": {"sam_audio_base"},
         }
-        if self.runtime.engine != expected[self.profile]:
+        if self.runtime.engine not in expected[self.profile]:
             raise ValueError("profile and engine do not match")
         if self.profile == "natural":
             if self.attenuation_limit_db is None or self.channel_policy != "preserve":
-                raise ValueError("Natural requires explicit attenuation and preserved channels")
+                raise ValueError("Natural requires attenuation and preserved channels")
         elif self.attenuation_limit_db is not None:
             raise ValueError("attenuation limit is only supported by Natural")
-        if self.profile == "music_atmosphere":
-            if self.noise_reduction_db is None or self.noise_reference is None:
-                raise ValueError(
-                    "Music & Atmosphere requires an explicit noise reference/reduction"
-                )
-            if not self.noise_reference.confirmed_noise_only or self.channel_policy != "preserve":
-                raise ValueError("confirmed reference and preserved channels are required")
-        elif self.noise_reduction_db is not None or self.noise_reference is not None:
-            raise ValueError("noise references are only supported by Music & Atmosphere")
-        if self.profile == "voice_focus":
-            if self.prompt_sha256 is None or self.channel_policy == "preserve":
-                raise ValueError("Voice Focus requires pinned prompt and explicit mono policy")
+        if self.profile == "sam_audio":
+            if self.prompt_sha256 is None or self.channel_policy not in (
+                "mono",
+                "validated_dual_mono",
+            ):
+                raise ValueError("SAM Audio requires a pinned prompt and explicit mono policy")
+            if self.prompt_text is None:
+                raise ValueError("SAM Audio requires prompt text")
+            if self.prompt_mode is None:
+                raise ValueError("SAM Audio requires a prompt mode")
+            if (
+                self.prompt_text != self.prompt_text.strip()
+                or not self.prompt_text.isprintable()
+                or hashlib.sha256(self.prompt_text.encode("utf-8")).hexdigest()
+                != self.prompt_sha256
+            ):
+                raise ValueError("SAM prompt text must be bounded and match its SHA-256")
         elif self.prompt_sha256 is not None:
-            raise ValueError("prompt conditioning is only supported by Voice Focus")
+            raise ValueError("prompt conditioning is only supported by SAM Audio")
+        if self.profile != "sam_audio" and (
+            self.prompt_text is not None
+            or self.prompt_action != "isolate"
+            or self.prompt_mode is not None
+        ):
+            raise ValueError("SAM prompt options are only supported by SAM Audio")
         return self
 
 
@@ -180,17 +201,15 @@ class AttemptTicket(Contract):
             raise ValueError("only sample previews require a sample interval")
         if self.sample and self.sample.end_frame > self.input.frames:
             raise ValueError("sample exceeds the pinned source")
-        reference = self.plan.noise_reference
-        if reference and (
-            reference.revision_id != self.input.revision_id
-            or reference.end_frame > self.input.frames
-        ):
-            raise ValueError("noise reference must belong to the actual pinned input")
-        if self.plan.profile == "voice_focus":
-            if self.input.channels == 2 and (
-                not self.plan.mono_acknowledged or self.plan.channel_policy != "validated_dual_mono"
-            ):
-                raise ValueError("stereo Voice Focus requires acknowledged, validated dual mono")
+        if self.plan.profile == "sam_audio":
+            if self.input.channels == 2:
+                if (
+                    not self.plan.mono_acknowledged
+                    or self.plan.channel_policy != "validated_dual_mono"
+                ):
+                    raise ValueError("stereo SAM Audio requires acknowledged, validated dual mono")
+            elif self.plan.channel_policy != "mono":
+                raise ValueError("mono SAM Audio input requires the mono channel policy")
         return self
 
 
@@ -223,7 +242,7 @@ class ArtifactIdentity(Contract):
 class ContentWarningInterval(SampleInterval):
     """Coarse signal-risk interval on the pinned source frame grid, not VAD proof."""
 
-    code: Literal["possible_wanted_content_loss", "no_speech_target_detected"]
+    code: Literal["possible_wanted_content_loss", "sam_audio_target_not_detected"]
     minimum_rms_ratio: float = Field(ge=0, le=1)
 
 
@@ -313,7 +332,7 @@ class CleanResultManifest(Contract):
             raise ValueError("warning interval exceeds pinned source")
         speech = self.validation.speech_activity
         if speech:
-            output_channels = 1 if self.plan.profile == "voice_focus" else self.source.channels
+            output_channels = 1 if self.plan.profile == "sam_audio" else self.source.channels
             if (
                 speech.source_sha256 != self.source.sha256
                 or len(speech.source_active_frames) != self.source.channels

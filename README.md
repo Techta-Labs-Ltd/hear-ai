@@ -1,272 +1,221 @@
-# Hear AI
+# Hear AI Runtime
 
-Hear AI is one Python project containing the audio intelligence pipeline,
-and model deployments. Ray Serve owns model lifecycle,
-scheduling, the FastAPI ingress, and the built-in gRPC proxy.
+Hear AI is a Python 3.12 execution runtime for audio intelligence jobs. It runs as a capability-specific Pod worker or a RunPod Serverless handler. Both entrypoints use the same contracts, executor, workflows, local inference engines, and artifact storage.
 
-The staged refactor is tracked in [implementation status](04_IMPLEMENTATION_STATUS.md).
-Required backend changes are in [the backend handoff](05_HEAR_BACKEND_HANDOFF.md).
-The active runtime is still the legacy protocol; backend-owned execution is not enabled.
-
-## Runtime architecture
+## Runtime layout
 
 ```text
-HTTP client -> Ray Serve HTTP proxy :8000 -> FastAPI ingress --+
-                                                               |
-gRPC client -> Ray Serve gRPC proxy :50051 --------------------+
-                                                               v
-                                                Gateway (application=hear)
-    |-- Orchestrator
-    |-- Whisper + Qwen aligner
-    |-- Qwen LLM
-    |-- Toxicity, sentiment, and NLI models
-    |-- DeepFilterNet and MossFormer2
-    `-- Fish Speech
+Hear Backend
+    |
+    +-- HTTPS/SSE --> Pod API --> RabbitMQ --> Pod worker --+
+    |                                                       |
+    +-- RunPod Serverless -------------------------+--> workflow
+                                                     --> local inference engines
+                                                     --> Backblaze B2 artifacts
+Pod worker / Serverless handler -- canonical events as SSE --> Hear Backend
 ```
 
-FastAPI runs inside the Ray Serve ingress; there is no separate Uvicorn
-process, gRPC server, model sidecar, or runtime installer. Internal calls use
-injected Ray Serve deployment handles.
-Required Python packages, native libraries, and PostgreSQL must be available
-before the process starts. The server applies its verified dependency patch and
-uses Ray to provision missing model artifacts before it creates Serve deployments.
+The runtime supports four durable job types: `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Magic Clean has two production profiles: `natural` and `sam_audio`. Natural uses the pinned DeepFilterNet3 model for general denoising. SAM Audio accepts a text prompt describing a sound and returns either the residual with that sound removed or the isolated target. Reconstruction uses a disk-backed FFmpeg timeline. The backend owns durable job state, retries, routing, and client progress streams; this service does not connect to the application database or Redis.
 
-## Package management
+The Pod accepts authenticated `AttemptEnvelope` requests at `POST /v1/attempts/stream`, publishes them to a durable RabbitMQ role queue, and streams queued and canonical execution events as SSE. Its local worker consumes that queue, claims attempts through the backend, and executes them. RabbitMQ is local to the Pod, and its AMQP listener binds to loopback. Serverless workers use RunPod dispatch and emit the same canonical events; they do not use RabbitMQ. The backend persists events, outcomes, and user-facing progress. The Pod also exposes `/healthz`, `/readyz`, `/capabilities`, `/metrics`, and `/drain`.
 
-The project uses `uv` and commits `uv.lock`; there is no `requirements.txt` or
-hand-managed virtual environment workflow. Resolve dependencies during a
-controlled development/build step:
+## Build runtime images
+
+Docker targets provide separate Pod and Serverless images for each supported role. Optional pipeline LLM images are also available.
 
 ```bash
-python scripts/setup_runtime.py
+docker build --target pipeline-pod -t hear-ai:pipeline .
+docker build --target transcription-serverless -t hear-ai:transcription-serverless .
+docker build --target reconstruction-pod -t hear-ai:reconstruction .
+docker build --target magic-clean-natural-serverless -t hear-ai:magic-clean-natural .
 ```
 
-Setup installs the committed lockfile and automatically applies verified dependency patches.
-See [class ownership and patch automation](docs/CLASS_OWNERSHIP_AND_PATCHES.md).
-Production images should run `python scripts/setup_runtime.py --no-dev` while being built.
-When the image already provides the locked packages in its system Python, run
-uv in no-project mode. This does not create a project environment or install
-anything during startup:
+Use a target that matches the worker role and transport. Image builds install the role-specific dependency group, apply and verify required dependency patches, and run workers with offline model loading. Publish immutable image tags tied to the source revision.
+
+## Configure a worker
+
+Start with [.env.example](.env.example) and provide deployment values through the platform's environment or secret store. Required common values include:
+
+- `HEAR_WORKER_ROLE`, `HEAR_IMAGE_REVISION`, and `HEAR_ENGINE_REVISION`; `HEAR_WORKER_ID` may be supplied or generated from the RunPod Pod ID and role
+- `HEAR_MODEL_ROOT` and `HEAR_TEMP_DIR`
+- `HEAR_BACKEND_INTERNAL_URL` and `HEAR_BACKEND_SERVICE_KEY`
+- `HEAR_POD_API_KEY` for authenticated Pod job requests
+- `HEAR_RABBITMQ_URL` for the Pod-local RabbitMQ broker
+- `HEAR_POD_MAX_CONCURRENT_JOBS` (defaults to `1`)
+- `HEAR_SERVERLESS_MAX_CONCURRENT_JOBS` (defaults to `1` per Serverless worker)
+- `HEAR_HOST_JOB_LOCK_PATH` for the Pod-wide active job permit
+- `HEAR_API_MAX_BODY_BYTES` for bounded attempt request bodies
+- `HEAR_OPTIONAL_ENGINE_MODE=available` to run Natural with DeepFilterNet3 and prompt-driven separation with SAM Audio Base, or `certified` for certificate-gated model engines
+- `HEAR_MAGIC_CLEAN_MODEL_DEVICE=cuda:0` for the installed Magic Clean model engines
+- `HEAR_CLEANER_CERTIFICATION_PATH` for Magic Clean workers
+
+`HEAR_WORKER_ID` identifies the role process for backend leases and heartbeats; it does not select a GPU. GPU selection comes from the Pod's CUDA device, which is `cuda:0` on this one-GPU Pod. `HEAR_IMAGE_REVISION` and `HEAR_ENGINE_REVISION` identify the software and model/runtime versions reported with that worker identity.
+
+Set `HEAR_MODEL_FEATURES=qwen_llm` only when using a pipeline LLM image. Provision model files under `HEAR_MODEL_ROOT`; startup validates local files and does not download weights. Version 1 of `hear/model_manifest.json` records pinned revisions, required files, engine adapters, provenance, and license review status.
+
+### Runpod storage paths
+
+Keep source code and model data in separate directories. On this Pod, source stays in `/workspace/hear-ai-v11`; model weights live under `/models`, Hugging Face/Torch caches under `/root/.cache`, and isolated role environments live under `/opt/hear-ai-v11/venvs/<role>`. `/root`, `/models`, and `/opt` are temporary across Pod replacement. The Serverless profile uses its attached network volume at `/runpod-volume` for persistent weights. The sample path profiles are [runpod-pod.env.example](deploy/runtime/env/runpod-pod.env.example) and [runpod-serverless.env.example](deploy/runtime/env/runpod-serverless.env.example).
+
+Provision models on the Pod after loading the Pod profile:
 
 ```bash
-uv run --no-project python main.py
+python scripts/setup_runtime.py --role transcription --provider pod
+set -a
+source deploy/runtime/env/runpod-pod.env.example
+set +a
+uv run --project deploy/runtime --no-sync python -m hear.tools.model_provisioning \
+  --role transcription \
+  --model-root "$HEAR_MODEL_ROOT" \
+  --cache-dir "$HEAR_MODEL_ROOT/.hub-cache"
+uv run --project deploy/runtime --no-sync python -m hear.tools.model_provisioning \
+  --role transcription \
+  --model-root "$HEAR_MODEL_ROOT" \
+  --cache-dir "$HEAR_MODEL_ROOT/.hub-cache" \
+  --verify-only
 ```
 
-For KubeRay, use a Ray image that already contains `uv` and set
-`RAY_RUNTIME_ENV_HOOK=ray._private.runtime_env.uv_runtime_env_hook.hook` on
-every Ray pod. Keep the project directory as the working directory so Ray and
-`uv` discover the same lockfile. The dependency environment must be present
-before the Serve application starts.
+In Serverless endpoint environment settings, use the values from `runpod-serverless.env.example` and attach a network volume in the same data center. Provision Serverless weights separately under `/runpod-volume/hear-ai-v11/models`; the Pod's `/models` directory is on its temporary container root and is not shared. Model provisioning is an explicit step; the worker image runs in Hugging Face offline mode and will not download weights at startup. Use a network volume for Serverless provisioning because the downloader uses atomic file replacement and Hugging Face cache locks; Runpod documents that its global volume does not provide file locks or atomic rename. Network volumes pin the endpoint to their data center. Keep `/tmp/hear-ai-audio` for per-job scratch; completed workflows remove their attempt directory, and the worker container disk is temporary.
 
-## RunPod persistent workspace
-
-RunPod treats `/root` as ephemeral. Before installing dependencies or starting
-the server, source the workspace environment helper:
+Provision the actual Magic Clean engines outside worker startup:
 
 ```bash
-cd /workspace/hear-ai
-source scripts/runpod-workspace-env.sh
+/opt/hear-ai-v11/venvs/magic_clean_sam_audio/bin/python \
+  scripts/provision_magic_clean_models.py --model-root /models --engine deepfilter
+HF_TOKEN=<accepted-hugging-face-token> \
+  /opt/hear-ai-v11/venvs/magic_clean_sam_audio/bin/python \
+  scripts/provision_magic_clean_models.py --model-root /models --engine sam
 ```
 
-The helper only creates repository-local directories and exports cache paths.
-When the server starts, Ray downloads missing model artifacts into `/models`
-and startup applies the verified dependency patch.
-`scripts/download_models_ray.py` remains available for manual pre-warming.
-Keep `.env` model paths aligned with `.env.example`.
+The SAM command requires an account with accepted access to `facebook/sam-audio-base`. The provisioner verifies every pinned file hash before atomically replacing an installed model directory.
 
-After a CUDA or base-image maintenance event, rebuild the project environment
-from the committed lockfile instead of reusing a virtual environment created
-against the previous image:
+Set the endpoint’s initial active workers and concurrency to one while measuring GPU and RAM use. Add workers only after confirming the chosen GPU can hold the selected role’s loaded models and concurrent jobs. Pipeline LLM use also reads `QWEN_LLM_GPU_MEMORY_UTILIZATION`; its default is `0.75`.
+
+Provision and verify models before starting a worker:
 
 ```bash
-cd /workspace/hear-ai
-source scripts/runpod-workspace-env.sh
-mv .venv .venv.pre-cuda13  # recoverable backup, if an old environment exists
-python scripts/setup_runtime.py
-uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-uv run --no-project python main.py --validate-only
+python -m hear.tools.model_provisioning --role transcription --model-root /models
+python -m hear.tools.model_provisioning --role transcription --model-root /models --verify-only
 ```
 
-Do not run the removal command during preparation; it is a post-maintenance
-operator step. The locked CUDA 12.8 PyTorch build should be tested against the
-new NVIDIA driver before changing dependency versions.
-
-## Start
-
-Copy `.env.example` to `.env` (or the deployment secret store) and set every
-required model path. The application reads `/workspace/hear-ai/.env` through
-`pydantic-settings`; Supervisor also exports that file before starting Ray so
-shell tools and Python see the same values. Explicit Supervisor overrides such
-as `RAY_ADDRESS=auto` take precedence over the file.
-
-`AI_SERVICE_URL` and `AI_SERVICE_SECRET` are backend-client names and are not
-AI-server settings. On this service, authentication is configured with the
-`BACKEND_REGISTRY_JSON` SHA-256 digest; the backend keeps the matching
-plaintext `HEAR_SERVICE_KEY`. Registrations are environment-scoped; see
-[development and production credentials](docs/ENVIRONMENTS.md).
-
-The server stores only service-key SHA-256 digests. Generate a new backend key
-and install its digest with:
+For an image that uses an optional pipeline feature, pass its feature explicitly during provisioning and verification:
 
 ```bash
-python scripts/generate_service_key.py --backend-id backend-a --env-file .env --write
+python -m hear.tools.model_provisioning --role pipeline --feature qwen_llm --model-root /models
 ```
 
-Save the printed `HEAR_SERVICE_KEY` in the backend's secret store. The backend
-must send that same plaintext key as `X-Service-Key`/`x-api-key`; never commit
-the plaintext key or put it in `BACKEND_REGISTRY_JSON`.
-
-Validate the immutable runtime without starting Ray:
+Provision the pinned SAM Audio Base and T5 assets for the prompt-driven SAM Audio role with:
 
 ```bash
-uv run --no-project python main.py --validate-only
+python -m hear.tools.model_provisioning --role magic_clean_sam_audio --model-root /models
 ```
 
-Start the complete application:
+Magic Clean assets are certified separately and referenced by the JSON file configured in `HEAR_CLEANER_CERTIFICATION_PATH`. Workers fail readiness when required local assets or runtime checks are unavailable.
+
+## Run locally
+
+Use a Python 3.12 environment with the dependency groups for the selected role. The deployment lock and role groups are in [deploy/runtime/pyproject.toml](deploy/runtime/pyproject.toml). The container targets are the reproducible production build path.
+
+Run one local transcription directly on this Pod without Runpod Serverless or Hear backend credentials:
 
 ```bash
-uv run --no-project python main.py
+python scripts/setup_runtime.py --role transcription --provider pod
+set -a
+source deploy/runtime/env/runpod-pod.env.example
+set +a
+uv run --project deploy/runtime --no-sync python -m scripts.run_local_transcription \
+  /path/to/audio.wav \
+  --output .cache/local-jobs/transcription.json
 ```
 
-`main.py` connects to `RAY_ADDRESS` or creates a local Ray runtime, starts the
-Ray Serve HTTP and gRPC proxies, registers the generated protobuf servicers,
-and deploys the single `hear` application. Before Serve starts, a Ray task
-downloads any missing artifacts into the filesystem-root `/models` directory
-and applies required dependency patches. Model paths must stay under that one
-directory; do not use a separate workspace model cache.
+This loads the provisioned Qwen ASR and aligner from `HEAR_MODEL_ROOT`, writes the transcript JSON at the requested output path, and unloads the model afterward. It runs the transcription model and service locally; the normal Pod entrypoint accepts backend attempts over HTTP/SSE.
 
-### Supervisor deployment
-
-Use [deploy/supervisord.conf](deploy/supervisord.conf) as the process-manager
-configuration. It starts a Ray head first, waits for it in
-`scripts/start-hear-ray-server.sh`, then starts `main.py` with
-`RAY_ADDRESS=auto`. Supervisor restarts either process if it exits; first
-startup provisions the `/models` cache from the Ray cluster before Serve
-accepts traffic.
-
-On a new root-capable pod, one command installs the OS/Python/Fish Speech
-dependencies, creates local PostgreSQL credentials, and prepares the root-level
-runtime directories:
+For local setup, select the worker role and provider explicitly. For example:
 
 ```bash
-cd /workspace/hear-ai
-sudo scripts/bootstrap-pod.sh
-supervisord -c deploy/supervisord.conf
+python scripts/setup_runtime.py --role transcription --provider pod
+python scripts/setup_runtime.py --role pipeline --provider serverless --feature qwen_llm
 ```
 
-Use `scripts/bootstrap-pod.sh --start` to start Supervisor immediately after
-setup. The first server start downloads models into `/models`; it does not
-store weights under `/workspace`.
+The repository root `pyproject.toml` contains shared lint, typing, and test configuration. Runtime dependencies and the only dependency lock live under `deploy/runtime/`.
 
-When deploying code or changing `MAGIC_CLEAN_ENGINE_REVISION`, first drain
-queued/running jobs, then restart both Ray processes. Restarting only the
-application process can retain existing Serve actors with stale imports or
-settings, causing engine-revision mismatches:
+Start the complete Pod gateway and local worker stack:
 
 ```bash
-supervisorctl -c deploy/supervisord.conf stop hear-ray-server
-supervisorctl -c deploy/supervisord.conf restart ray-head
-supervisorctl -c deploy/supervisord.conf start hear-ray-server
+cp deploy/runtime/env/runpod-pod.env.example .env
+scripts/run_pod_stack.sh
 ```
 
-Wait for `/health` to report `healthy` and `control_ready: true` before
-submitting new jobs.
+Set backend credentials and the Pod API key in `/root/hear-ai-v11/runtime.env` before starting the process. The launcher prefers that root-owned environment file and falls back to the repository `.env` when it is absent. The API is the only web listener on port 8000. It authenticates the request, selects the RabbitMQ queue from `job_type` and the Magic Clean profile, and streams worker events over the same SSE connection. Role processes are queue consumers and do not expose HTTP ports. Pod environments use `/opt/hear-ai-v11/venvs/<role>` and Serverless environments use `/opt/hear-ai-v11/venvs/<role>-serverless`; no backend worker ID is needed to submit a job.
 
-## Availability and concurrency
+The default role list starts pipeline, reconstruction, Natural, and SAM Audio consumers. The pipeline worker also handles transcription requests without loading Qwen twice. Available mode runs the pinned DeepFilterNet3 checkpoint for Natural and the official SAM Audio Base Python API for prompt-driven separation. The stack exits when any child worker exits so the Pod supervisor can restart the complete process set.
 
-The production defaults run two stateless gateway replicas. Ray Serve
-load-balances requests across them and performs rolling replacement. A small
-Ray deployment sweeps abandoned audio from `HEAR_TEMP_DIR` at the configured
-interval, while normal job completion and failure paths clean their own files.
+Natural accepts `attenuation_limit_db` as `12`, `18`, or `24` and is the correct profile for recording hiss, steady background noise, and speech denoising. SAM Audio requires `prompt`, accepts `action` as `remove` or `isolate`, accepts `prompt_mode` as `ambient` or `event`, and accepts a deterministic `seed`. The action and prompt mode default to `remove` and `ambient`. Ambient mode generates two candidates and selects one with the official CLAP text ranker. Event mode uses the official PE Audio Frame span predictor. Use a short lowercase noun or verb phrase naming one sound source, such as `background music`, `dog barking`, or `singing voice`.
 
-The orchestrator is intentionally a single stateful replica because it owns
-live `Subscribe` streams. It admits at most
-`ORCHESTRATOR_MAX_CONCURRENT_JOBS` jobs (three by default); additional work is
-reported as queued and starts when a slot becomes available. Durable job state
-remains in PostgreSQL, while coordination and request routing use Ray rather
-than Redis.
+The Magic Clean portion of an attempt request uses one of these option objects:
 
-## FastAPI
+```json
+{"profile":"natural","attenuation_limit_db":24}
+```
 
-Ray Serve hosts these system endpoints on `HTTP_PORT` (default `8000`):
+```json
+{"profile":"sam_audio","prompt":"background music","action":"remove","prompt_mode":"ambient","seed":0}
+```
 
-- `GET /`: service identity
-- `GET /health`: aggregate pipeline health
-- `GET /ready`: pipeline readiness status
-- `POST /process`: idempotent submission for every asynchronous job type
+For SAM Audio, the prompt names the target sound. `remove` returns everything except that target; `isolate` returns only that target. An isolated noise target is not expected to contain speech. If the requested isolated target is not audible in the source, the attempt returns `target_not_detected` and publishes no audio artifact.
 
-`POST /process` requires `X-Service-Key` for the submitted `backend_id`.
-Every request must include that registered backend identity and a job-scoped
-`storage` object containing an allowed B2 endpoint/bucket, temporary credentials,
-a user/job folder prefix, public base URL, and expiry. Missing or mismatched
-backend/storage context is rejected. The request `job_id` is its idempotency key:
-an identical resend returns the original `run_id` and current status, while a
-different semantic payload for the same key returns HTTP `409`. A queued Magic
-Clean job may accept an authenticated credential-only refresh with a later
-expiry; deliberate reruns must still use a new `job_id`.
+SAM Audio processes up to 75 seconds in one context window and uses 5-second overlap for longer inputs. Removal results are rejected if the residual collapses active source audio for two continuous seconds. Isolated targets are checked in one-second windows against an audible absolute and source-relative floor. These checks prevent collapsed residuals and absent targets from being published as successful output.
 
-OpenAPI documentation is exposed at `/docs` and `/openapi.json` only when
-`ENABLE_DOCS=true`. Typed application operations remain on gRPC.
+Available reconstruction supports `remove_segments` directly. `replace_segments`, `edit_transcript`, and `preview` accept ordered changes containing `segment_start`, `segment_end`, and either `is_deletion=true` or `replacement_audio_url`. `rebuild` accepts `rendered_audio_url`. Text-to-speech voice cloning remains part of certified reconstruction.
 
-## gRPC
+The backend sends the same versioned attempt envelope used as RunPod Serverless input to `POST /v1/attempts/stream` with `Authorization: Bearer $HEAR_POD_API_KEY`. The Pod queues it in local RabbitMQ, claims it through `HEAR_BACKEND_INTERNAL_URL` when a worker is free, heartbeats and reports events/outcome while it runs, and returns queued and canonical execution events as SSE. The backend deduplicates events by ID, stores job history, and serves reconnectable status/SSE to clients; the Pod owns no job database.
 
-Contracts and checked-in client stubs live in `hear/proto`. Every call must
-include:
-
-- `application: hear` for Ray Serve application routing
-- `x-api-key: <registered backend service key>` for backend-bound authentication
-
-The Pipeline service covers progress streaming, results, cancellation, queue
-status, moderation, categorization, reconstruction, discovery, administration,
-and aggregate health. Hear submits over REST, then consumes `Subscribe` and
-`GetResult` over gRPC. Terminal results are persisted and replayed after a
-stream reconnect. Jobs and results are isolated by the backend identity resolved
-from `x-api-key`; one backend cannot read or cancel another backend's jobs.
-Artifact results contain `backend_id`, `bucket_name`, `b2_key`, and a URL joined
-from the submitted public base URL, but never storage credentials.
-
-For reconstruction requests sent through `SubmitJob` or `CreatePreview`, an
-omitted `same_speaker` field defaults to `true`. Send the optional field
-explicitly as `false` to opt out of matching the source speaker.
-Reconstruction measures the first-to-last aligned source speech span and applies
-a bounded, pitch-preserving tempo correction to match the generated delivery rate
-while retaining natural internal pauses. A longer or shorter replacement can
-therefore change the segment and rebuilt-track duration; clients must use the
-returned duration instead of assuming the old interval length.
-
-Ray Serve provides the gRPC proxy. Do not start `grpc.aio.server`, install
-packages, generate stubs, or download models in `main.py`.
-
-For asynchronous `SubmitJob` same-interval retries, submitting the exact
-rebuilt URL from an earlier completed job with the same `backend_id`,
-`track_id`, and change intervals keeps that current audio for splicing but
-resolves the original source for voice, pitch, and pace reference. Isolated
-segment URLs and changed intervals fail closed because their timestamps cannot
-be mapped safely to the original speaker. URL aliases, re-uploads, and changed
-track IDs are deliberately not guessed across security boundaries; those clients
-should retain the immutable original and submit the cumulative change set in
-original-track coordinates.
-
-To regenerate stubs during a controlled build/development step:
+Start a Serverless handler:
 
 ```bash
-python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. \
-  hear/proto/pipeline.proto
+HEAR_WORKER_ROLE=transcription python -m hear.entrypoints.serverless
 ```
 
-The generator version must be compatible with the protobuf runtime baked into
-the deployment image.
+The process requires valid backend credentials and the transport settings for its selected entrypoint. A worker does not accept jobs until local readiness checks pass.
 
-## Project layout
+## Project structure
 
-- `main.py`: only production entry point
-- `hear/config.py`: unified settings
-- `hear/deployments/`: Ray models, audio cleanup, orchestrator, and FastAPI/gRPC gateway graph
-- `hear/proto/`: Pipeline protobuf contracts/stubs
-- `hear/services/`: application and audio-processing services
-- `tests/`: unit, contract, and integration tests
+| Path | Responsibility |
+| --- | --- |
+| `hear/contracts` | Attempt, event, worker, and outcome schemas |
+| `hear/entrypoints` | Pod and Serverless process startup |
+| `hear/api` | Pod job SSE ingress and operational routes |
+| `hear/execution` | Shared executor, lease, and backend reporting |
+| `hear/workflows` | Pipeline, transcription, reconstruction, and Magic Clean jobs |
+| `hear/inference` | Local engines and model manifest |
+| `hear/storage` | Scoped artifact storage |
+| `hear/health` and `hear/api` | Readiness probes and Pod operations endpoints |
+| `HEAR_AI_FULL_MIGRATION_MASTER_PLAN_V11.md` | Runtime migration architecture and file-by-file plan |
 
-Outbound HTTP/S3 integrations to the Hear backend, taxonomy CDN, and object
-storage remain supported. Job result callbacks are not used; Hear consumes
-results through gRPC. System probes and job submission use FastAPI, while typed
-result and operation traffic uses gRPC.
+## Test without Docker
+
+Install the local worker and development dependencies with Python 3.12 and `uv`:
+
+```bash
+export UV_PROJECT_ENVIRONMENT=/opt/hear-ai-v11/venv
+uv sync --project deploy/runtime --locked --group pod --group serverless --group dev
+uv pip install --python "$UV_PROJECT_ENVIRONMENT/bin/python" --no-cache \
+  --index-strategy unsafe-best-match \
+  --index-url https://pypi.org/simple \
+  --extra-index-url https://download.pytorch.org/whl/cpu \
+  'torch==2.8.0+cpu' 'torchaudio==2.8.0+cpu' 'onnxruntime==1.30.0' \
+  'librosa==0.11.0' 'pyloudnorm==0.2.0' 'protobuf==6.33.6'
+```
+
+Run all offline unit tests that do not require the optional transcription group:
+
+```bash
+export UV_PROJECT_ENVIRONMENT=/opt/hear-ai-v11/venv
+uv run --project deploy/runtime python -m hear.tools.check_architecture
+uv run --project deploy/runtime ruff check hear tests scripts
+uv run --project deploy/runtime mypy
+uv run --project deploy/runtime python -m pytest tests -q
+uv run --project deploy/runtime python -m pytest tests/integration -q
+```
+
+Qwen ASR inference requires the locked `transcription` dependency group and pinned ASR/aligner assets. Tests that use real model checkpoints require those assets to be provisioned locally. Start a worker only after setting its role, credentials, transport, model root, and scratch path in the environment.

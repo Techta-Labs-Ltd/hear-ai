@@ -13,13 +13,15 @@ ticket = ticket_fixture
 @pytest.fixture
 def certified(ticket):
     plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
-    return plan, CertifiedRuntime(plan.runtime, "c" * 64, 96000, 1000000, (16000, 48000), (1, 2), "gpu")
+    return plan, CertifiedRuntime(
+        plan.runtime, "c" * 64, 96000, 1000000, (16000, 48000), (1, 2), "gpu", 1_000_000_000
+    )
 
 
 def test_empty_registry_reports_all_profiles_unavailable():
     response = EngineRegistry((), {}).capabilities()
     assert response["contract_version"] == "hear.cleaner.capabilities.v2"
-    assert len(response["profiles"]) == 3
+    assert len(response["profiles"]) == 2
     assert all(not item["ready"] for item in response["profiles"])
     assert all(item["reason"] == "not_certified" for item in response["profiles"])
 
@@ -36,7 +38,7 @@ def test_capabilities_do_not_load_models_and_isolate_optional_profiles(certified
         {"deepfilternet3": lambda identity: identity == plan.runtime},
     )
     profiles = registry.capabilities()["profiles"]
-    assert [item["ready"] for item in profiles] == [True, False, False]
+    assert [item["ready"] for item in profiles] == [True, False]
     assert profiles[0]["rate_limits"] == [
         {"sample_rate": 16000, "max_frames": 96000, "max_duration_seconds": 6.0},
         {"sample_rate": 48000, "max_frames": 96000, "max_duration_seconds": 2.0},

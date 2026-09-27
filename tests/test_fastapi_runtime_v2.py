@@ -17,7 +17,7 @@ class PatchVerifier:
 class TestFastApiRuntime:
     def test_health_and_readiness_routes(self, tmp_path: Path):
         manifest_path = tmp_path / "manifest.json"
-        manifest_path.write_text(json.dumps({"models": []}))
+        manifest_path.write_text(json.dumps({"manifest_version": 1, "models": []}))
         readiness = RuntimeReadiness(
             WorkerRole.TRANSCRIPTION,
             ModelManifest(manifest_path),
@@ -32,7 +32,7 @@ class TestFastApiRuntime:
 
     def test_drain_route_marks_runtime_not_ready(self, tmp_path: Path):
         manifest_path = tmp_path / "manifest.json"
-        manifest_path.write_text(json.dumps({"models": []}))
+        manifest_path.write_text(json.dumps({"manifest_version": 1, "models": []}))
         readiness = RuntimeReadiness(
             WorkerRole.TRANSCRIPTION,
             ModelManifest(manifest_path),

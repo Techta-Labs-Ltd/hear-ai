@@ -19,12 +19,12 @@ class TestModelManifest:
 
     def test_transcription_loads_only_asr_models(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))
-        names = {model.name for model in manifest.models_for(WorkerRole.TRANSCRIPTION)}
+        names = {model.logical_name for model in manifest.models_for(WorkerRole.TRANSCRIPTION)}
         assert names == {"qwen3-asr-1.7b", "qwen3-forced-aligner"}
 
     def test_reconstruction_has_only_required_model_families(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))
-        names = {model.name for model in manifest.models_for(WorkerRole.RECONSTRUCTION)}
+        names = {model.logical_name for model in manifest.models_for(WorkerRole.RECONSTRUCTION)}
         assert names == {
             "fish-speech-s2-pro",
             "dnsmos",
@@ -32,9 +32,11 @@ class TestModelManifest:
 
     def test_pipeline_llm_is_opt_in(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))
-        without_llm = {model.name for model in manifest.models_for(WorkerRole.PIPELINE)}
+        without_llm = {
+            model.logical_name for model in manifest.models_for(WorkerRole.PIPELINE)
+        }
         with_llm = {
-            model.name
+            model.logical_name
             for model in manifest.models_for(
                 WorkerRole.PIPELINE,
                 enabled_features=frozenset({"qwen_llm"}),
@@ -43,9 +45,22 @@ class TestModelManifest:
         assert "qwen2.5-7b-instruct" not in without_llm
         assert "qwen2.5-7b-instruct" in with_llm
 
+    def test_unreviewed_model_licenses_block_runtime_roles(self):
+        manifest = ModelManifest(Path("hear/model_manifest.json"))
+
+        assert manifest.license_blockers(WorkerRole.PIPELINE) == ()
+        assert manifest.license_blockers(WorkerRole.TRANSCRIPTION) == ()
+        assert manifest.license_blockers(WorkerRole.RECONSTRUCTION) == (
+            "fish-speech-s2-pro:permission_required",
+            "dnsmos:review_required",
+        )
+        assert manifest.license_blockers(WorkerRole.MAGIC_CLEAN_SAM_AUDIO) == (
+            "sam-audio-base:review_required",
+        )
+
     def test_manifest_json_has_unique_names_and_paths(self):
         payload = json.loads(Path("hear/model_manifest.json").read_text())
-        names = [item["name"] for item in payload["models"]]
+        names = [item["logical_name"] for item in payload["models"]]
         paths = [item["relative_path"] for item in payload["models"]]
         assert len(names) == len(set(names))
         assert len(paths) == len(set(paths))

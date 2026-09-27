@@ -8,6 +8,7 @@ import tempfile
 import warnings
 import wave
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -15,8 +16,8 @@ import torch
 import torchaudio
 import torchaudio.functional as F_audio
 
+from hear.audio.workspace import AudioWorkspace
 from hear.config import settings
-from hear.core.hear_temp import TempWorkspace
 from hear.core.noise import NoiseReducer
 from hear.services.reconstruction.dnsmos import DNSMOSScorer
 from hear.services.reconstruction.tts_post_processor import TTSPostProcessor
@@ -103,6 +104,15 @@ class SpeechSynthesizer:
         self._loaded = False
         self._fishspeech_available = False
         self._noise = NoiseReducer()
+
+    @staticmethod
+    def _remove_temp_file(path: str | None) -> None:
+        if not path:
+            return
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def load(self):
         self._fishspeech_available = settings.FISH_SPEECH_TTS_ENABLED
@@ -215,6 +225,7 @@ class SpeechSynthesizer:
         same_speaker: bool = True,
         original_text: str | None = None,
         job_id: str | None = None,
+        workspace: AudioWorkspace | None = None,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
         if orig_sr != self.TARGET_SR:
@@ -237,6 +248,7 @@ class SpeechSynthesizer:
                     end_sample,
                     track_id=track_id,
                     original_text=original_text,
+                    workspace=workspace,
                 )
             tts_bytes = await self._generate_segment_groups(
                 new_text,
@@ -247,14 +259,14 @@ class SpeechSynthesizer:
             )
         finally:
             if reference_path:
-                TempWorkspace.drop_temp_standalone(reference_path)
+                self._remove_temp_file(reference_path)
         with tempfile.NamedTemporaryFile(
-            suffix=".mp3", delete=False, dir=TempWorkspace.hear_temp_directory()
+            suffix=".mp3", delete=False, dir=workspace.path if workspace is not None else None
         ) as tmp:
             tmp.write(tts_bytes)
             tts_path = tmp.name
         tts_waveform, tts_sr = torchaudio.load(tts_path)
-        TempWorkspace.drop_temp_standalone(tts_path)
+        self._remove_temp_file(tts_path)
         if tts_sr != self.TARGET_SR:
             tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
         duration_reference = original_waveform[:, start_sample:end_sample]
@@ -290,7 +302,7 @@ class SpeechSynthesizer:
             original_waveform, tts_waveform, start_sample, end_sample
         )
         out_path = save_as_mp3(
-            reconstructed, self.TARGET_SR, track_id=track_id, purpose="reconstruct_mp3"
+            reconstructed, self.TARGET_SR, purpose="reconstruct_mp3", workspace=workspace
         )
         duration = reconstructed.shape[1] / self.TARGET_SR
         b2_key = storage.key("reconstructed", f"{job_id or track_id}.mp3")
@@ -300,7 +312,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -317,7 +329,7 @@ class SpeechSynthesizer:
         same_speaker: bool = True,
         voice_reference_audio_path: str | None = None,
         job_id: str | None = None,
-        run_id: str | None = None,
+        workspace: AudioWorkspace | None = None,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
         if orig_sr != self.TARGET_SR:
@@ -379,6 +391,7 @@ class SpeechSynthesizer:
                         reference_end,
                         track_id=track_id,
                         original_text=original_text,
+                        workspace=workspace,
                     )
                 _recon_payload_logger.info(
                     "CHANGE | seg=%.1fs-%.1fs | original_text='%s' | new_text='%s' | ref_text_for_clone='%s' | ref_path=%s | track=%s",
@@ -399,14 +412,14 @@ class SpeechSynthesizer:
                 )
             finally:
                 if reference_path:
-                    TempWorkspace.drop_temp_standalone(reference_path)
+                    self._remove_temp_file(reference_path)
             with tempfile.NamedTemporaryFile(
-                suffix=".wav", delete=False, dir=TempWorkspace.hear_temp_directory()
+                suffix=".wav", delete=False, dir=workspace.path if workspace is not None else None
             ) as tmp:
                 tmp.write(tts_bytes)
                 tts_path = tmp.name
             tts_waveform, tts_sr = torchaudio.load(tts_path)
-            TempWorkspace.drop_temp_standalone(tts_path)
+            self._remove_temp_file(tts_path)
             if tts_sr != self.TARGET_SR:
                 tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
             ref_segment = reference_waveform[:, reference_start:reference_end]
@@ -457,6 +470,7 @@ class SpeechSynthesizer:
                     purpose="reconstruct_segment_mp3",
                     storage=storage,
                     job_id=job_id or track_id,
+                    workspace=workspace,
                 )
             )
             merged = self._splice_segment(merged, tts_waveform, start_sample, end_sample)
@@ -466,10 +480,8 @@ class SpeechSynthesizer:
         out_path = save_as_mp3(
             merged,
             self.TARGET_SR,
-            job_id=job_id,
-            run_id=run_id,
-            track_id=track_id,
             purpose="reconstruct_mp3",
+            workspace=workspace,
         )
         duration = merged.shape[1] / self.TARGET_SR
         b2_key = storage.key("reconstructed", f"{job_id or track_id}.mp3")
@@ -479,7 +491,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -496,6 +508,7 @@ class SpeechSynthesizer:
         same_speaker: bool = True,
         voice_reference_path: str | None = None,
         job_id: str | None = None,
+        workspace: AudioWorkspace | None = None,
     ) -> SynthesisResult:
         normalized = self._normalize_changes(changes)
         if not normalized:
@@ -536,6 +549,7 @@ class SpeechSynthesizer:
                         end_sample,
                         track_id=track_id,
                         original_text=original_text,
+                        workspace=workspace,
                     )
                     owns_reference = True
                 try:
@@ -548,14 +562,14 @@ class SpeechSynthesizer:
                     )
                 finally:
                     if ref_path and owns_reference:
-                        TempWorkspace.drop_temp_standalone(ref_path)
+                        self._remove_temp_file(ref_path)
                 with tempfile.NamedTemporaryFile(
-                    suffix=".mp3", delete=False, dir=TempWorkspace.hear_temp_directory()
+                    suffix=".mp3", delete=False, dir=workspace.path if workspace is not None else None
                 ) as tmp:
                     tmp.write(tts_bytes)
                     tts_path = tmp.name
                 tts_waveform, tts_sr = torchaudio.load(tts_path)
-                TempWorkspace.drop_temp_standalone(tts_path)
+                self._remove_temp_file(tts_path)
                 if tts_sr != self.TARGET_SR:
                     tts_waveform = F_audio.resample(tts_waveform, tts_sr, self.TARGET_SR)
                 duration_reference = merged[:, start_sample:end_sample]
@@ -596,7 +610,7 @@ class SpeechSynthesizer:
         if peak > 0.99:
             merged = merged * (0.99 / peak)
         out_path = save_as_mp3(
-            merged, self.TARGET_SR, job_id=job_id, track_id=track_id, purpose="reconstruct_mp3"
+            merged, self.TARGET_SR, purpose="reconstruct_mp3", workspace=workspace
         )
         duration = merged.shape[1] / self.TARGET_SR
         b2_key = storage.key("reconstructed", f"{job_id or track_id}.mp3")
@@ -606,7 +620,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -622,6 +636,7 @@ class SpeechSynthesizer:
         storage: ReconstructionStorage,
         same_speaker: bool = True,
         job_id: str | None = None,
+        workspace: AudioWorkspace | None = None,
     ) -> SynthesisResult:
         normalized = self._normalize_changes(changes)
         if not normalized:
@@ -661,6 +676,7 @@ class SpeechSynthesizer:
                         end_sample,
                         track_id=track_id,
                         original_text=original_text,
+                        workspace=workspace,
                     )
                 tts_bytes = await self._generate_segment_groups(
                     text,
@@ -671,14 +687,14 @@ class SpeechSynthesizer:
                 )
             finally:
                 if reference_path:
-                    TempWorkspace.drop_temp_standalone(reference_path)
+                    self._remove_temp_file(reference_path)
             with tempfile.NamedTemporaryFile(
-                suffix=".wav", delete=False, dir=TempWorkspace.hear_temp_directory()
+                suffix=".wav", delete=False, dir=workspace.path if workspace is not None else None
             ) as tmp:
                 tmp.write(tts_bytes)
                 tts_path = tmp.name
             wf, sr = torchaudio.load(tts_path)
-            TempWorkspace.drop_temp_standalone(tts_path)
+            self._remove_temp_file(tts_path)
             if sr != self.TARGET_SR:
                 wf = F_audio.resample(wf, sr, self.TARGET_SR)
             duration_reference = original_waveform[:, start_sample:end_sample]
@@ -742,7 +758,9 @@ class SpeechSynthesizer:
         peak = combined.abs().max().item()
         if peak > 0.99:
             combined = combined * (0.99 / peak)
-        out_path = save_as_mp3(combined, self.TARGET_SR, track_id=track_id, purpose="preview_mp3")
+        out_path = save_as_mp3(
+            combined, self.TARGET_SR, purpose="preview_mp3", workspace=workspace
+        )
         duration = combined.shape[1] / self.TARGET_SR
         b2_key = storage.key("previews", f"{job_id or track_id}.mp3")
         loop = asyncio.get_event_loop()
@@ -751,7 +769,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -770,8 +788,9 @@ class SpeechSynthesizer:
         purpose: str,
         storage: ReconstructionStorage,
         job_id: str,
+        workspace: AudioWorkspace | None = None,
     ) -> SegmentAudioResult:
-        out_path = save_as_mp3(waveform, self.TARGET_SR, track_id=track_id, purpose=purpose)
+        out_path = save_as_mp3(waveform, self.TARGET_SR, purpose=purpose, workspace=workspace)
         b2_key = storage.key("segments", job_id, f"{os.urandom(8).hex()}.mp3")
         loop = asyncio.get_event_loop()
         try:
@@ -779,7 +798,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SegmentAudioResult(
             segment_start=segment_start,
             segment_end=segment_end,
@@ -797,6 +816,7 @@ class SpeechSynthesizer:
         segment_end: float,
         storage: ReconstructionStorage,
         job_id: str,
+        workspace: AudioWorkspace | None = None,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
         if orig_sr != self.TARGET_SR:
@@ -819,7 +839,7 @@ class SpeechSynthesizer:
         peak = merged.abs().max().item()
         if peak > 0.99:
             merged = merged * (0.99 / peak)
-        out_path = save_as_mp3(merged, self.TARGET_SR, track_id=track_id, purpose="remove_mp3")
+        out_path = save_as_mp3(merged, self.TARGET_SR, purpose="remove_mp3", workspace=workspace)
         duration = merged.shape[1] / self.TARGET_SR
         b2_key = storage.key("reconstructed", f"{job_id}.mp3")
         loop = asyncio.get_event_loop()
@@ -828,7 +848,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -844,6 +864,7 @@ class SpeechSynthesizer:
         job_id: str,
         storage: ReconstructionStorage,
         original_transcript: str = "",
+        workspace: AudioWorkspace | None = None,
     ) -> SynthesisResult:
         original_waveform, orig_sr = torchaudio.load(original_audio_path)
         if orig_sr != self.TARGET_SR:
@@ -866,6 +887,7 @@ class SpeechSynthesizer:
                 end_sample,
                 track_id=track_id,
                 original_text=original_transcript,
+                workspace=workspace,
             )
             rebuilt_bytes = await self._generate_segment_groups(
                 edited_transcript,
@@ -876,14 +898,14 @@ class SpeechSynthesizer:
             )
         finally:
             if reference_path:
-                TempWorkspace.drop_temp_standalone(reference_path)
+                self._remove_temp_file(reference_path)
         with tempfile.NamedTemporaryFile(
-            suffix=".mp3", delete=False, dir=TempWorkspace.hear_temp_directory()
+            suffix=".mp3", delete=False, dir=workspace.path if workspace is not None else None
         ) as tmp:
             tmp.write(rebuilt_bytes)
             rebuilt_path = tmp.name
         rebuilt_waveform, rebuilt_sr = torchaudio.load(rebuilt_path)
-        TempWorkspace.drop_temp_standalone(rebuilt_path)
+        self._remove_temp_file(rebuilt_path)
         if rebuilt_sr != self.TARGET_SR:
             rebuilt_waveform = F_audio.resample(rebuilt_waveform, rebuilt_sr, self.TARGET_SR)
         ref_segment = original_waveform[:, start_sample:end_sample]
@@ -907,7 +929,7 @@ class SpeechSynthesizer:
         if peak > 0.99:
             merged = merged * (0.99 / peak)
         out_path = save_as_mp3(
-            merged, self.TARGET_SR, job_id=job_id, track_id=track_id, purpose="rebuilt_track_mp3"
+            merged, self.TARGET_SR, purpose="rebuilt_track_mp3", workspace=workspace
         )
         duration = merged.shape[1] / self.TARGET_SR
         b2_key = storage.key("reconstructed", f"{job_id}.mp3")
@@ -917,7 +939,7 @@ class SpeechSynthesizer:
                 None, storage.upload_file, out_path, b2_key, "audio/mpeg"
             )
         finally:
-            TempWorkspace.drop_temp_standalone(out_path)
+            self._remove_temp_file(out_path)
         return SynthesisResult(
             b2_key=b2_key,
             audio_url=audio_url,
@@ -1060,6 +1082,7 @@ class SpeechSynthesizer:
         end_sample: int,
         *,
         track_id: str | None = None,
+        workspace: AudioWorkspace | None = None,
     ) -> str:
         start_sample = max(0, start_sample)
         end_sample = max(start_sample, min(end_sample, waveform.shape[1]))
@@ -1078,7 +1101,7 @@ class SpeechSynthesizer:
         )
         clip = self._noise.noise_gate(clip, self.TARGET_SR, threshold_db=-45.0)
         with tempfile.NamedTemporaryFile(
-            suffix=".wav", delete=False, dir=TempWorkspace.hear_temp_directory()
+            suffix=".wav", delete=False, dir=workspace.path if workspace is not None else None
         ) as tmp:
             ref_path = tmp.name
         torchaudio.save(ref_path, clip, self.TARGET_SR)
@@ -1259,6 +1282,7 @@ class SpeechSynthesizer:
         *,
         track_id: str | None,
         original_text: str | None = None,
+        workspace: AudioWorkspace | None = None,
     ) -> tuple[str | None, str, float | None]:
         """Export word-aligned speaker audio, transcript, and delivery rate."""
         total_samples = waveform.shape[1]
@@ -1291,6 +1315,7 @@ class SpeechSynthesizer:
                 ref_start,
                 ref_end,
                 track_id=track_id,
+                workspace=workspace,
             )
             duration_seconds = max(
                 (ref_end - ref_start) / self.TARGET_SR,
@@ -1316,7 +1341,11 @@ class SpeechSynthesizer:
                 )
             else:
                 reference_path = self._export_reference_clip(
-                    waveform, ref_start, ref_end, track_id=track_id
+                    waveform,
+                    ref_start,
+                    ref_end,
+                    track_id=track_id,
+                    workspace=workspace,
                 )
                 audio_bytes = await asyncio.to_thread(self._read_file_bytes, reference_path)
             pacing_duration = (pacing_end - pacing_start) / self.TARGET_SR
@@ -1349,7 +1378,11 @@ class SpeechSynthesizer:
             if reference_text:
                 if reference_path is None:
                     reference_path = self._export_reference_clip(
-                        waveform, ref_start, ref_end, track_id=track_id
+                        waveform,
+                        ref_start,
+                        ref_end,
+                        track_id=track_id,
+                        workspace=workspace,
                     )
                 return (reference_path, reference_text, speaking_rate)
             if speaking_rate is not None:
@@ -1358,13 +1391,13 @@ class SpeechSynthesizer:
                     track_id,
                 )
                 if reference_path:
-                    TempWorkspace.drop_temp_standalone(reference_path)
+                    self._remove_temp_file(reference_path)
                 return (None, "", speaking_rate)
             logger.warning("Voice reference transcription was empty for track=%s", track_id)
         except Exception as exc:
             logger.warning("Voice reference transcription failed for track=%s: %s", track_id, exc)
         if reference_path:
-            TempWorkspace.drop_temp_standalone(reference_path)
+            self._remove_temp_file(reference_path)
         return (None, "", None)
 
     @staticmethod

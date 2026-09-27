@@ -7,7 +7,6 @@ dependencies = [
     "cryptography>=50,<51",
     "fastapi>=0.141,<1",
     "httpx>=0.27,<0.28",
-    "huggingface-hub>=0.24,<1",
     "numpy>=1.24.3,<2",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.5,<3",
@@ -99,15 +98,19 @@ magic-clean-natural = [
     "torch==2.8.0",
     "torchaudio==2.8.0",
 ]
-magic-clean-voice-focus = [
+magic-clean-sam-audio = [
     "einops==0.8.2",
+    "sam-audio @ git+https://github.com/facebookresearch/sam-audio.git@bb4c6999d2677c7402360e426afc01ddfad6dce0",
+    "safetensors==0.8.0",
+    "sentencepiece==0.2.2",
     "torch==2.8.0",
     "torchaudio==2.8.0",
-]
-magic-clean-music-atmosphere = [
-    "onnxruntime>=1.20,<2",
+    "tokenizers==0.22.2",
+    "transformers==4.57.6",
 ]
 dev = [
+    "huggingface-hub>=0.24,<1",
+    "mypy>=1.14,<2",
     "pytest>=8.3,<10",
     "ruff>=0.9,<1",
 ]
@@ -120,17 +123,12 @@ conflicts = [
     [{ group = "pipeline" }, { group = "reconstruction" }],
     [{ group = "pipeline-llm" }, { group = "reconstruction" }],
     [{ group = "transcription" }, { group = "magic-clean-natural" }],
-    [{ group = "transcription" }, { group = "magic-clean-voice-focus" }],
-    [{ group = "transcription" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "transcription" }, { group = "magic-clean-sam-audio" }],
     [{ group = "pipeline" }, { group = "magic-clean-natural" }],
-    [{ group = "pipeline" }, { group = "magic-clean-voice-focus" }],
-    [{ group = "pipeline" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "pipeline" }, { group = "magic-clean-sam-audio" }],
     [{ group = "reconstruction" }, { group = "magic-clean-natural" }],
-    [{ group = "reconstruction" }, { group = "magic-clean-voice-focus" }],
-    [{ group = "reconstruction" }, { group = "magic-clean-music-atmosphere" }],
-    [{ group = "magic-clean-natural" }, { group = "magic-clean-voice-focus" }],
-    [{ group = "magic-clean-natural" }, { group = "magic-clean-music-atmosphere" }],
-    [{ group = "magic-clean-voice-focus" }, { group = "magic-clean-music-atmosphere" }],
+    [{ group = "reconstruction" }, { group = "magic-clean-sam-audio" }],
+    [{ group = "magic-clean-natural" }, { group = "magic-clean-sam-audio" }],
 ]
 override-dependencies = [
     "numpy>=1.24.3,<2",
