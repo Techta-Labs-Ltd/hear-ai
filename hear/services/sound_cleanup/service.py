@@ -15,6 +15,7 @@ from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 from hear.services.magic_clean.mastering import AudioMasteringService
 from hear.services.sound_cleanup.analysis import SoundAnalyser, SoundAnalysis
 from hear.services.sound_cleanup.planner import SoundRegion, SoundRepairPlanner
+from hear.services.sound_cleanup.preview_integrity import PreviewIntegrity
 from hear.services.sound_cleanup.separator import EventSeparator
 
 
@@ -182,6 +183,11 @@ class SoundCleanupService:
                         )
                         weight = self.blend_weight(len(before))[:, None]
                         blended = (before * (1 - weight) + candidate * weight).astype("float32")
+                        reason, blend_metrics = PreviewIntegrity.assess(before, blended)
+                        region.separation_checks["blended_artifact_check"] = blend_metrics
+                        if reason:
+                            region.outcome, region.reason = "rejected", reason
+                            continue
                         output.seek(region.start)
                         output.write(blended)
                         region.outcome, region.reason = (
@@ -222,6 +228,9 @@ class SoundCleanupService:
         recipe = {
             "version": SoundRepairPlanner.VERSION,
             "assets": evidence.model_digest,
+            "separator_policy": EventSeparator.POLICY_VERSION if self.separator else None,
+            "separator_manifest": getattr(self.separator, "digest", None),
+            "preview_integrity_policy": PreviewIntegrity.POLICY,
             "options": options.model_dump(mode="json"),
         }
         return {

@@ -34,8 +34,8 @@ unchanged stereo perception or perfect speech preservation.
 
 Overlap previews reject insignificant or oversized estimates, excessive peak
 increases, lost high-confidence speech activity and detected speech leakage into
-the removed estimate. VAD agreement does not certify words. The preview uses a
-bounded 85% estimated-component subtraction and retains explicit review status.
+the removed estimate. VAD agreement does not certify words. The corrected preview subtracts the complete estimated component, checks for
+new tonal/DC artifacts before and after blending, and retains explicit review status.
 No recursive or open-ended stronger-processing loop is used.
 
 ## Request options
@@ -142,3 +142,25 @@ durable dispatch, capability proxy, preview and approval UI together. Until then
 this feature is usable through the local CLI or the versioned worker API, not the
 current dashboard controls. The existing backend catalog routing problem is not
 fixed by this audio-engine change.
+
+## Residual-bark correction (v2)
+
+The previous 0.85 subtraction coefficient deliberately retained 15% of the
+estimated event. User listening rejected that result. The corrected implementation
+uses 1.0 and relies on rejection checks, not fixed event leakage, for protection.
+DeepFilterNet, its profiles, the separator checkpoint, and the source recordings
+are unchanged. The separator-policy fingerprint changes with this correction.
+
+The original controlled mixture improved from 15.85 dB to 24.28 dB of waveform
+error reduction against its known reference. The known reference is used only
+for evaluation, never passed into inference. The no-bark control remained exactly
+unchanged; half/double-level variations are supplementary checks on the same
+fixture, not independent evidence of broad generalisation. See the v2 JSON report.
+
+The user's humming complaint is not fully resolved by that measurement. The
+available fixture did not show a newly introduced stable 50/60 Hz line relative
+to its reference. Do not notch out voice harmonics or claim hum removal without
+identifying the interference. The new gate rejects a defined class of persistent
+output-only tones and excessive DC changes. It does not detect every audible
+artifact, certify words, or remove pre-existing hum. Thresholds require corpus
+validation. Corrected files remain explicit previews, not production certification.

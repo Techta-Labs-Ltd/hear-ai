@@ -13,9 +13,12 @@ from scipy import signal
 from hear.runtime.cleaner.asset_probe import PinnedAssetProbe
 from hear.runtime.cleaner.resource_guard import ResourceGuard
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
+from hear.services.sound_cleanup.preview_integrity import PreviewIntegrity
 
 
 class EventSeparator:
+    POLICY_VERSION = "audiosep-full-estimate-v2"
+
     def __init__(self, root: Path, digest: str, device: str):
         if (
             device not in ("cpu", "cuda:0")
@@ -93,14 +96,19 @@ class EventSeparator:
             estimate[:, channel] = signal.resample_poly(isolated[0, 0], 3, 2)[: len(context)]
         start, end = region.start - left, region.end - left
         wanted = context[start:end].astype("float64")
-        removed = estimate[start:end].astype("float64") * 0.85
+        removed = estimate[start:end].astype("float64")
         base_rms = float(np.sqrt(np.mean(wanted**2)))
         removed_rms = float(np.sqrt(np.mean(removed**2)))
         if removed_rms < max(1e-5, base_rms * 0.05):
             return None, "target_estimate_not_significant", {}
         if removed_rms > max(base_rms * 1.25, 0.001):
             return None, "target_estimate_exceeds_source", {}
+        # The old 0.85 coefficient deliberately retained target interference.
+        # Use the complete estimate and reject unsafe repairs instead.
         candidate = wanted - removed
+        reason, artifact_metrics = PreviewIntegrity.assess(wanted, candidate)
+        if reason:
+            return None, reason, {"artifact_check": artifact_metrics}
         if np.max(np.abs(candidate)) > max(np.max(np.abs(wanted)) * 1.5, 0.01):
             return None, "separator_peak_increase", {}
         # Explicit previews still reject gross speech loss or speech in the
@@ -125,6 +133,9 @@ class EventSeparator:
         lost = anchor & (np.max(candidate_prob[lo:hi], axis=1) < 0.1)
         leakage = anchor & (np.max(removed_prob[lo:hi], axis=1) >= 0.5)
         metrics = {
+            "separator_policy": self.POLICY_VERSION,
+            "target_subtraction_gain": 1.0,
+            "artifact_check": artifact_metrics,
             "speech_anchor_frames": int(np.count_nonzero(anchor)),
             "speech_loss_frames": int(np.count_nonzero(lost)),
             "removed_speech_frames": int(np.count_nonzero(leakage)),
