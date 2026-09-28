@@ -28,3 +28,6 @@ models
 **/*.safetensors
 **/*.pem
 bazel-*
+
+# Exclude decoded long-job test audio and temporary processing files.
+.runtime-audio/

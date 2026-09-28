@@ -402,6 +402,16 @@ class PodRuntime:
             return
         reply_to = message.reply_to
         if isinstance(attempt.result, AttemptRejection):
+            # A redelivery can arrive before a disconnected worker's backend
+            # lease expires. Do not acknowledge away that recoverable job.
+            if attempt.result.data.get("decision") == "lease_unavailable":
+                dead, _ = await self._retry_or_dead_letter(
+                    message, capacity_wait=True, expired=envelope.deadline <= datetime.now(UTC)
+                )
+                await self._publish_local(envelope.attempt_id, attempt.result, reply_to)
+                if dead:
+                    await self._publish_local(envelope.attempt_id, None, reply_to)
+                return
             await self._publish_local(envelope.attempt_id, attempt.result, reply_to)
             await self._publish_local(envelope.attempt_id, None, reply_to)
             await message.ack()

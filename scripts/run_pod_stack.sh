@@ -49,13 +49,16 @@ for role in "${role_list[@]}"; do
     printf 'Skipping %s: runtime environment is missing at %s\n' "$role" "$role_python" >&2
     continue
   fi
+  replicas=$("$role_python" -c 'import json,os,sys; n=json.loads(os.environ.get("HEAR_WORKER_REPLICAS","{}")).get(sys.argv[1],1); assert type(n) is int and 1<=n<=10; print(n)' "$role")
+  for replica in $(seq 1 "$replicas"); do
   (
     export HEAR_WORKER_ROLE="$role"
-    export HEAR_WORKER_ID="runpod-${RUNPOD_POD_ID:-local}-${role}-01"
+    export HEAR_WORKER_ID="runpod-${RUNPOD_POD_ID:-local}-${role}-${replica}"
     export HEAR_PYTHON_BIN="$role_python"
     "$role_python" -m hear.entrypoints.consumer
   ) &
   children+=("$!")
+  done
   started_roles+=("$role")
 done
 

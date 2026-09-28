@@ -108,6 +108,8 @@ class PodGateway:
             "concurrency": {
                 "host_total": int(os.environ.get("HEAR_HOST_MAX_CONCURRENT_JOBS", "1")),
                 "per_role_worker": int(os.environ.get("HEAR_POD_MAX_CONCURRENT_JOBS", "1")),
+                "per_type": json.loads(os.environ.get("HEAR_POD_ROLE_LIMITS", "{}")),
+                "per_process": json.loads(os.environ.get("HEAR_POD_PROCESS_LIMITS", "{}")),
             },
             "magic_clean": catalogue,
             "reconstruction": {

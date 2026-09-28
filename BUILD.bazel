@@ -6,7 +6,17 @@ filegroup(
     srcs = glob([
         "hear/**/*.py", "hear/**/*.json", "scripts/*.py", "scripts/*.sh",
         "patches/**", "deploy/runtime/**", "deploy/cleaner/*.ini",
-    ], exclude = ["**/__pycache__/**", "**/*.pyc", "**/.venv/**"])
+    ], exclude = [
+        "**/__pycache__/**",
+        "**/*.pyc",
+        "**/.venv/**",
+        "scripts/test_*.py",
+        "scripts/simulation_*.py",
+        "scripts/setup_simulation.py",
+        "scripts/run_simulation_stack.sh",
+        "scripts/package_image_context.py",
+        "scripts/build_runpod_image.sh",
+    ])
     + ["Dockerfile", ".dockerignore"],
 )
 

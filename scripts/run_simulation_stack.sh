@@ -17,19 +17,24 @@ done
 export HTTP_HOST=0.0.0.0 HTTP_PORT=8000
 "$python" -m hear.entrypoints.gateway >"$root/logs/gateway.log" 2>&1 &
 children+=("$!")
-for role in reconstruction pipeline transcription magic_clean_natural; do
+IFS=',' read -r -a configured_roles <<< "${HEAR_POD_STACK_ROLES:-pipeline}"
+for role in "${configured_roles[@]}"; do
+  [[ -n "$role" ]] || continue
+  replicas=$("$python" -c 'import json,os,sys; n=json.loads(os.environ.get("HEAR_WORKER_REPLICAS","{}" )).get(sys.argv[1],1); assert type(n) is int and 1<=n<=10; print(n)' "$role")
+  for replica in $(seq 1 "$replicas"); do
   role_python="/opt/hear-ai-v11/venvs/$role/bin/python"
-  HEAR_WORKER_ROLE="$role" HEAR_WORKER_ID="simulation-$role-01" "$role_python" -m hear.entrypoints.consumer >"$root/logs/$role.log" 2>&1 &
+  HEAR_WORKER_ROLE="$role" HEAR_WORKER_ID="simulation-$role-$replica" "$role_python" -m hear.entrypoints.consumer >"$root/logs/$role-$replica.log" 2>&1 &
   child=$!; children+=("$child")
   echo "Starting real-model worker: $role (PID $child)"
   ready=false
   for n in {1..180}; do
-    if ! kill -0 "$child" 2>/dev/null; then tail -30 "$root/logs/$role.log"; exit 1; fi
-    if "$python" -c 'import httpx,sys; d=httpx.get("http://127.0.0.1:8000/readyz",timeout=3).json(); sys.exit(0 if d.get("lanes",{}).get(sys.argv[1],{}).get("status")=="ready" else 1)' "$role" 2>/dev/null; then ready=true; break; fi
+    if ! kill -0 "$child" 2>/dev/null; then tail -30 "$root/logs/$role-$replica.log"; exit 1; fi
+    if "$python" -c 'import httpx,sys; d=httpx.get("http://127.0.0.1:8000/readyz",timeout=3).json(); sys.exit(0 if d.get("lanes",{}).get(sys.argv[1],{}).get("status")=="ready" and d.get("lanes",{}).get(sys.argv[1],{}).get("consumers",0)>=int(sys.argv[2]) else 1)' "$role" "$replica" 2>/dev/null; then ready=true; break; fi
     sleep 2
   done
-  if [[ "$ready" != true ]]; then echo "Worker startup timed out: $role"; tail -30 "$root/logs/$role.log"; exit 1; fi
-  echo "Ready: $role"
+  if [[ "$ready" != true ]]; then echo "Worker startup timed out: $role"; tail -30 "$root/logs/$role-$replica.log"; exit 1; fi
+  echo "Ready: $role replica=$replica"
+  done
 done
 echo "SIMULATION API READY: all four real-model job types on port 8000"
 set +e

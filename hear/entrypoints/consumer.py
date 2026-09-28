@@ -6,9 +6,9 @@ import signal
 
 from hear.bootstrap import RuntimeBootstrap
 from hear.config import RuntimeSettings
+from hear.runtime.concurrency import RoleConcurrency
 from hear.runtime.host_admission import HostJobAdmission
 from hear.runtime.pod import PodRuntime
-from hear.runtime.roles import WorkerRole
 
 
 class ConsumerEntrypoint:
@@ -18,13 +18,18 @@ class ConsumerEntrypoint:
         environment: dict[str, str] | None = None,
     ) -> None:
         source = dict(os.environ) if environment is None else environment
+        self._environment = source
         self._settings = RuntimeSettings.from_environment(source)
         self._bootstrap = bootstrap or RuntimeBootstrap(source)
 
     async def run(self) -> None:
         role = self._settings.worker_role
-        if role == WorkerRole.RECONSTRUCTION and self._settings.pod_max_concurrent_jobs != 1:
-            raise ValueError("fish_reconstruction_requires_one_job_per_worker")
+        limits = RoleConcurrency.load(
+            role,
+            self._settings.pod_max_concurrent_jobs,
+            self._settings.host_max_concurrent_jobs,
+            environment=self._environment,
+        )
         readiness = self._bootstrap.readiness(role)
         executor, backend, resources = self._bootstrap.executor_for(role)
         runtime = PodRuntime(
@@ -33,14 +38,14 @@ class ConsumerEntrypoint:
             executor,
             backend,
             api_key="",
-            max_concurrent_jobs=self._settings.pod_max_concurrent_jobs,
+            max_concurrent_jobs=limits.process_jobs,
             rabbitmq_url=self._settings.required("rabbitmq_url"),
             require_api_key=False,
             host_admission=HostJobAdmission(
                 self._settings.host_job_lock_path,
                 self._settings.host_max_concurrent_jobs,
                 role=role.value,
-                role_limit=1,
+                role_limit=limits.role_jobs,
             ),
         )
         stopped = asyncio.Event()

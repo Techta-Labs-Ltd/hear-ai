@@ -78,3 +78,28 @@ def test_simulation_rejects_a_real_backend_identity(monkeypatch):
     monkeypatch.setenv("HEAR_BACKEND_REGISTRY_JSON", json.dumps(value))
     with pytest.raises(ValueError, match="real_backend_identity"):
         SimulationBoundary.enabled()
+
+
+def test_runpod_stack_defaults_match_verified_runtime():
+    from pathlib import Path
+
+    docker = Path("Dockerfile").read_text()
+    assert "ENV HEAR_POD_STACK_ROLES=reconstruction,pipeline,magic_clean_natural" in docker
+    assert "ENV HEAR_HOST_MAX_CONCURRENT_JOBS=10" in docker
+    assert 'ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4,"reconstruction":2}' in docker
+    assert 'ENV HEAR_POD_PROCESS_LIMITS={"pipeline":7,"magic_clean_natural":1,"reconstruction":1}' in docker
+    assert 'ENV HEAR_WORKER_REPLICAS={"pipeline":1,"magic_clean_natural":4,"reconstruction":2}' in docker
+    assert "ENV WHISPER_BATCH_SIZE=8" in docker
+    assert "ENV WHISPER_LONG_AUDIO_BATCH_SIZE=8" in docker
+    assert "ENV WHISPER_CHUNK_SECONDS=240" in docker
+    assert "ENV HEAR_SOUND_CLEANUP_BUNDLE=/models/sound-cleanup-v1-runtime" in docker
+    assert "ENV HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime" in docker
+
+
+def test_transcription_is_supported_without_a_duplicate_worker():
+    from pathlib import Path
+
+    docker = Path("Dockerfile").read_text()
+    roles = next(line for line in docker.splitlines() if line.startswith("ENV HEAR_POD_STACK_ROLES="))
+    assert "transcription" not in roles
+    assert "JobType.TRANSCRIPTION: transcription" in Path("hear/bootstrap.py").read_text()

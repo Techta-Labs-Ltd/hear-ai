@@ -17,17 +17,20 @@ from fastapi.responses import FileResponse
 from hear.contracts.jobs import AttemptEnvelope
 from hear.contracts.outcomes import ExecutionOutcome
 from hear.contracts.scope import ExecutionScope
+from scripts.simulation_multipart import SimulationMultipart
 
 
 class SimulationBackend:
     def __init__(self, root: Path):
         self.root = root
+        self.multipart = SimulationMultipart(root)
         self.config = json.loads((root / "config.json").read_text())
         self.lock = asyncio.Lock()
         saved = root / "state.json"
         state = json.loads(saved.read_text()) if saved.is_file() else {}
         self.attempts = state.get("attempts", {})
-        self.max_active = state.get("max_active", 0)
+        self.previous_max_active = state.get("max_active", 0)
+        self.max_active = sum(self.lease_live(item) for item in self.attempts.values())
         self.app = FastAPI(title="Hear local simulation — not production")
         self.app.add_api_route("/simulation/register", self.register, methods=["POST"])
         self.app.add_api_route("/simulation/summary", self.summary, methods=["GET"])
@@ -42,8 +45,13 @@ class SimulationBackend:
             "/api/v1/internal/ai/attempts/{attempt_id}/{action}", self.callback, methods=["POST"]
         )
         self.app.add_api_route(
-            "/s3/{bucket}/{key:path}", self.object, methods=["PUT", "HEAD", "GET"]
+            "/s3/{bucket}/{key:path}", self.object, methods=["PUT", "HEAD", "GET", "POST", "DELETE"]
         )
+
+    @staticmethod
+    def lease_live(item: dict) -> bool:
+        last = item.get("last_heartbeat", item.get("claimed_at", 0))
+        return item.get("status") == "running" and time.time() - float(last) < 90
 
     def authenticate(self, request: Request):
         if not secrets.compare_digest(
@@ -116,17 +124,22 @@ class SimulationBackend:
                     raise HTTPException(403, "request_scope_mismatch")
                 if item["status"] == "completed":
                     return {"decision": "already_completed"}
-                if item["status"] == "running":
+                if item["status"] in {"failed", "cancelled"}:
+                    return {"decision": "cancelled"}
+                if self.lease_live(item):
                     return {"decision": "lease_unavailable"}
+                if item["status"] == "running":
+                    item["expired_leases"] = item.get("expired_leases", 0) + 1
                 item.update(
                     status="running",
                     worker=payload["worker_id"],
                     generation=payload["generation"],
                     claimed_at=time.time(),
+                    last_heartbeat=time.time(),
                     claims=item["claims"] + 1,
                 )
                 self.max_active = max(
-                    self.max_active, sum(x["status"] == "running" for x in self.attempts.values())
+                    self.max_active, sum(self.lease_live(x) for x in self.attempts.values())
                 )
                 self.persist()
                 return {"decision": "execute", "lease_seconds": 90, "heartbeat_seconds": 15}
@@ -186,6 +199,9 @@ class SimulationBackend:
             "real_models": True,
             "cloud_storage_used": False,
             "max_simultaneously_claimed": self.max_active,
+            "active_leases": sum(self.lease_live(x) for x in self.attempts.values()),
+            "prior_process_reported_peak": self.previous_max_active,
+            "peak_scope": "valid leases since simulation backend startup",
             "attempts": [],
         }
         for identity, item in self.attempts.items():
@@ -216,6 +232,8 @@ class SimulationBackend:
         ):
             raise HTTPException(403, "fake_s3_credential_required")
         path = self.root / "objects" / self.safe(key)
+        if "uploads" in request.query_params or "uploadId" in request.query_params:
+            return await self.multipart.handle(request, bucket, key, path)
         metadata = self.root / "metadata" / (hashlib.sha256(key.encode()).hexdigest() + ".json")
         if request.method == "PUT":
             if "aws-chunked" in request.headers.get("content-encoding", ""):

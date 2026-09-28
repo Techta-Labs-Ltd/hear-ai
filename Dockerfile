@@ -142,15 +142,28 @@ COPY --from=reconstruction-pod /opt/fish-speech /opt/fish-speech
 RUN ln -s /opt/hear-ai-v11/venvs/pipeline /opt/hear-ai-v11/venvs/transcription
 COPY hear /app/hear
 COPY scripts /app/scripts
-ENV HEAR_POD_STACK_ROLES=reconstruction,pipeline,transcription,magic_clean_natural
+ENV HEAR_POD_STACK_ROLES=reconstruction,pipeline,magic_clean_natural
 ENV HEAR_GATEWAY_PYTHON_BIN=/opt/hear-ai-v11/venvs/pipeline/bin/python
 ENV HEAR_MODEL_ROOT=/models
 ENV FISH_SPEECH_MODEL_ROOT=/root/hear-ai-v11/models
 ENV FISH_SPEECH_HOME=/opt/fish-speech
 ENV FISH_SPEECH_BNB_MODE=nf4
 ENV HEAR_POD_MAX_CONCURRENT_JOBS=1
-ENV HEAR_HOST_MAX_CONCURRENT_JOBS=2
-ENV HEAR_TEMP_DIR=/root/hear-ai-v11/scratch
+ENV HEAR_HOST_MAX_CONCURRENT_JOBS=10
+ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4,"reconstruction":2}
+ENV HEAR_POD_PROCESS_LIMITS={"pipeline":7,"magic_clean_natural":1,"reconstruction":1}
+ENV HEAR_WORKER_REPLICAS={"pipeline":1,"magic_clean_natural":4,"reconstruction":2}
+ENV WHISPER_BATCH_SIZE=8
+ENV WHISPER_LONG_AUDIO_BATCH_SIZE=8
+ENV WHISPER_CHUNK_SECONDS=240
+ENV OMP_NUM_THREADS=2
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=2
+ENV HEAR_SOUND_CLEANUP_BUNDLE=/models/sound-cleanup-v1-runtime
+ENV HEAR_SOUND_CLEANUP_BUNDLE_SHA256=f878d14f1d892e142db2c3f582a5092aabc9ac260c9b771b02a09b0ea71389a9
+ENV HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime
+ENV HEAR_SOUND_CLEANUP_SEPARATOR_SHA256=e1227365d076eafde534152c75be2c106302705c578eb8f71969c014f2958546
+ENV HEAR_TEMP_DIR=/workspace/hear-ai-v11/.runtime-audio
 ENV PATH=/opt/hear-ai-v11/venvs/pipeline/bin:/root/.local/bin:${PATH}
 RUN /opt/hear-ai-v11/venvs/pipeline/bin/python -c "import torch, aio_pika, uvicorn" && \
     /opt/hear-ai-v11/venvs/reconstruction/bin/python -c "import torch, bitsandbytes; from fish_speech.inference_engine import TTSInferenceEngine" && \
