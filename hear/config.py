@@ -135,6 +135,16 @@ class RuntimeSettings(BaseModel):
         default=4 * 1024**3, gt=0, alias="MAGIC_CLEAN_MAX_INPUT_BYTES"
     )
     magic_clean_max_frames: int = Field(default=96000 * 7200, gt=0, alias="MAGIC_CLEAN_MAX_FRAMES")
+    sound_cleanup_separator_bundle: Path | None = Field(
+        default=None, alias="HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE"
+    )
+    sound_cleanup_separator_sha256: str | None = Field(
+        default=None, alias="HEAR_SOUND_CLEANUP_SEPARATOR_SHA256", pattern=r"^[a-f0-9]{64}$"
+    )
+    sound_cleanup_bundle: Path | None = Field(default=None, alias="HEAR_SOUND_CLEANUP_BUNDLE")
+    sound_cleanup_bundle_sha256: str | None = Field(
+        default=None, alias="HEAR_SOUND_CLEANUP_BUNDLE_SHA256", pattern=r"^[a-f0-9]{64}$"
+    )
     magic_clean_model_device: Literal["cpu", "cuda:0"] = Field(
         default="cuda:0", alias="HEAR_MAGIC_CLEAN_MODEL_DEVICE"
     )
@@ -168,7 +178,12 @@ class RuntimeSettings(BaseModel):
             raise ValueError("runtime_path_must_not_be_empty")
         return value
 
-    @field_validator("cleaner_certification_path", mode="before")
+    @field_validator(
+        "cleaner_certification_path",
+        "sound_cleanup_bundle",
+        "sound_cleanup_separator_bundle",
+        mode="before",
+    )
     @classmethod
     def normalize_optional_certification_path(cls, value: object) -> object:
         if value is None or not str(value).strip():

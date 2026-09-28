@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import threading
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from hear.audio.io import AudioIO
@@ -12,6 +15,7 @@ from hear.contracts.outcomes import ExecutionOutcome
 from hear.execution.native import NativeExecutor
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 from hear.storage.b2 import B2StorageFactory
+from hear.workflows.cleaning_progress import CleaningProgress
 
 
 class AvailableMagicCleanWorkflow:
@@ -39,6 +43,24 @@ class AvailableMagicCleanWorkflow:
         yield self._event(envelope, sequence, "preparing", 0, ExecutionEventType.STARTED)
         sequence += 1
         try:
+            if envelope.deadline <= datetime.now(UTC):
+                raise CleanExecutionError(ErrorCode.DEADLINE_EXCEEDED, "attempt deadline exceeded")
+            cleaner = self._model_cleaner
+            if cleaner is None:
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE, "magic_clean_model_engine_unavailable"
+                )
+            sound = envelope.options.get("sound_cleanup", {})
+            if sound.get("enabled") and not getattr(cleaner, "sound_cleanup_available", False):
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE, "sound_cleanup_not_provisioned"
+                )
+            if sound.get("preview_overlaps") and not getattr(
+                cleaner, "overlap_preview_available", False
+            ):
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE, "overlap_separator_not_provisioned"
+                )
             source = await self._audio.download_source(str(envelope.source.url), workspace)
             source_digest = await self._native.run(self._sha256, source)
             if envelope.source.file_sha256 and source_digest != envelope.source.file_sha256:
@@ -55,15 +77,35 @@ class AvailableMagicCleanWorkflow:
                 raise CleanExecutionError(
                     ErrorCode.ENGINE_UNAVAILABLE, "magic_clean_model_engine_unavailable"
                 )
-            clean_report = await self._native.run(
-                cleaner.clean,
-                source,
-                master,
-                workspace.path,
-                envelope.options,
-                envelope.deadline,
-                self._timeout_seconds,
+            cancellation = threading.Event()
+            progress = CleaningProgress()
+            task = asyncio.create_task(
+                self._native.run_cancellable(
+                    cleaner.clean,
+                    source,
+                    master,
+                    workspace.path,
+                    envelope.options,
+                    envelope.deadline,
+                    self._timeout_seconds,
+                    cancelled=cancellation,
+                    progress=progress.publish,
+                )
             )
+            try:
+                while not task.done():
+                    try:
+                        stage, percent = await asyncio.wait_for(progress.queue.get(), timeout=0.2)
+                    except TimeoutError:
+                        continue
+                    yield self._event(envelope, sequence, stage, percent, ExecutionEventType.STAGE)
+                    sequence += 1
+                clean_report = await task
+            finally:
+                cancellation.set()
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
             engine = cleaner.engine
             delivery = workspace.file("delivery_audio.mp3")
             if (

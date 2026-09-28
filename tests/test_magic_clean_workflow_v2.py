@@ -210,7 +210,7 @@ def test_available_magic_clean_returns_processing_failure_outcome(tmp_path):
     class Cleaner:
         profile = "natural"
 
-        def clean(self, *args):
+        def clean(self, *args, **kwargs):
             raise CleanExecutionError(
                 ErrorCode.PROCESS_FAILED,
                 "DeepFilterNet processing failed",

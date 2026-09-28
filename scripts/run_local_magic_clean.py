@@ -12,6 +12,10 @@ from pathlib import Path
 from hear.contracts.cleaning import CleaningProfiles, MagicCleanProfile
 from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
 from hear.runtime.cleaner.resource_guard import ResourceBudget
+from hear.services.sound_cleanup.analysis import SoundAnalyser
+from hear.services.sound_cleanup.assets import SoundCleanupAssets
+from hear.services.sound_cleanup.separator import EventSeparator
+from hear.services.sound_cleanup.service import SoundCleanupService
 
 
 class LocalMagicCleanCli:
@@ -28,6 +32,11 @@ class LocalMagicCleanCli:
         parser.add_argument("--auto-level", action=argparse.BooleanOptionalAction, default=None)
         parser.add_argument("--remove-clicks", action="store_true")
         parser.add_argument("--trim-silence", action="store_true")
+        parser.add_argument("--sound-cleanup-options", type=Path)
+        parser.add_argument("--sound-cleanup-bundle", type=Path)
+        parser.add_argument("--sound-cleanup-bundle-sha256")
+        parser.add_argument("--separator-bundle", type=Path)
+        parser.add_argument("--separator-sha256")
         parser.add_argument("--timeout-seconds", type=int, default=1800)
         args = parser.parse_args()
         source = args.source.resolve(strict=True)
@@ -40,6 +49,27 @@ class LocalMagicCleanCli:
         }
         if args.auto_level is not None:
             options["auto_level"] = args.auto_level
+        sound_service = None
+        if args.sound_cleanup_options:
+            if args.sound_cleanup_options.stat().st_size > 65536:
+                parser.error("sound-cleanup option file is too large")
+            options["sound_cleanup"] = json.loads(args.sound_cleanup_options.read_text())
+            if not args.sound_cleanup_bundle or not args.sound_cleanup_bundle_sha256:
+                parser.error("a pinned sound-cleanup bundle is required")
+            separator = (
+                EventSeparator(args.separator_bundle, args.separator_sha256 or "", args.device)
+                if args.separator_bundle
+                else None
+            )
+            sound_service = SoundCleanupService(
+                SoundAnalyser(
+                    SoundCleanupAssets.load(
+                        args.sound_cleanup_bundle, args.sound_cleanup_bundle_sha256
+                    ),
+                    device=args.device,
+                ),
+                separator=separator,
+            )
         options = CleaningProfiles.validate(options)
         output = args.output_dir.resolve()
         output.mkdir(parents=True, exist_ok=True)
@@ -51,6 +81,7 @@ class LocalMagicCleanCli:
             args.model_root.resolve() / "magic-clean/DeepFilterNet3",
             ResourceBudget(20_000_000_000, 2_000_000_000, 48000 * 7200),
             device=args.device,
+            sound_cleanup_service=sound_service,
         )
         try:
             if not cleaner.is_ready():

@@ -480,11 +480,38 @@ class RuntimeBootstrap:
         if role == WorkerRole.MAGIC_CLEAN_NATURAL:
             from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
 
+            sound_cleanup_service = None
+            if self._settings.sound_cleanup_bundle is not None:
+                from hear.services.sound_cleanup.analysis import SoundAnalyser
+                from hear.services.sound_cleanup.assets import SoundCleanupAssets
+                from hear.services.sound_cleanup.service import SoundCleanupService
+
+                assets = SoundCleanupAssets.load(
+                    self._settings.sound_cleanup_bundle,
+                    self._settings.sound_cleanup_bundle_sha256 or "",
+                )
+                from hear.services.sound_cleanup.separator import EventSeparator
+
+                separator = None
+                if self._settings.sound_cleanup_separator_bundle is not None:
+                    separator = EventSeparator(
+                        self._settings.sound_cleanup_separator_bundle,
+                        self._settings.sound_cleanup_separator_sha256 or "",
+                        self._settings.magic_clean_model_device,
+                    )
+                sound_cleanup_service = SoundCleanupService(
+                    SoundAnalyser(
+                        assets,
+                        device=self._settings.magic_clean_model_device,
+                    ),
+                    separator=separator,
+                )
             model_cleaner = DeepFilterNetCleaner(
                 self._root / "deploy" / "cleaner" / "deepfilter3.ini",
                 self._model_root / "magic-clean" / "DeepFilterNet3",
                 self._magic_clean_budget(),
                 device=self._settings.magic_clean_model_device,
+                sound_cleanup_service=sound_cleanup_service,
             )
         readiness = self.readiness(role)
         readiness.add_check("ffmpeg", self._ffmpeg_ready)
