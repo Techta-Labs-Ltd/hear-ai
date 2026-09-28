@@ -65,7 +65,7 @@ class RuntimeSetup:
                     text=True,
                     check=True,
                 ).stdout.strip()
-                if revision != "214da3cd841bda85da2496b96cd3c4d7edb1337e":
+                if revision != "fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb":
                     raise RuntimeError("fish_source_revision_mismatch")
                 python = str(Path(environment["UV_PROJECT_ENVIRONMENT"]) / "bin" / "python")
                 if not args.check:

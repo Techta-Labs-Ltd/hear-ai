@@ -66,7 +66,7 @@ CMD ["python", "-m", "hear.entrypoints.serverless"]
 
 FROM runtime-base AS reconstruction-base
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction
-RUN git clone https://github.com/fishaudio/fish-speech.git /opt/fish-speech && cd /opt/fish-speech && git checkout 214da3cd841bda85da2496b96cd3c4d7edb1337e
+RUN git clone https://github.com/groxaxo/fish-speech-int4-patch.git /opt/fish-speech && cd /opt/fish-speech && git checkout fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb
 RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
 RUN python -c "from fish_speech.inference_engine import TTSInferenceEngine; from fish_speech.models.dac.inference import load_model; from fish_speech.models.text2semantic.inference import launch_thread_safe_queue; from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest"
 

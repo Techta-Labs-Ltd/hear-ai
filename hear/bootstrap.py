@@ -15,6 +15,7 @@ from hear.execution.executor import JobExecutor
 from hear.execution.native import NativeExecutor
 from hear.execution.reporter import BackendAttemptClient
 from hear.health.service import RuntimeReadiness
+from hear.inference.fish_nf4_assets import FishNF4Assets
 from hear.inference.manifest import ModelManifest
 from hear.runtime.roles import WorkerRole
 from hear.storage.b2 import B2StorageFactory
@@ -59,7 +60,9 @@ class RuntimeBootstrap:
         current = RuntimeReadiness(
             role,
             self._manifest,
-            self._model_root,
+            self._settings.fish_speech_model_root or self._model_root
+            if role == WorkerRole.RECONSTRUCTION
+            else self._model_root,
             self._patch_manager,
             enabled_features=self._settings.model_features,
             require_manifest_models=not self._uses_available_engine(role),
@@ -324,10 +327,12 @@ class RuntimeBootstrap:
         fish_native = NativeExecutor("reconstruction-fish")
         audio_native = NativeExecutor("reconstruction-audio")
         fish_module = importlib.import_module("hear.inference.fish_speech")
+        fish_root = self._settings.fish_speech_model_root or self._model_root
+        checkpoint = FishNF4Assets.runtime_path(fish_root)
         fish = fish_module.FishSpeechEngine(
             self._settings.fish_speech_home,
-            self._model_root / "fish-speech" / "s2-pro",
-            self._model_root / "fish-speech" / "s2-pro" / "codec.pth",
+            checkpoint,
+            checkpoint / "codec.pth",
             fish_native,
             bnb_mode=self._settings.fish_speech_bnb_mode,
         )

@@ -141,24 +141,37 @@
     },
     {
       "logical_name": "fish-speech-s2-pro",
-      "repo_id": "fishaudio/s2-pro",
-      "revision": "1de9996b6be38b745688de084d87a5633f714e4e",
-      "relative_path": "fish-speech/s2-pro",
+      "repo_id": "groxaxo/s2-pro-BnB-4Bits",
+      "revision": "5c09659b9dbea2f64b90c1a611c4824560619ce7",
+      "relative_path": "fish-speech/s2-pro-nf4",
       "roles": [
         "reconstruction"
       ],
       "required_files": [
+        "model.pth",
         "codec.pth",
         "config.json",
-        "model.safetensors.index.json",
         "tokenizer.json",
-        "tokenizer_config.json"
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "chat_template.jinja",
+        "LICENSE.md"
       ],
       "engine_adapter": "fish_speech_s2_pro",
-      "provenance_url": "https://huggingface.co/fishaudio/s2-pro/tree/1de9996b6be38b745688de084d87a5633f714e4e",
+      "provenance_url": "https://huggingface.co/groxaxo/s2-pro-BnB-4Bits/tree/5c09659b9dbea2f64b90c1a611c4824560619ce7",
       "license_name": "Fish Audio Research License",
       "license_status": "permission_required",
-      "license_url": "https://huggingface.co/fishaudio/s2-pro/blob/1de9996b6be38b745688de084d87a5633f714e4e/LICENSE.md"
+      "license_url": "https://huggingface.co/fishaudio/s2-pro/blob/1de9996b6be38b745688de084d87a5633f714e4e/LICENSE.md",
+      "file_hashes": {
+        "model.pth": "08b409f40c653cf2af5b5b08a797c67ba706d22b586c831c14e5ac156b1960ae",
+        "codec.pth": "74fc41c5a7151c6f350af8bd7e5d6e3accfcc7f3dfbfac23afd35af07052bb2f",
+        "config.json": "e21c808529c2934be09038ff66b6ceda125d22e403c2d8c6c2b7a1d63d6d8c5e",
+        "tokenizer.json": "f24e08099d45a8adf3f52f5f0b03276e433bb9d689bb15fcbcc48ce58744588b",
+        "tokenizer_config.json": "98f4141ba0fe5831c7cff842a3a3c65b22888000009a8409d1666ab031a9bd68",
+        "special_tokens_map.json": "c2ff18fde6e43b7408435bc8ed079af74531befba549358a97cbc59ce606bc6b",
+        "chat_template.jinja": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
+        "LICENSE.md": "aa7d9206e9d710590987a3636934f643529c00cd490323594e6206aaa0c32d80"
+      }
     }
   ]
 }

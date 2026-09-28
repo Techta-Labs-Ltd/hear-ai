@@ -24,35 +24,56 @@ class FishProcess:
             from fish_speech.models.dac.inference import load_model
             from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
             from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
+            from loguru import logger
+
+            # Third-party INFO logs include complete job transcripts.
+            logger.disable("fish_speech")
 
             if not torch.cuda.is_available():
                 raise RuntimeError("fish_speech_cuda_unavailable")
+            precision = torch.float16 if bnb_mode == "nf4" else torch.bfloat16
             kwargs = {
                 "checkpoint_path": checkpoint,
                 "device": "cuda",
-                "precision": torch.bfloat16,
+                "precision": precision,
                 "compile": False,
             }
             supported = inspect.signature(launch_thread_safe_queue).parameters
-            if bnb_mode not in ("", "none") and "bnb_mode" not in supported:
+            if bnb_mode == "nf4" and "bnb4" in supported:
+                kwargs["bnb4"] = True
+            elif bnb_mode not in ("", "none") and "bnb_mode" not in supported:
                 raise RuntimeError("requested_fish_quantisation_not_supported_by_pinned_source")
             if "bnb_mode" in supported:
                 kwargs["bnb_mode"] = bnb_mode if bnb_mode not in ("", "none") else None
+            if "max_seq_len" in supported:
+                kwargs["max_seq_len"] = 4096
+            torch.set_num_threads(2)
+            torch.cuda.reset_peak_memory_stats()
             queue_result = launch_thread_safe_queue(**kwargs)
             llama_queue = queue_result[0] if isinstance(queue_result, tuple) else queue_result
             decoder = load_model(config_name="modded_dac_vq", checkpoint_path=codec, device="cuda")
             engine = TTSInferenceEngine(
                 llama_queue=llama_queue,
                 decoder_model=decoder,
-                precision=torch.bfloat16,
+                precision=precision,
                 compile=False,
             )
-            connection.send({"status": "ready"})
+            connection.send(
+                {
+                    "status": "ready",
+                    "quantization": bnb_mode,
+                    "startup_cuda_allocated_bytes": torch.cuda.memory_allocated(),
+                    "startup_cuda_reserved_bytes": torch.cuda.memory_reserved(),
+                    "startup_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                    "startup_peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+                }
+            )
             while True:
                 values = connection.recv()
                 if values is None:
                     llama_queue.put(None)
                     return
+                torch.cuda.reset_peak_memory_stats()
                 request = ServeTTSRequest(
                     text=values["text"],
                     max_new_tokens=values["max_new_tokens"],
@@ -64,7 +85,12 @@ class FishProcess:
                     format="wav",
                     streaming=False,
                     use_memory_cache="off",
+                    normalize=False,
                 )
+                # Do not inherit a companion loader's bundled default speaker.
+                # Only the job's explicit reference is allowed to condition voice.
+                if not values["references"]:
+                    request = request.model_copy(update={"reference_id": None})
                 audio = None
                 rate = 0
                 for result in engine.inference(request):
@@ -81,7 +107,17 @@ class FishProcess:
                     raise RuntimeError("fish_speech_invalid_output")
                 stream = io.BytesIO()
                 sf.write(stream, audio, rate, format="WAV", subtype="FLOAT")
-                connection.send({"status": "completed", "audio": stream.getvalue()})
+                connection.send(
+                    {
+                        "status": "completed",
+                        "audio": stream.getvalue(),
+                        "quantization": bnb_mode,
+                        "sample_rate": rate,
+                        "frames": int(audio.size),
+                        "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                        "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+                    }
+                )
         except BaseException as exc:
             try:
                 # Do not send user text, references, credential-bearing paths or tracebacks.
@@ -106,6 +142,8 @@ class FishSpeechEngine:
         startup_timeout: float = 300,
         inference_timeout: float = 180,
     ):
+        if bnb_mode not in ("none", "nf4"):
+            raise ValueError("unsupported_fish_quantization")
         if not (source_root / "fish_speech" / "inference_engine").is_dir():
             raise RuntimeError("fish_speech_source_not_provisioned")
         if (
@@ -130,7 +168,9 @@ class FishSpeechEngine:
         self._process.start()
         child.close()
         try:
-            if self._receive(startup_timeout, threading.Event()).get("status") != "ready":
+            self.startup_metrics = self._receive(startup_timeout, threading.Event())
+            self.last_inference_metrics: dict[str, Any] = {}
+            if self.startup_metrics.get("status") != "ready":
                 raise RuntimeError("fish_speech_startup_failed")
         except BaseException:
             self._stop()
@@ -218,6 +258,9 @@ class FishSpeechEngine:
         try:
             self._connection.send(request)
             response = self._receive(self._timeout, cancelled)
+            self.last_inference_metrics = {
+                key: value for key, value in response.items() if key != "audio"
+            }
             data = response.get("audio")
             if (
                 response.get("status") != "completed"
@@ -238,4 +281,10 @@ class FishSpeechEngine:
         if self._closed:
             return
         self._closed = True
+        if not self._faulted and self._process.is_alive():
+            try:
+                self._connection.send(None)
+                self._process.join(timeout=2)
+            except (OSError, EOFError, BrokenPipeError):
+                pass
         self._stop()
