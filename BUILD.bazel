@@ -1,0 +1,27 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "runtime_sources",
+    srcs = glob([
+        "hear/**/*.py", "hear/**/*.json", "scripts/*.py", "scripts/*.sh",
+        "patches/**", "deploy/runtime/**", "deploy/cleaner/*.ini",
+    ], exclude = ["**/__pycache__/**", "**/*.pyc", "**/.venv/**"])
+    + ["Dockerfile", ".dockerignore"],
+)
+
+genrule(
+    name = "image_context",
+    srcs = [":runtime_sources"],
+    tools = ["scripts/package_image_context.py"],
+    outs = ["hear-runtime-context.tar"],
+    cmd = "python3 $(location scripts/package_image_context.py) $@ $(locations :runtime_sources)",
+)
+
+# Bazel builds the bounded, credential-free context. Buildx builds/pushes the
+# actual OCI image using the existing role-isolated locked Dockerfile.
+sh_binary(
+    name = "runpod_image",
+    srcs = ["scripts/build_runpod_image.sh"],
+    data = [":image_context"],
+)

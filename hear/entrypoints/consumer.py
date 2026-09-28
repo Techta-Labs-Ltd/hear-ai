@@ -36,7 +36,12 @@ class ConsumerEntrypoint:
             max_concurrent_jobs=self._settings.pod_max_concurrent_jobs,
             rabbitmq_url=self._settings.required("rabbitmq_url"),
             require_api_key=False,
-            host_admission=HostJobAdmission(self._settings.host_job_lock_path),
+            host_admission=HostJobAdmission(
+                self._settings.host_job_lock_path,
+                self._settings.host_max_concurrent_jobs,
+                role=role.value,
+                role_limit=1,
+            ),
         )
         stopped = asyncio.Event()
         loop = asyncio.get_running_loop()

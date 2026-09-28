@@ -1,0 +1,2 @@
+build --jobs=2
+common --enable_bzlmod

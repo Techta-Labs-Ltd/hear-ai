@@ -22,6 +22,7 @@ from hear.runtime.gateway import (
     RabbitMQGateway,
 )
 from hear.runtime.ownership import BackendOwnershipPolicy, BackendRegistry
+from hear.runtime.simulation import SimulationBoundary
 
 
 class PodGateway:
@@ -36,6 +37,7 @@ class PodGateway:
         sound_cleanup_available: bool = False,
         overlap_preview_available: bool = False,
     ) -> None:
+        self._simulation = SimulationBoundary.enabled()
         self._runtime = runtime
         self._api_key = api_key.strip()
         self.enable_docs = enable_docs
@@ -61,7 +63,11 @@ class PodGateway:
         lanes = await self._runtime.lane_status()
         ready = bool(lanes) and all(item["status"] == "ready" for item in lanes.values())
         return JSONResponse(
-            {"status": "ready" if ready else "loading", "lanes": lanes},
+            {
+                "status": "ready" if ready else "loading",
+                "runtime_mode": "simulation" if self._simulation else "production",
+                "lanes": lanes,
+            },
             status_code=200 if ready else 503,
         )
 
@@ -97,6 +103,12 @@ class PodGateway:
         return {
             "status": "ready" if ready else "loading",
             "lanes": lanes,
+            "runtime_mode": "simulation" if self._simulation else "production",
+            "backend_type": "simulated_local" if self._simulation else "external",
+            "concurrency": {
+                "host_total": int(os.environ.get("HEAR_HOST_MAX_CONCURRENT_JOBS", "1")),
+                "per_role_worker": int(os.environ.get("HEAR_POD_MAX_CONCURRENT_JOBS", "1")),
+            },
             "magic_clean": catalogue,
             "reconstruction": {
                 "engine": "fish_speech_s2_pro",

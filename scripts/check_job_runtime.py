@@ -12,6 +12,7 @@ from hear.config import RuntimeSettings
 from hear.inference.manifest import ModelManifest
 from hear.runtime.ownership import BackendRegistry, DeploymentOwnership
 from hear.runtime.roles import WorkerRole
+from hear.runtime.simulation import SimulationBoundary
 
 
 class JobRuntimeCheck:
@@ -26,6 +27,7 @@ class JobRuntimeCheck:
                 if value is not None:
                     os.environ[key] = value
         root = Path(__file__).resolve().parents[1]
+        simulation = SimulationBoundary.enabled()
         blockers = []
         roles = []
         try:
@@ -61,7 +63,7 @@ class JobRuntimeCheck:
             checks[role.value] = {"missing_models": missing, "license_blockers": licences}
             if missing:
                 blockers.append("role_missing_models:" + role.value)
-            if licences:
+            if licences and not simulation:
                 blockers.append("role_license_review_required:" + role.value)
         callbacks = []
         try:
@@ -103,13 +105,15 @@ class JobRuntimeCheck:
                 blockers.append("backend_protocol_unavailable:" + backend_id)
         report = {
             "status": "blocked" if blockers else "configuration_checked",
+            "runtime_mode": "simulation" if simulation else "production",
+            "production_approval_claimed": False,
             "blockers": blockers,
             "roles": checks,
             "backends": backend_checks,
             "admission": {
                 "per_worker_limit": settings.pod_max_concurrent_jobs,
-                "host_total_limit": 1,
-                "mechanism": "exclusive_process_shared_file_lock",
+                "host_total_limit": int(os.environ.get("HEAR_HOST_MAX_CONCURRENT_JOBS", "1")),
+                "mechanism": "process_shared_global_and_role_slot_locks",
                 "configured_roles": [r.value for r in roles],
                 "configured_is_not_load_tested_capacity": True,
             },

@@ -6,6 +6,11 @@ Hear AI is a Python 3.12 execution runtime for audio intelligence jobs. It runs 
 
 See [job intake and deployment checks](docs/JOB_RUNTIME_SETUP.md) before enabling app traffic.
 
+## Live simulation and image build
+
+The four real-model job types can be exercised with the local simulated backend.
+See [simulation and Bazel image build](docs/SIMULATION_AND_IMAGE_BUILD.md).
+
 ## Runtime layout
 
 ```text

@@ -100,6 +100,9 @@ class RuntimeSettings(BaseModel):
     optional_engine_mode: Literal["available", "certified"] = Field(
         default="available", alias="HEAR_OPTIONAL_ENGINE_MODE"
     )
+    host_max_concurrent_jobs: int = Field(
+        default=1, ge=1, le=16, alias="HEAR_HOST_MAX_CONCURRENT_JOBS"
+    )
     host_job_lock_path: Path = Field(
         default=Path("/tmp/hear-ai/host-job.lock"), alias="HEAR_HOST_JOB_LOCK_PATH"
     )

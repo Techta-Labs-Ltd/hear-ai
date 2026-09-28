@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 
 from hear.contracts.jobs import AttemptEnvelope, JobType, MagicCleanProfile
@@ -19,11 +20,13 @@ class RabbitMQTopology:
         *,
         exchange: str = "hear.ai.jobs",
         queue_prefix: str = "hear.ai",
-        version: int = 2,
+        version: int = 3,
         max_queue_messages: int = 1000,
         retry_delay_ms: int = 5000,
         max_retries: int = 5,
     ) -> None:
+        exchange = os.environ.get("HEAR_QUEUE_EXCHANGE", exchange)
+        queue_prefix = os.environ.get("HEAR_QUEUE_PREFIX", queue_prefix)
         self.exchange = exchange
         self.retry_exchange = f"{exchange}.retry"
         self.dead_exchange = f"{exchange}.dead"
@@ -72,7 +75,7 @@ class RabbitMQTopology:
         return {
             "x-queue-type": "quorum",
             "x-max-length": self.max_queue_messages,
-            "x-overflow": "reject-publish-dlx",
+            "x-overflow": "reject-publish",
             "x-dead-letter-exchange": self.dead_exchange,
             "x-dead-letter-routing-key": binding.dead_routing_key,
             "x-delivery-limit": self.max_retries + 1,

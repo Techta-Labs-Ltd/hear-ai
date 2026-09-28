@@ -13,9 +13,9 @@ RUN curl -LsSf https://astral.sh/uv/0.10.9/install.sh | sh
 WORKDIR /app
 COPY deploy/runtime/pyproject.toml deploy/runtime/uv.lock /app/deploy/runtime/
 COPY deploy/cleaner/deepfilter3.ini /app/deploy/cleaner/deepfilter3.ini
-COPY hear /app/hear
+COPY hear/__init__.py /app/hear/__init__.py
+COPY hear/tools /app/hear/tools
 COPY patches /app/patches
-COPY scripts /app/scripts
 ENV HEAR_PROJECT_ROOT=/app
 
 FROM runtime-base AS runtime-pod-base
@@ -30,24 +30,32 @@ FROM runtime-pod-base AS transcription-pod
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group transcription --group pod
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=transcription
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
 FROM runtime-base AS transcription-serverless
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group transcription --group serverless
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=transcription
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
 
 FROM runtime-pod-base AS pipeline-pod
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pod
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
 FROM runtime-base AS pipeline-serverless
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group serverless
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
 
 FROM runtime-pod-base AS pipeline-llm-pod
@@ -55,6 +63,8 @@ RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --g
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
 ENV HEAR_MODEL_FEATURES=qwen_llm
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
 FROM runtime-base AS pipeline-llm-serverless
@@ -62,6 +72,8 @@ RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --g
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
 ENV HEAR_MODEL_FEATURES=qwen_llm
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
 
 FROM runtime-base AS reconstruction-base
@@ -78,6 +90,8 @@ RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
 RUN python -c "import aio_pika, uvicorn; from fish_speech.inference_engine import TTSInferenceEngine"
 ENV HEAR_WORKER_ROLE=reconstruction
 ENV FISH_SPEECH_HOME=/opt/fish-speech
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
 FROM reconstruction-base AS reconstruction-serverless
@@ -86,6 +100,8 @@ RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
 RUN python -c "from fish_speech.inference_engine import TTSInferenceEngine"
 ENV HEAR_WORKER_ROLE=reconstruction
 ENV FISH_SPEECH_HOME=/opt/fish-speech
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
 
 FROM runtime-base AS magic-clean-natural-pod-builder
@@ -95,6 +111,8 @@ RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-
 FROM runtime-pod-base AS magic-clean-natural-pod
 COPY --from=magic-clean-natural-pod-builder /opt/venv /opt/venv
 ENV HEAR_WORKER_ROLE=magic_clean_natural
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
 FROM runtime-base AS magic-clean-natural-serverless-builder
@@ -104,4 +122,38 @@ RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-
 FROM runtime-base AS magic-clean-natural-serverless
 COPY --from=magic-clean-natural-serverless-builder /opt/venv /opt/venv
 ENV HEAR_WORKER_ROLE=magic_clean_natural
+COPY hear /app/hear
+COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
+
+# Assemble once, remove byte-identical duplicated native libraries before the
+# final COPY, and retain separate Python dependency environments for each engine.
+FROM runtime-pod-base AS runpod-stack-assembly
+COPY --from=pipeline-pod /opt/venv /opt/hear-image-assembly/venvs/pipeline
+COPY --from=reconstruction-pod /opt/venv /opt/hear-image-assembly/venvs/reconstruction
+COPY --from=magic-clean-natural-pod /opt/venv /opt/hear-image-assembly/venvs/magic_clean_natural
+COPY scripts/deduplicate_image_dependencies.py /tmp/deduplicate_image_dependencies.py
+RUN HEAR_IMAGE_ASSEMBLY=1 python3.12 /tmp/deduplicate_image_dependencies.py
+
+FROM runtime-pod-base AS runpod-stack
+COPY --from=runpod-stack-assembly /opt/hear-image-assembly/venvs /opt/hear-ai-v11/venvs
+COPY --from=runpod-stack-assembly /opt/hear-image-assembly/shared /opt/hear-ai-v11/shared
+COPY --from=reconstruction-pod /opt/fish-speech /opt/fish-speech
+RUN ln -s /opt/hear-ai-v11/venvs/pipeline /opt/hear-ai-v11/venvs/transcription
+COPY hear /app/hear
+COPY scripts /app/scripts
+ENV HEAR_POD_STACK_ROLES=reconstruction,pipeline,transcription,magic_clean_natural
+ENV HEAR_GATEWAY_PYTHON_BIN=/opt/hear-ai-v11/venvs/pipeline/bin/python
+ENV HEAR_MODEL_ROOT=/models
+ENV FISH_SPEECH_MODEL_ROOT=/root/hear-ai-v11/models
+ENV FISH_SPEECH_HOME=/opt/fish-speech
+ENV FISH_SPEECH_BNB_MODE=nf4
+ENV HEAR_POD_MAX_CONCURRENT_JOBS=1
+ENV HEAR_HOST_MAX_CONCURRENT_JOBS=2
+ENV HEAR_TEMP_DIR=/root/hear-ai-v11/scratch
+ENV PATH=/opt/hear-ai-v11/venvs/pipeline/bin:/root/.local/bin:${PATH}
+RUN /opt/hear-ai-v11/venvs/pipeline/bin/python -c "import torch, aio_pika, uvicorn" && \
+    /opt/hear-ai-v11/venvs/reconstruction/bin/python -c "import torch, bitsandbytes; from fish_speech.inference_engine import TTSInferenceEngine" && \
+    /opt/hear-ai-v11/venvs/magic_clean_natural/bin/python -c "import torch; from df.enhance import init_df"
+EXPOSE 8000
+CMD ["bash", "/app/scripts/run_pod_stack.sh"]

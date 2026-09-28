@@ -60,3 +60,5 @@ logs/
 .cache/
 htmlcov/
 .coverage
+
+/bazel-*

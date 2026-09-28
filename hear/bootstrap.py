@@ -18,6 +18,7 @@ from hear.health.service import RuntimeReadiness
 from hear.inference.fish_nf4_assets import FishNF4Assets
 from hear.inference.manifest import ModelManifest
 from hear.runtime.roles import WorkerRole
+from hear.runtime.simulation import SimulationBoundary
 from hear.storage.b2 import B2StorageFactory
 from hear.tools.dependency_patches import DependencyPatchManager
 
@@ -66,6 +67,7 @@ class RuntimeBootstrap:
             self._patch_manager,
             enabled_features=self._settings.model_features,
             require_manifest_models=not self._uses_available_engine(role),
+            simulation=SimulationBoundary.enabled(),
         )
         scratch_root = self._settings.temp_dir
         required_scratch_bytes = self._settings.min_free_scratch_bytes

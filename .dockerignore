@@ -16,3 +16,15 @@ deploy/cleaner/evidence
 *.pyc
 *.pyo
 *.log
+.env
+.env.*
+.git
+clean
+models
+**/*.mp3
+**/*.wav
+**/*.flac
+**/*.pth
+**/*.safetensors
+**/*.pem
+bazel-*
