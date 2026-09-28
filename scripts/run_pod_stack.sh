@@ -4,6 +4,8 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 default_env_file="${project_root}/.env"
 for candidate in \
+  /workspace/hear-ai-config/production.env \
+  /workspace/hear-ai-config/runtime.env \
   /root/hear-ai-config/production.env \
   /root/hear-ai-config/runtime.env \
   /root/hear-ai-v11/production.env \
@@ -79,7 +81,7 @@ for role in "${role_list[@]}"; do
   for replica in $(seq 1 "$replicas"); do
   (
     export HEAR_WORKER_ROLE="$role"
-    export HEAR_WORKER_ID="runpod-${RUNPOD_POD_ID:-local}-${role}-${replica}"
+    export HEAR_WORKER_ID="runpod-${RUNPOD_POD_ID:-local}-$role-$replica"
     export HEAR_PYTHON_BIN="$role_python"
     "$role_python" -m hear.entrypoints.consumer
   ) &
