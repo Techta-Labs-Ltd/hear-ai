@@ -44,6 +44,9 @@ class PodGateway:
         self._sound_cleanup_available = sound_cleanup_available
         self._overlap_preview_available = overlap_preview_available
         self.router = APIRouter(tags=["gateway"])
+        self.router.add_api_route(
+            "/v1/attempts", self.submit_attempt, methods=["POST"], status_code=202
+        )
         self.router.add_api_route("/v1/attempts/stream", self.stream_attempt, methods=["POST"])
         self.router.add_api_route("/healthz", self.healthz, methods=["GET"])
         self.router.add_api_route("/readyz", self.readyz, methods=["GET"])
@@ -170,11 +173,7 @@ class PodGateway:
         except (OSError, ValueError, IndexError, TimeoutError):
             return None
 
-    async def stream_attempt(
-        self,
-        envelope: AttemptEnvelope,
-        authorization: str | None = Header(default=None),
-    ) -> StreamingResponse:
+    def validate_request(self, envelope: AttemptEnvelope, authorization: str | None) -> None:
         if isinstance(self._ownership, BackendRegistry):
             try:
                 self._ownership.authenticate(envelope, authorization)
@@ -213,6 +212,41 @@ class PodGateway:
                 )
             ):
                 raise HTTPException(status_code=422, detail="preset_requires_available_engine_mode")
+
+    async def submit_attempt(
+        self, envelope: AttemptEnvelope, authorization: str | None = Header(default=None)
+    ) -> JSONResponse:
+        self.validate_request(envelope, authorization)
+        try:
+            await self._runtime.submit(envelope)
+        except GatewayQueueFull as exc:
+            raise HTTPException(
+                status_code=429, detail=str(exc), headers={"Retry-After": "5"}
+            ) from exc
+        except GatewayDeadlineExpired as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except GatewayUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return JSONResponse(
+            status_code=202,
+            content={
+                "schema_version": 1,
+                "status": "accepted",
+                "backend_id": envelope.backend_id,
+                "job_id": envelope.job_id,
+                "run_id": envelope.run_id,
+                "attempt_id": envelope.attempt_id,
+                "track_id": envelope.track_id,
+                "source_revision": envelope.source.revision,
+                "result_delivery": "owning_backend_callback",
+                "duplicate_policy": "backend_claim_is_authoritative",
+            },
+        )
+
+    async def stream_attempt(
+        self, envelope: AttemptEnvelope, authorization: str | None = Header(default=None)
+    ) -> StreamingResponse:
+        self.validate_request(envelope, authorization)
         try:
             attempt = await self._runtime.enqueue(envelope)
         except GatewayQueueFull as exc:

@@ -1,0 +1,64 @@
+{
+  "worker_tests": {
+    "passed": 625,
+    "skipped": 12,
+    "warnings": 3
+  },
+  "worker_typecheck": {
+    "status": "passed",
+    "source_files": 135
+  },
+  "backend_tests": {
+    "passed": 59,
+    "scope": "focused unit/protocol regressions; mocked database and cloud"
+  },
+  "backend_commit": "23ba4524fa8ab8262ff8c13c26523084f4228b9d",
+  "backend_pull_request": 45,
+  "worker_branch": "fix/ready-job-runtime",
+  "worker_base": "e42d2195683ec325a964cac1374cf1f3833b0ba7",
+  "live_deployed": false,
+  "live_concurrency_changed": false,
+  "audio_or_queue_data_deleted": false,
+  "preflight": {
+    "status": "blocked",
+    "blockers": [
+      "role_not_provisioned:reconstruction",
+      "backend_ownership_policy_missing"
+    ],
+    "roles": {
+      "reconstruction": {
+        "missing_models": [
+          "fish-speech-s2-pro:directory"
+        ],
+        "license_blockers": [
+          "fish-speech-s2-pro:permission_required"
+        ]
+      },
+      "magic_clean_natural": {
+        "missing_models": [],
+        "license_blockers": []
+      }
+    },
+    "backends": {},
+    "live_inference_verified": false,
+    "cloud_roundtrip_verified": false,
+    "note": "Configuration inspection only. Require an authenticated canary before enabling app dispatch."
+  },
+  "intake": "POST /v1/attempts",
+  "acknowledgement": "202 after confirmed broker publication",
+  "callbacks": [
+    "claim",
+    "heartbeat",
+    "events",
+    "outcome"
+  ],
+  "scope_test_sha256": "90e6ec34959edae2986abde0cb6f14a7c8621dd347e3e246c1454c191f6fc9c5",
+  "remaining": [
+    "Broker quorum overflow compatibility correction was tool-blocked and is not included",
+    "Approved Fish checkpoints absent",
+    "Ownership registry not enabled in live environment",
+    "Backend and worker deployment, real job/cloud/approval canary not completed",
+    "Frontend options not migrated",
+    "Residual humming acceptance not established"
+  ]
+}

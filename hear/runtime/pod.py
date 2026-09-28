@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+import httpx
 
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope
@@ -337,14 +340,21 @@ class PodRuntime:
             else:
                 payload = {"kind": "end"}
             provider = self._rabbitmq()
-            await self._rabbitmq_channel.default_exchange.publish(
-                provider.Message(
-                    body=json.dumps(payload, separators=(",", ":")).encode(),
-                    content_type="application/json",
-                    correlation_id=attempt_id,
-                ),
-                routing_key=reply_to,
-            )
+            try:
+                await self._rabbitmq_channel.default_exchange.publish(
+                    provider.Message(
+                        body=json.dumps(payload, separators=(",", ":")).encode(),
+                        content_type="application/json",
+                        correlation_id=attempt_id,
+                    ),
+                    routing_key=reply_to,
+                    mandatory=False,
+                    timeout=5,
+                )
+            except Exception:
+                # The browser/request may already have disconnected. The backend
+                # callback, not an ephemeral preview queue, is authoritative.
+                logging.getLogger(__name__).warning("Optional attempt preview delivery failed")
 
     async def _on_rabbitmq_message(self, message) -> None:
         try:
@@ -425,6 +435,25 @@ class PodRuntime:
             await self._publish_local(envelope.attempt_id, None, reply_to)
             await message.ack()
             return
+        if isinstance(failure, httpx.HTTPStatusError) and failure.response.status_code in {
+            401,
+            403,
+            404,
+            409,
+            410,
+            422,
+        }:
+            await self._publish_local(
+                envelope.attempt_id,
+                AttemptRejection(
+                    "backend_attempt_rejected",
+                    {"job_id": envelope.job_id, "attempt_id": envelope.attempt_id},
+                ),
+                reply_to,
+            )
+            await self._publish_local(envelope.attempt_id, None, reply_to)
+            await message.ack()
+            return
         dead, retry_count = await self._retry_or_dead_letter(message)
         await self._publish_local(
             envelope.attempt_id,
@@ -478,6 +507,10 @@ class PodRuntime:
             try:
                 await callback(*args)
                 return
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code < 500 and exc.response.status_code != 429:
+                    raise
+                last_error = exc
             except Exception as exc:
                 last_error = exc
         if last_error is not None:

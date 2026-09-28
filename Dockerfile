@@ -15,6 +15,8 @@ COPY deploy/runtime/pyproject.toml deploy/runtime/uv.lock /app/deploy/runtime/
 COPY deploy/cleaner/deepfilter3.ini /app/deploy/cleaner/deepfilter3.ini
 COPY hear /app/hear
 COPY patches /app/patches
+COPY scripts /app/scripts
+ENV HEAR_PROJECT_ROOT=/app
 
 FROM runtime-base AS runtime-pod-base
 RUN apt-get update && apt-get install -y --no-install-recommends rabbitmq-server && rm -rf /var/lib/apt/lists/*
@@ -71,6 +73,9 @@ RUN python -c "from fish_speech.inference_engine import TTSInferenceEngine; from
 FROM runtime-pod-base AS reconstruction-pod
 COPY --from=reconstruction-base /opt/venv /opt/venv
 COPY --from=reconstruction-base /opt/fish-speech /opt/fish-speech
+RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction --group pod
+RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
+RUN python -c "import aio_pika, uvicorn; from fish_speech.inference_engine import TTSInferenceEngine"
 ENV HEAR_WORKER_ROLE=reconstruction
 ENV FISH_SPEECH_HOME=/opt/fish-speech
 CMD ["/usr/local/bin/run_pod.sh"]

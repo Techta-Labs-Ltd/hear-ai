@@ -8,6 +8,7 @@ import httpx
 from hear.contracts.events import ExecutionEvent
 from hear.contracts.jobs import AttemptClaim, AttemptEnvelope, WorkerIdentity
 from hear.contracts.outcomes import ExecutionOutcome
+from hear.contracts.scope import ExecutionScope
 from hear.runtime.ownership import BackendRegistry, DeploymentOwnership
 
 
@@ -38,9 +39,12 @@ class BackendAttemptClient:
         )
         return f"{base}/internal/ai/attempts/{attempt_id}/{suffix}"
 
-    @staticmethod
-    def _headers(envelope: AttemptEnvelope) -> dict[str, str]:
-        return {"X-AI-Attempt-Grant": envelope.reporting_grant}
+    def _headers(self, envelope: AttemptEnvelope) -> dict[str, str]:
+        return {
+            "X-AI-Attempt-Grant": envelope.reporting_grant,
+            "X-AI-Worker-ID": self._worker.worker_id,
+            "X-AI-Worker-Generation": self._worker.generation,
+        }
 
     async def _post(
         self,
@@ -63,7 +67,10 @@ class BackendAttemptClient:
         response = await self._post(
             envelope,
             "claim",
-            self._worker.model_dump(mode="json"),
+            {
+                **self._worker.model_dump(mode="json"),
+                "request_scope_sha256": ExecutionScope.digest(envelope.model_dump(mode="json")),
+            },
         )
         return AttemptClaim.model_validate(response.json())
 

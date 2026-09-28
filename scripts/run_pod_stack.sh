@@ -25,16 +25,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 IFS=',' read -ra role_list <<< "$roles"
-pipeline_available=false
-for configured_role in "${role_list[@]}"; do
-  configured_role="${configured_role//[[:space:]]/}"
-  if [[ "$configured_role" == "pipeline" ]]; then
-    pipeline_python="${HEAR_ROLE_PYTHON_BIN:-/opt/hear-ai-v11/venvs/pipeline/bin/python}"
-    if [[ -x "$pipeline_python" ]]; then
-      pipeline_available=true
-    fi
-  fi
-done
 declare -A seen_roles=()
 for role in "${role_list[@]}"; do
   role="${role//[[:space:]]/}"
@@ -54,10 +44,6 @@ for role in "${role_list[@]}"; do
     continue
   fi
   seen_roles[$role]=1
-  if [[ "$role" == "transcription" && "$pipeline_available" == "true" ]]; then
-    printf 'Using the pipeline worker for transcription jobs.\n'
-    continue
-  fi
   role_python="${HEAR_ROLE_PYTHON_BIN:-/opt/hear-ai-v11/venvs/${role}/bin/python}"
   if [[ ! -x "$role_python" ]]; then
     printf 'Skipping %s: runtime environment is missing at %s\n' "$role" "$role_python" >&2

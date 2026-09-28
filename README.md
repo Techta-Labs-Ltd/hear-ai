@@ -4,6 +4,8 @@ Fish TTS editing and deployment audit: see [Fish reconstruction](docs/FISH_TTS_R
 
 Hear AI is a Python 3.12 execution runtime for audio intelligence jobs. It runs as a capability-specific Pod worker or a RunPod Serverless handler. Both entrypoints use the same contracts, executor, workflows, local inference engines, and artifact storage.
 
+See [job intake and deployment checks](docs/JOB_RUNTIME_SETUP.md) before enabling app traffic.
+
 ## Runtime layout
 
 ```text
@@ -17,9 +19,9 @@ Hear Backend
 Pod worker / Serverless handler -- canonical events as SSE --> Hear Backend
 ```
 
-The runtime supports four durable job types: `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Magic Clean uses the pinned DeepFilterNet3 model with four one-click profiles: `natural`, `studio_voice`, `outdoor_mobile`, and `clean_raw`. SAM-Audio is no longer supported. See [DeepFilterNet cleaning profiles](docs/DEEPFILTER_CLEANING_PROFILES.md) for processing, options, validation and migration. Reconstruction uses a disk-backed FFmpeg timeline. The backend owns durable job state, retries, routing, and client progress streams; this service does not connect to the application database or Redis.
+The runtime supports four durable job types: `pipeline`, `transcription`, `reconstruction`, and `magic_clean`. Magic Clean uses the pinned DeepFilterNet3 model with four one-click profiles: `natural`, `studio_voice`, `outdoor_mobile`, and `clean_raw`. SAM-Audio is no longer supported. See [DeepFilterNet cleaning profiles](docs/DEEPFILTER_CLEANING_PROFILES.md) for processing, options, validation and migration. Reconstruction generates edited narration with Fish Speech and assembles a disk-backed timeline; it never substitutes pre-rendered audio for TTS. The backend owns durable job state, retries, routing, and client progress streams; this service does not connect to the application database or Redis.
 
-The Pod accepts authenticated `AttemptEnvelope` requests at `POST /v1/attempts/stream`, publishes them to a durable RabbitMQ role queue, and streams queued and canonical execution events as SSE. Its local worker consumes that queue, claims attempts through the backend, and executes them. RabbitMQ is local to the Pod, and its AMQP listener binds to loopback. Serverless workers use RunPod dispatch and emit the same canonical events; they do not use RabbitMQ. The backend persists events, outcomes, and user-facing progress. The Pod also exposes `/healthz`, `/readyz`, `/capabilities`, `/metrics`, and `/drain`.
+The Pod accepts authenticated `AttemptEnvelope` requests at `POST /v1/attempts` and returns 202 only after confirmed publication to RabbitMQ. Results are reported to the owning backend. `POST /v1/attempts/stream` is an optional preview stream, not a durable result store. Its local worker consumes that queue, claims attempts through the backend, and executes them. RabbitMQ is local to the Pod, and its AMQP listener binds to loopback. Serverless workers use RunPod dispatch and emit the same canonical events; they do not use RabbitMQ. The backend persists events, outcomes, and user-facing progress. The Pod also exposes `/healthz`, `/readyz`, `/capabilities`, `/metrics`, and `/drain`.
 
 ## Optional Sound Cleanup
 
@@ -57,7 +59,7 @@ Start with [.env.example](.env.example) and provide deployment values through th
 - `HEAR_API_MAX_BODY_BYTES` for bounded attempt request bodies
 - `HEAR_OPTIONAL_ENGINE_MODE=available` to run all DeepFilterNet profiles, or `certified` for the legacy Natural certificate-gated workflow
 - `HEAR_MAGIC_CLEAN_MODEL_DEVICE=cuda:0` for the installed Magic Clean model engines
-- `HEAR_CLEANER_CERTIFICATION_PATH` for Magic Clean workers
+- `HEAR_CLEANER_CERTIFICATION_PATH` only for the legacy certified Natural mode
 
 `HEAR_WORKER_ID` identifies the role process for backend leases and heartbeats; it does not select a GPU. GPU selection comes from the Pod's CUDA device, which is `cuda:0` on this one-GPU Pod. `HEAR_IMAGE_REVISION` and `HEAR_ENGINE_REVISION` identify the software and model/runtime versions reported with that worker identity.
 
@@ -151,8 +153,7 @@ scripts/run_pod_stack.sh
 
 Set backend credentials and the Pod API key in `/root/hear-ai-v11/runtime.env` before starting the process. The launcher prefers that root-owned environment file and falls back to the repository `.env` when it is absent. The API is the only web listener on port 8000. It authenticates the request, selects the RabbitMQ queue from `job_type` and the Magic Clean profile, and streams worker events over the same SSE connection. Role processes are queue consumers and do not expose HTTP ports. Pod environments use `/opt/hear-ai-v11/venvs/<role>` and Serverless environments use `/opt/hear-ai-v11/venvs/<role>-serverless`; no backend worker ID is needed to submit a job.
 
-The default role list starts pipeline, reconstruction, and the DeepFilterNet Natural
-consumer. All four cleaning profiles use this one consumer and its existing queue.
+Set `HEAR_POD_STACK_ROLES` explicitly. Each requested role starts its own consumer; transcription is not silently skipped when pipeline is configured. All four cleaning profiles use this one consumer and its existing queue.
 Remove the retired SAM worker role from deployment environment settings.
 
 The Magic Clean portion of an attempt request accepts, for example:
@@ -170,9 +171,13 @@ The new profiles use real preset DSP and produce a measured FLAC master, MP3 and
 validation report. All candidates require approval; originals are retained.
 [Full profile/API and deployment guide](docs/DEEPFILTER_CLEANING_PROFILES.md).
 
-Available reconstruction supports `remove_segments` directly. `replace_segments`, `edit_transcript`, and `preview` accept ordered changes containing `segment_start`, `segment_end`, and either `is_deletion=true` or `replacement_audio_url`. `rebuild` accepts `rendered_audio_url`. Text-to-speech voice cloning remains part of certified reconstruction.
+Reconstruction is Fish TTS editing in every engine mode. Provide `changes` with
+`segment_start`, `segment_end`, `new_text` and aligned `original_text`, or an explicit
+source voice reference. Pre-generated replacement URLs are no longer accepted.
+See [Fish editing](docs/FISH_TTS_RECONSTRUCTION.md) for duration maps and approval.
+Missing Fish assets or licence approval keep reconstruction unavailable.
 
-The backend sends the same versioned attempt envelope used as RunPod Serverless input to `POST /v1/attempts/stream` with `Authorization: Bearer $HEAR_POD_API_KEY`. The Pod queues it in local RabbitMQ, claims it through `HEAR_BACKEND_INTERNAL_URL` when a worker is free, heartbeats and reports events/outcome while it runs, and returns queued and canonical execution events as SSE. The backend deduplicates events by ID, stores job history, and serves reconnectable status/SSE to clients; the Pod owns no job database.
+The backend sends the same versioned attempt envelope used as RunPod Serverless input to `POST /v1/attempts` with `Authorization: Bearer $HEAR_POD_API_KEY`. The Pod queues it in local RabbitMQ, claims it through `HEAR_BACKEND_INTERNAL_URL` when a worker is free, heartbeats and reports events/outcome while it runs, and acknowledges acceptance independently of the caller connection. Optional SSE previews use `/v1/attempts/stream`. The backend deduplicates events by ID, stores job history, and serves reconnectable status/SSE to clients; the Pod owns no job database.
 
 Start a Serverless handler:
 

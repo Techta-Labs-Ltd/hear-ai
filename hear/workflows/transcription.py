@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from hear.audio.io import AudioIO
+from hear.audio.source_integrity import SourceIntegrity
 from hear.audio.workspace import AudioWorkspace
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope
@@ -68,6 +69,7 @@ class TranscriptionWorkflow:
                 str(envelope.source.url),
                 workspace,
             )
+            await self._native.run(SourceIntegrity.verify, source, envelope.source.file_sha256)
             yield self._event(
                 envelope,
                 sequence,

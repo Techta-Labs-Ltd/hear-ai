@@ -129,15 +129,12 @@ class AttemptEnvelope(BaseModel):
         if self.job_type == JobType.RECONSTRUCTION:
             if self.operation is None:
                 raise ValueError("invalid reconstruction operation")
-            validated = ReconstructionOptions.validate_operation(self.operation.value, self.options)
-            object.__setattr__(
-                self, "options", validated.model_dump(mode="json", exclude_none=True)
-            )
+            ReconstructionOptions.validate_operation(self.operation.value, self.options)
+            # Keep submitted options unchanged across transports; the workflow applies defaults.
         elif self.operation is not None:
             raise ValueError("operation is only supported for reconstruction")
         if self.job_type == JobType.MAGIC_CLEAN:
-            options = self._validate_magic_clean_options(self.options)
-            object.__setattr__(self, "options", options)
+            self._validate_magic_clean_options(self.options)
         if len(json.dumps(self.options, separators=(",", ":"), default=str).encode()) > 1048576:
             raise ValueError("options_too_large")
         return self
