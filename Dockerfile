@@ -77,6 +77,7 @@ COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
 
 FROM runtime-base AS reconstruction-base
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction
 RUN git clone https://github.com/groxaxo/fish-speech-int4-patch.git /opt/fish-speech && cd /opt/fish-speech && git checkout fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb
 RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
