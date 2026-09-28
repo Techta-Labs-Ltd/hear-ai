@@ -9,6 +9,7 @@ import torch
 from transformers import pipeline
 
 from hear.execution.native import NativeExecutor
+from hear.runtime.gpu_idle import SyncIdleResource
 
 
 class SmallModelsEngine:
@@ -104,10 +105,86 @@ class SmallModelsEngine:
         if not all(hasattr(self, name) for name in ("_toxic", "_sentiment", "_nli")):
             raise RuntimeError("small_models_unavailable")
 
-    async def close(self) -> None:
+    def unload(self) -> None:
         for name in ("_toxic", "_sentiment", "_nli"):
             if hasattr(self, name):
                 delattr(self, name)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
+    async def close(self) -> None:
+        self.unload()
+
+
+class LazySmallModelsEngine:
+    """Lazy-load GPU classifiers and evict them after the pipeline is idle."""
+
+    def __init__(
+        self,
+        toxic_path: Path,
+        sentiment_path: Path,
+        nli_path: Path,
+        native: NativeExecutor,
+        *,
+        device: int = 0,
+        idle_seconds: float,
+        eviction_enabled: bool,
+    ) -> None:
+        self._paths = (toxic_path, sentiment_path, nli_path)
+        self._native = native
+        self._device = device
+        self._resource = SyncIdleResource(
+            "small_models",
+            lambda: SmallModelsEngine(*self._paths, native, device=device),
+            lambda engine: engine.unload(),
+            idle_seconds=idle_seconds,
+            eviction_enabled=eviction_enabled,
+        )
+
+    def infer_sync(
+        self,
+        model_name: str,
+        text: str,
+        candidates: list[str] | None = None,
+        hypothesis_template: str | None = None,
+    ) -> dict:
+        engine = self._resource.acquire()
+        try:
+            return engine.infer_sync(model_name, text, candidates, hypothesis_template)
+        finally:
+            self._resource.release()
+
+    async def infer(
+        self,
+        model_name: str,
+        text: str,
+        candidates: list[str] | None = None,
+        hypothesis_template: str | None = None,
+    ) -> dict:
+        return await self._native.run(
+            self.infer_sync,
+            model_name,
+            text,
+            candidates,
+            hypothesis_template,
+        )
+
+    def check_health(self) -> None:
+        if self._resource.state == "failed":
+            raise RuntimeError("small_models_lazy_engine_failed")
+        if any(not path.is_dir() for path in self._paths):
+            raise RuntimeError("small_models_assets_missing")
+        if self._device >= 0 and not torch.cuda.is_available():
+            raise RuntimeError("small_models_cuda_unavailable")
+
+    @property
+    def lifecycle(self) -> dict:
+        return self._resource.snapshot
+
+    def evict_now(self) -> bool:
+        return self._resource.evict_now()
+
+    async def close(self) -> None:
+        self._resource.close()

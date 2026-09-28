@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-28T10:52:09.488454+00:00",
+  "verified_at": "2026-09-28T11:38:33.835009+00:00",
   "runtime_mode": "simulation",
   "deployment_ready_for_real_backend_switch": false,
   "reason": "Real backend/Backblaze canary and actual OCI image build/push are separate deployment steps.",
@@ -50,7 +50,21 @@
     "fish_startup_cpu_staging_observed_mib": 18462.0,
     "fish_settled_cpu_rss_observed_mib": 3134.5,
     "intentional_cpu_offload_configured": false,
-    "note": "CPU RAM is loader/state/buffers/page cache. Fish has a temporary CPU staging spike while loading NF4; Qwen/Fish are explicitly CUDA-resident."
+    "note": "CPU RAM is loader/state/buffers/page cache. Fish has a temporary CPU staging spike while loading NF4; Qwen/Fish are explicitly CUDA-resident.",
+    "lazy_loading_enabled": true,
+    "production_idle_ttl_seconds": {
+      "pipeline": 600,
+      "magic_clean": 300,
+      "reconstruction": 1200,
+      "audiosep": 90
+    },
+    "cold_worker_gpu_mib": 3,
+    "real_job_cycle_peak_mib": 10165,
+    "idle_after_proof_mib": 798,
+    "pipeline_reload_peak_mib": 9394,
+    "pipeline_after_idle_mib": 798,
+    "cleanup_lazy_peak_mib": 4014,
+    "cleanup_after_idle_mib": 1848
   },
   "audio_cleanup": {
     "selected_bark_overlap": {
@@ -208,9 +222,9 @@
       "//:image_context",
       "//:runpod_image"
     ],
-    "context_path": "/root/hear-ai-v11/builds/hear-runtime-context-e2080d52bdbf.tar",
-    "context_sha256": "e2080d52bdbff7b13cd4adee2de565731e26af5ba2475346455b3e47b5009dd1",
-    "context_bytes": 2447360,
+    "context_path": "/root/hear-ai-v11/builds/hear-runtime-context-122b18a6e7ee.tar",
+    "context_sha256": "122b18a6e7eeddc801b6d4b7560a89008eb154d7b2e04dee8891225b79dd1d42",
+    "context_bytes": 2467840,
     "image_dry_run_passed": true,
     "model_audio_secret_leak_check": "passed",
     "oci_image_built": false,
@@ -218,10 +232,10 @@
     "simulation_test_scripts_in_context": false
   },
   "verification": {
-    "pytest_passed": 668,
+    "pytest_passed": 672,
     "pytest_skipped": 12,
     "warnings": 3,
-    "mypy_source_files": 139,
+    "mypy_source_files": 140,
     "ruff": "passed",
     "architecture": "passed"
   },
@@ -230,5 +244,6 @@
     "Selected bark-over-speech AudioSep preview passed artifact/speech checks but remains approval-required.",
     "Stationary background cleanup is listening-review required and does not claim certified hum removal.",
     "Real Backblaze and production backend callbacks were not used in these simulation canaries."
-  ]
+  ],
+  "gpu_idle_verification": "docs/verification/gpu-idle-20260928.json"
 }

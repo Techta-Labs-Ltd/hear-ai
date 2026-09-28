@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from hear.execution.native import NativeExecutor
+from hear.runtime.gpu_idle import AsyncIdleResource
 
 
 class FishProcess:
@@ -288,3 +289,102 @@ class FishSpeechEngine:
             except (OSError, EOFError, BrokenPipeError):
                 pass
         self._stop()
+
+
+class LazyFishSpeechEngine:
+    """Keep the reconstruction worker alive while Fish itself is cold when idle."""
+
+    def __init__(
+        self,
+        source_root: Path,
+        checkpoint_path: Path,
+        codec_path: Path,
+        native: NativeExecutor,
+        *,
+        bnb_mode: str = "nf4",
+        startup_timeout: float = 300,
+        inference_timeout: float = 180,
+        idle_seconds: float,
+        eviction_enabled: bool,
+    ) -> None:
+        self._source_root = source_root
+        self._checkpoint_path = checkpoint_path
+        self._codec_path = codec_path
+        self._native = native
+        self._bnb_mode = bnb_mode
+        self._startup_timeout = startup_timeout
+        self._inference_timeout = inference_timeout
+        self._loader = NativeExecutor("fish-speech-lazy-loader")
+        self._resource = AsyncIdleResource(
+            "fish_speech",
+            self._load,
+            self._close_loaded,
+            idle_seconds=idle_seconds,
+            eviction_enabled=eviction_enabled,
+        )
+
+    async def _load(self) -> FishSpeechEngine:
+        return await self._loader.run(
+            lambda: FishSpeechEngine(
+                self._source_root,
+                self._checkpoint_path,
+                self._codec_path,
+                self._native,
+                bnb_mode=self._bnb_mode,
+                startup_timeout=self._startup_timeout,
+                inference_timeout=self._inference_timeout,
+            )
+        )
+
+    @staticmethod
+    async def _close_loaded(engine: FishSpeechEngine) -> None:
+        await engine.close()
+
+    async def generate_speech(
+        self,
+        *,
+        text: str,
+        max_new_tokens: int = 1024,
+        references: list[dict] | None = None,
+        reference_id: str | None = None,
+        language: str = "en",
+        seed: int | None = None,
+    ) -> bytes:
+        FishSpeechEngine.validate_request(text, references, reference_id, language, max_new_tokens)
+        engine = await self._resource.acquire()
+        try:
+            return await engine.generate_speech(
+                text=text,
+                max_new_tokens=max_new_tokens,
+                references=references,
+                reference_id=reference_id,
+                language=language,
+                seed=seed,
+            )
+        finally:
+            await self._resource.release()
+
+    def check_health(self) -> None:
+        if self._resource.state == "failed":
+            raise RuntimeError("fish_speech_lazy_engine_failed")
+        if not (self._source_root / "fish_speech" / "inference_engine").is_dir():
+            raise RuntimeError("fish_speech_source_not_provisioned")
+        if (
+            not self._checkpoint_path.is_dir()
+            or not self._codec_path.is_file()
+            or not (self._checkpoint_path / "config.json").is_file()
+        ):
+            raise RuntimeError("fish_speech_checkpoint_not_provisioned")
+
+    @property
+    def lifecycle(self) -> dict:
+        return self._resource.snapshot
+
+    async def evict_now(self) -> bool:
+        return await self._resource.evict_now()
+
+    async def close(self) -> None:
+        try:
+            await self._resource.close()
+        finally:
+            await self._loader.close()

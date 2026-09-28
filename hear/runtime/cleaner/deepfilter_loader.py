@@ -1,4 +1,5 @@
 import configparser
+import gc
 import hashlib
 import importlib
 import json
@@ -81,10 +82,21 @@ class PinnedDeepFilterFactory:
     _runtime_lease = threading.Lock()
     _worker_faulted = threading.Event()
 
-    def __init__(self, assets: PinnedDeepFilterAssets):
+    def __init__(
+        self,
+        assets: PinnedDeepFilterAssets,
+        *,
+        idle_seconds: float = 300,
+        eviction_enabled: bool = True,
+    ):
+        if idle_seconds <= 0:
+            raise ValueError("invalid_deepfilter_idle_ttl")
         self.assets = assets
         self._cache_lock = threading.Lock()
         self._loaded = None
+        self._idle_seconds = idle_seconds
+        self._eviction_enabled = eviction_enabled
+        self._idle_timer: threading.Timer | None = None
 
     def identity(self, longform_policy_sha256: str) -> RuntimeIdentity:
         return RuntimeIdentity(
@@ -124,9 +136,10 @@ class PinnedDeepFilterFactory:
         self.assert_healthy()
         guard.check()
         with self._cache_lock:
+            self._cancel_idle_locked()
             loaded = self._loaded
             if loaded is not None and not loaded.closed:
-                return loaded.borrow(guard)
+                return loaded.borrow(guard, self._borrow_released)
             self._loaded = None
             self.assets.verify(guard)
             if not self._runtime_lease.acquire(blocking=False):
@@ -161,16 +174,50 @@ class PinnedDeepFilterFactory:
                 raise
             else:
                 self._loaded = loaded
-                return loaded.borrow(guard)
+                return loaded.borrow(guard, self._borrow_released)
 
         raise failure
 
-    def close(self) -> None:
+    def _cancel_idle_locked(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _borrow_released(self) -> None:
         with self._cache_lock:
+            self._cancel_idle_locked()
+            if not self._eviction_enabled or self._loaded is None:
+                return
+            timer = threading.Timer(self._idle_seconds, self._evict_idle)
+            timer.daemon = True
+            self._idle_timer = timer
+            timer.start()
+
+    def _evict_idle(self) -> None:
+        with self._cache_lock:
+            self._idle_timer = None
             loaded = self._loaded
             self._loaded = None
-            if loaded is not None:
-                loaded.close()
+        if loaded is not None:
+            loaded.close()
+
+    def evict_now(self) -> bool:
+        with self._cache_lock:
+            self._cancel_idle_locked()
+            loaded = self._loaded
+            self._loaded = None
+        if loaded is None:
+            return False
+        loaded.close()
+        return True
+
+    def close(self) -> None:
+        with self._cache_lock:
+            self._cancel_idle_locked()
+            loaded = self._loaded
+            self._loaded = None
+        if loaded is not None:
+            loaded.close()
 
     def _load(self, guard: ResourceGuard):
 
@@ -269,11 +316,11 @@ class LoadedDeepFilterRuntime:
         self.device_type = device_type
         self.closed = False
 
-    def borrow(self, guard: ResourceGuard):
+    def borrow(self, guard: ResourceGuard, on_close=lambda: None):
         guard.check()
         if self.closed or self.model is None:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "DF3 cached runtime is closed")
-        return LoadedDeepFilter(self, guard)
+        return LoadedDeepFilter(self, guard, on_close)
 
     def enhance(
         self,
@@ -333,12 +380,17 @@ class LoadedDeepFilterRuntime:
                 finally:
                     if self.lease.locked():
                         self.lease.release()
+                    gc.collect()
+                    if self.device_type == "cuda" and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.ipc_collect()
 
 
 class LoadedDeepFilter:
-    def __init__(self, runtime: LoadedDeepFilterRuntime, guard: ResourceGuard):
+    def __init__(self, runtime: LoadedDeepFilterRuntime, guard: ResourceGuard, on_close):
         self.runtime = runtime
         self.guard = guard
+        self._on_close = on_close
         self.closed = False
 
     @property
@@ -356,4 +408,7 @@ class LoadedDeepFilter:
             raise
 
     def close(self) -> None:
+        if self.closed:
+            return
         self.closed = True
+        self._on_close()

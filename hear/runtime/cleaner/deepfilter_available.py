@@ -39,6 +39,8 @@ class DeepFilterNetCleaner:
         *,
         device: str = "cuda:0",
         sound_cleanup_service: SoundCleanupService | None = None,
+        idle_seconds: float = 300,
+        eviction_enabled: bool = True,
     ) -> None:
         checkpoint = model_directory / "checkpoints" / "model_120.ckpt.best"
         packages = tuple(
@@ -57,7 +59,11 @@ class DeepFilterNetCleaner:
         self._sound_cleanup = sound_cleanup_service
         self._budget = budget
         self._policy = ContextualPolicy(480_000, 48_000)
-        self._factory = PinnedDeepFilterFactory(assets)
+        self._factory = PinnedDeepFilterFactory(
+            assets,
+            idle_seconds=idle_seconds,
+            eviction_enabled=eviction_enabled,
+        )
         self._identity = self._factory.identity(self._policy.digest)
         self._engine = DeepFilterEngine(self._identity, self._factory, self._policy)
         self._runner = CancellableProcessRunner()
@@ -269,6 +275,8 @@ class DeepFilterNetCleaner:
 
     def close(self) -> None:
         self._engine.close()
+        if self._sound_cleanup is not None:
+            self._sound_cleanup.close()
 
     @staticmethod
     def _verify_file(path: Path, expected: str) -> None:

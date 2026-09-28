@@ -1,7 +1,9 @@
 """Optional, explicitly selected overlap-repair previews with pinned local assets."""
 
+import gc
 import hashlib
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,15 @@ from hear.services.sound_cleanup.preview_integrity import PreviewIntegrity
 class EventSeparator:
     POLICY_VERSION = "audiosep-full-estimate-v2"
 
-    def __init__(self, root: Path, digest: str, device: str):
+    def __init__(
+        self,
+        root: Path,
+        digest: str,
+        device: str,
+        *,
+        idle_seconds: float = 90,
+        eviction_enabled: bool = True,
+    ):
         if (
             device not in ("cpu", "cuda:0")
             or len(digest) != 64
@@ -32,16 +42,44 @@ class EventSeparator:
         self.manifest = json.loads(payload)
         if self.manifest.get("input_frames") != 320000 or self.manifest.get("sample_rate") != 32000:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "separator_contract_mismatch")
+        if idle_seconds <= 0:
+            raise ValueError("invalid_separator_idle_ttl")
         self.root, self.digest, self.device = root, digest, device
         self.model: Any = None
         self.queries: dict[str, list[float]] | None = None
+        self._idle_seconds = idle_seconds
+        self._eviction_enabled = eviction_enabled
+        self._idle_timer: threading.Timer | None = None
+        self._idle_lock = threading.Lock()
+
+    def _cancel_idle(self) -> None:
+        with self._idle_lock:
+            if self._idle_timer is not None:
+                self._idle_timer.cancel()
+                self._idle_timer = None
+
+    def mark_idle(self) -> None:
+        self._cancel_idle()
+        if not self._eviction_enabled or self.model is None:
+            return
+        timer = threading.Timer(self._idle_seconds, self.close)
+        timer.daemon = True
+        with self._idle_lock:
+            self._idle_timer = timer
+        timer.start()
 
     def close(self) -> None:
+        self._cancel_idle()
         self.model = None
         self.queries = None
+        gc.collect()
+        if self.device == "cuda:0" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
 
     def _load(self, guard: ResourceGuard) -> None:
         guard.check()
+        self._cancel_idle()
         if self.model is not None:
             return
         for name in ("audiosep.jit", "queries.json"):

@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from hear.execution.native import NativeExecutor
+from hear.runtime.gpu_idle import AsyncIdleResource
 from hear.utils.transcription_chunks import (
     adaptive_batch_size,
     append_shifted_result,
@@ -260,3 +261,101 @@ class QwenAsrEngine:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
+
+class LazyQwenAsrEngine:
+    """Load Qwen ASR on the first job and evict it after the configured idle TTL."""
+
+    def __init__(
+        self,
+        *,
+        model_path: Path,
+        aligner_path: Path,
+        cache_dir: Path,
+        temp_dir: Path,
+        dtype: str,
+        device_map: str,
+        vad_onset: float,
+        vad_offset: float,
+        max_batch_size: int,
+        long_audio_batch_size: int,
+        chunk_seconds: int,
+        idle_seconds: float,
+        eviction_enabled: bool,
+    ) -> None:
+        self._model_path = model_path
+        self._aligner_path = aligner_path
+        self._cache_dir = cache_dir
+        self._temp_dir = temp_dir
+        self._dtype = dtype
+        self._device_map = device_map
+        self._vad_onset = vad_onset
+        self._vad_offset = vad_offset
+        self._max_batch_size = max_batch_size
+        self._long_audio_batch_size = long_audio_batch_size
+        self._chunk_seconds = chunk_seconds
+        self._loader = NativeExecutor("qwen-asr-lazy-loader")
+        self._resource = AsyncIdleResource(
+            "qwen_asr",
+            self._load,
+            self._close_loaded,
+            idle_seconds=idle_seconds,
+            eviction_enabled=eviction_enabled,
+        )
+
+    async def _load(self) -> QwenAsrEngine:
+        return await self._loader.run(
+            lambda: QwenAsrEngine(
+                model_path=self._model_path,
+                aligner_path=self._aligner_path,
+                cache_dir=self._cache_dir,
+                temp_dir=self._temp_dir,
+                dtype=self._dtype,
+                device_map=self._device_map,
+                vad_onset=self._vad_onset,
+                vad_offset=self._vad_offset,
+                max_batch_size=self._max_batch_size,
+                long_audio_batch_size=self._long_audio_batch_size,
+                chunk_seconds=self._chunk_seconds,
+            )
+        )
+
+    @staticmethod
+    async def _close_loaded(engine: QwenAsrEngine) -> None:
+        await engine.close()
+
+    async def transcribe_window(self, samples: np.ndarray, batch_size: int, language: str) -> dict:
+        engine = await self._resource.acquire()
+        try:
+            return await engine.transcribe_window(samples, batch_size, language)
+        finally:
+            await self._resource.release()
+
+    async def transcribe(self, audio_bytes: bytes, batch_size: int) -> dict:
+        engine = await self._resource.acquire()
+        try:
+            return await engine.transcribe(audio_bytes, batch_size)
+        finally:
+            await self._resource.release()
+
+    def check_health(self) -> None:
+        if self._resource.state == "failed":
+            raise RuntimeError("qwen_asr_lazy_engine_failed")
+        if not self._model_path.is_dir() or not self._aligner_path.is_dir():
+            raise RuntimeError("qwen_asr_assets_missing")
+        if not torch.cuda.is_available():
+            raise RuntimeError("qwen_asr_cuda_unavailable")
+
+    @property
+    def lifecycle(self) -> dict:
+        return self._resource.snapshot
+
+    async def evict_now(self) -> bool:
+        return await self._resource.evict_now()
+
+    async def close(self) -> None:
+        try:
+            await self._resource.close()
+        finally:
+            await self._loader.close()

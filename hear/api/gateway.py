@@ -111,6 +111,24 @@ class PodGateway:
                 "per_type": json.loads(os.environ.get("HEAR_POD_ROLE_LIMITS", "{}")),
                 "per_process": json.loads(os.environ.get("HEAR_POD_PROCESS_LIMITS", "{}")),
             },
+            "gpu_idle": {
+                "strategy": "lazy_load_idle_evict",
+                "enabled": os.environ.get("HEAR_GPU_IDLE_EVICTION_ENABLED", "true").lower()
+                in {"1", "true", "yes", "on"},
+                "worker_ready_while_cold": True,
+                "pipeline_ttl_seconds": float(
+                    os.environ.get("HEAR_PIPELINE_IDLE_TTL_SECONDS", "600")
+                ),
+                "magic_clean_ttl_seconds": float(
+                    os.environ.get("HEAR_MAGIC_CLEAN_IDLE_TTL_SECONDS", "300")
+                ),
+                "reconstruction_ttl_seconds": float(
+                    os.environ.get("HEAR_RECONSTRUCTION_IDLE_TTL_SECONDS", "1200")
+                ),
+                "audiosep_ttl_seconds": float(
+                    os.environ.get("HEAR_AUDIOSEP_IDLE_TTL_SECONDS", "90")
+                ),
+            },
             "magic_clean": catalogue,
             "reconstruction": {
                 "engine": "fish_speech_s2_pro",

@@ -124,7 +124,7 @@ class RuntimeBootstrap:
 
         self.ensure_ready(WorkerRole.TRANSCRIPTION)
         qwen_module = importlib.import_module("hear.inference.qwen_asr")
-        qwen_engine = qwen_module.QwenAsrEngine
+        qwen_engine = qwen_module.LazyQwenAsrEngine
         scratch_root = self._settings.temp_dir
         client = httpx.AsyncClient(
             follow_redirects=True,
@@ -148,6 +148,8 @@ class RuntimeBootstrap:
             max_batch_size=self._settings.whisper_batch_size,
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             chunk_seconds=self._settings.whisper_chunk_seconds,
+            idle_seconds=self._settings.pipeline_idle_ttl_seconds,
+            eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
         readiness = self.readiness(WorkerRole.TRANSCRIPTION)
         readiness.add_check("asr", lambda: self._engine_healthy(engine))
@@ -216,7 +218,7 @@ class RuntimeBootstrap:
         qwen_module = importlib.import_module("hear.inference.qwen_asr")
         small_module = importlib.import_module("hear.inference.small_models")
         text_module = importlib.import_module("hear.inference.text_generation")
-        asr = qwen_module.QwenAsrEngine(
+        asr = qwen_module.LazyQwenAsrEngine(
             model_path=self._model_root / "qwen3-asr-1.7b",
             aligner_path=self._model_root / "qwen3-forced-aligner",
             cache_dir=self._model_root,
@@ -228,12 +230,16 @@ class RuntimeBootstrap:
             max_batch_size=self._settings.whisper_batch_size,
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             chunk_seconds=self._settings.whisper_chunk_seconds,
+            idle_seconds=self._settings.pipeline_idle_ttl_seconds,
+            eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
-        small_models = small_module.SmallModelsEngine(
+        small_models = small_module.LazySmallModelsEngine(
             self._model_root / "toxic-bert",
             self._model_root / "twitter-roberta-sentiment",
             self._model_root / "nli-distilroberta",
             model_native,
+            idle_seconds=self._settings.pipeline_idle_ttl_seconds,
+            eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
         features = self._settings.model_features
         if "qwen_llm" in features:
@@ -331,12 +337,14 @@ class RuntimeBootstrap:
         fish_module = importlib.import_module("hear.inference.fish_speech")
         fish_root = self._settings.fish_speech_model_root or self._model_root
         checkpoint = FishNF4Assets.runtime_path(fish_root)
-        fish = fish_module.FishSpeechEngine(
+        fish = fish_module.LazyFishSpeechEngine(
             self._settings.fish_speech_home,
             checkpoint,
             checkpoint / "codec.pth",
             fish_native,
             bnb_mode=self._settings.fish_speech_bnb_mode,
+            idle_seconds=self._settings.reconstruction_idle_ttl_seconds,
+            eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
         readiness = self.readiness(WorkerRole.RECONSTRUCTION)
         readiness.add_check("fish_speech", lambda: self._engine_healthy(fish))
@@ -449,6 +457,8 @@ class RuntimeBootstrap:
                         self._settings.sound_cleanup_separator_bundle,
                         self._settings.sound_cleanup_separator_sha256 or "",
                         self._settings.magic_clean_model_device,
+                        idle_seconds=self._settings.audiosep_idle_ttl_seconds,
+                        eviction_enabled=self._settings.gpu_idle_eviction_enabled,
                     )
                 sound_cleanup_service = SoundCleanupService(
                     SoundAnalyser(
@@ -463,6 +473,8 @@ class RuntimeBootstrap:
                 self._magic_clean_budget(),
                 device=self._settings.magic_clean_model_device,
                 sound_cleanup_service=sound_cleanup_service,
+                idle_seconds=self._settings.magic_clean_idle_ttl_seconds,
+                eviction_enabled=self._settings.gpu_idle_eviction_enabled,
             )
         readiness = self.readiness(role)
         readiness.add_check("ffmpeg", self._ffmpeg_ready)

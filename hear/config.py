@@ -128,6 +128,19 @@ class RuntimeSettings(BaseModel):
     qwen_llm_gpu_memory_utilization: float = Field(
         default=0.75, gt=0, le=1, alias="QWEN_LLM_GPU_MEMORY_UTILIZATION"
     )
+    gpu_idle_eviction_enabled: bool = Field(default=True, alias="HEAR_GPU_IDLE_EVICTION_ENABLED")
+    pipeline_idle_ttl_seconds: float = Field(
+        default=600, ge=1, le=86400, alias="HEAR_PIPELINE_IDLE_TTL_SECONDS"
+    )
+    magic_clean_idle_ttl_seconds: float = Field(
+        default=300, ge=1, le=86400, alias="HEAR_MAGIC_CLEAN_IDLE_TTL_SECONDS"
+    )
+    reconstruction_idle_ttl_seconds: float = Field(
+        default=1200, ge=1, le=86400, alias="HEAR_RECONSTRUCTION_IDLE_TTL_SECONDS"
+    )
+    audiosep_idle_ttl_seconds: float = Field(
+        default=90, ge=1, le=86400, alias="HEAR_AUDIOSEP_IDLE_TTL_SECONDS"
+    )
     discovery_max_new_tokens: int = Field(default=1100, gt=0, alias="DISCOVERY_MAX_NEW_TOKENS")
     fish_speech_home: Path = Field(default=Path("/fish-speech"), alias="FISH_SPEECH_HOME")
     fish_speech_bnb_mode: Literal["nf4"] = Field(default="nf4", alias="FISH_SPEECH_BNB_MODE")

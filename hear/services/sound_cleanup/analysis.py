@@ -1,6 +1,7 @@
 """Bounded per-channel analysis; original and denoised speech both protect repairs."""
 
 import csv
+import gc
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -174,5 +175,9 @@ class SoundAnalyser:
                                 scores[name][lo:hi] = np.maximum(scores[name][lo:hi], values)
         finally:
             del model
+            gc.collect()
+            if self.device == "cuda:0" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
         guard.check()
         return scores

@@ -171,7 +171,13 @@ class SoundCleanupService:
                                 source, region, evidence, self.analyser, guard
                             )
                         finally:
-                            self.separator.close()
+                            mark_idle = getattr(self.separator, "mark_idle", None)
+                            if callable(mark_idle):
+                                mark_idle()
+                            else:
+                                close = getattr(self.separator, "close", None)
+                                if callable(close):
+                                    close()
                         region.method = "audiosep_selected_overlap_preview"
                         region.separation_checks = metrics
                         if candidate is None:
@@ -267,6 +273,10 @@ class SoundCleanupService:
                 r.confirmed_no_speech and r.outcome == "reduced" for r in regions
             ),
         }
+
+    def close(self) -> None:
+        if self.separator is not None:
+            self.separator.close()
 
     @staticmethod
     def verify_untouched(baseline: Path, repaired: Path, regions, guard):
