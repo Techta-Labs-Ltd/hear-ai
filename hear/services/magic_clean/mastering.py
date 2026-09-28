@@ -4,8 +4,8 @@ Only linear gain is applied. Loudness targets yield to +6 dB and true-peak
 constraints. Codec correction always starts with the float engine output.
 """
 
-import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,28 +80,27 @@ class AudioMasteringService:
     def measure(self, path: Path, guard: ResourceGuard, duration: float) -> LoudnessMeasurement:
         diagnostic = self.runner.run(
             self._input_args(path)
-            + ["-af", "loudnorm=I=-19:TP=-1:LRA=11:print_format=json", "-f", "null", "-"],
+            + ["-af", "ebur128=peak=true:framelog=verbose", "-f", "null", "-"],
             guard,
         ).decode("utf-8", errors="replace")
-        start = diagnostic.rfind("{")
-        end = diagnostic.rfind("}")
-        try:
-            data = json.loads(diagnostic[start : end + 1])
-            loudness = float(data["input_i"])
-            peak = float(data["input_tp"])
-        except (ValueError, KeyError, TypeError) as exc:
-            raise CleanExecutionError(
-                ErrorCode.INVALID_AUDIO, "missing loudness measurement"
-            ) from exc
+        summary = diagnostic.rsplit("Summary:", 1)
+        if len(summary) != 2:
+            raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "missing loudness measurement")
+        integrated = re.search(r"Integrated loudness:\s*I:\s*([-+0-9.infna]+) LUFS", summary[1])
+        true_peak = re.search(r"True peak:\s*Peak:\s*([-+0-9.infna]+) dBFS", summary[1])
+        if integrated is None or true_peak is None:
+            raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "missing loudness measurement")
+        loudness = float(integrated.group(1))
+        peak = float(true_peak.group(1))
         if math.isnan(loudness) or math.isnan(peak) or peak == math.inf or loudness == math.inf:
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "invalid loudness measurement")
-        reason = None
-        if duration < 0.4:
-            reason = "too_short"
-        elif loudness == -math.inf:
+        reason = "too_short" if duration < 0.4 else None
+        if reason is None and loudness <= -70.0:
             reason = "below_measurement_gate"
         return LoudnessMeasurement(
-            None if reason else loudness, reason, None if peak == -math.inf else peak
+            None if reason else loudness,
+            reason,
+            None if peak == -math.inf else round(peak + 0.05, 6),
         )
 
     @staticmethod

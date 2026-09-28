@@ -93,6 +93,9 @@ class DeepFilterNetCleaner:
         cancelled: threading.Event | None = None,
         progress: Callable[[str, float], None] | None = None,
     ) -> dict:
+        started = time.perf_counter()
+        timings: dict[str, float] = {}
+        phase_started = started
         options = CleaningProfiles.validate(options)
         sound_options = SoundCleanupOptions.model_validate(options.get("sound_cleanup", {}))
         if (sound_options.enabled or options.get("reduce_stationary_noise")) and getattr(
@@ -117,7 +120,11 @@ class DeepFilterNetCleaner:
         self._dsp.render(source, prepared, [], guard, decode=True)
         frames, channels = self._dsp.validate(prepared, guard)
         guard.preflight_pcm(frames, channels, copies=5, output_bytes=frames * channels * 4)
+        timings["decode_and_validate_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         original_measurement = self._mastering.measure(prepared, guard, frames / 48000)
+        timings["input_loudness_measurement_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         preparation_filters = self._dsp.preparation_filters(options)
         model_input = prepared
         if preparation_filters:
@@ -139,6 +146,8 @@ class DeepFilterNetCleaner:
             shorten_pauses=False,
             seed=0,
         )
+        timings["preprocessing_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         if progress:
             progress("denoising", 30)
         session = self._engine.open_session(plan, guard)
@@ -146,8 +155,12 @@ class DeepFilterNetCleaner:
             session.process(model_input, processed, plan, guard)
         finally:
             session.close()
+        timings["denoising_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         AudioMasteringService.scan(processed, guard, rate=48000, channels=channels, frames=frames)
         quality = AudioQualityGate().evaluate(model_input, processed, plan, guard)
+        timings["quality_checks_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         sound_report = {"enabled": False, "status": "not_requested"}
         if sound_options.enabled:
             if progress:
@@ -182,6 +195,10 @@ class DeepFilterNetCleaner:
                 background_output.unlink(missing_ok=True)
             else:
                 processed = background_output
+        timings["optional_event_and_background_cleanup_seconds"] = (
+            time.perf_counter() - phase_started
+        )
+        phase_started = time.perf_counter()
         finish_filters = self._dsp.finishing_filters(options)
         master_input = processed
         if finish_filters:
@@ -195,9 +212,13 @@ class DeepFilterNetCleaner:
             trimmed = workspace / "trimmed_output.wav"
             trim = self._dsp.trim_edges(master_input, trimmed, guard)
             master_input = trimmed
+        timings["finishing_and_trim_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         if progress:
             progress("mastering", 75)
         mastered = self._mastering.master(master_input, plan, guard)
+        timings["mastering_and_export_seconds"] = time.perf_counter() - phase_started
+        phase_started = time.perf_counter()
         delivery = workspace / "delivery_audio.mp3"
         guard.check()
         if target.exists() or delivery.exists():
@@ -217,12 +238,21 @@ class DeepFilterNetCleaner:
             warnings.append("linear_attenuation_applied_for_peak_safety")
         return {
             "engine": self.engine,
+            "performance": {
+                **{k: round(v, 6) for k, v in timings.items()},
+                "total_seconds": round(time.perf_counter() - started, 6),
+            },
             "profile": options["profile"],
             "profile_version": PROFILE_VERSION,
             "sound_cleanup": sound_report,
             "background_cleanup": background_report,
             "effective_options": {k: v for k, v in options.items() if k != "cleaner_ticket"},
             "input_measurement": asdict(original_measurement),
+            "loudness_meter": {
+                "method": "ffmpeg_ebur128_true_peak",
+                "loudness_resolution_lu": 0.1,
+                "true_peak_rounding_safety_db": 0.05,
+            },
             "master_measurement": asdict(mastered.master_measurement),
             "delivery_measurement": asdict(mastered.delivery_measurement),
             "target_lufs": target_lufs,

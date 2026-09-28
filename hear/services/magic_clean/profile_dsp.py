@@ -39,7 +39,7 @@ class ProfileDspService:
             "deesser",
             "atrim",
             "asetpts",
-            "loudnorm",
+            "ebur128",
             "volume",
         }
         try:

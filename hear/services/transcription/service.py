@@ -1,4 +1,5 @@
 import re
+import time
 from functools import partial
 from math import gcd
 from typing import Protocol
@@ -104,6 +105,14 @@ class TranscriptionService:
         language: str | None = None,
         progress: TranscriptionProgressSink | None = None,
     ) -> dict:
+        started = time.perf_counter()
+        performance = {
+            "decode_resample_seconds": 0.0,
+            "asr_and_alignment_seconds": 0.0,
+            "model_window_seconds": 0.0,
+            "executor_wait_seconds": 0.0,
+            "windows": 0,
+        }
         with sf.SoundFile(path) as source:
             duration = source.frames / source.samplerate
             batch_size = adaptive_batch_size(
@@ -113,17 +122,24 @@ class TranscriptionService:
             frames = source.samplerate * self._chunk_seconds
             while source.tell() < source.frames:
                 offset = source.tell() / source.samplerate
+                window_started = time.perf_counter()
                 operation = partial(self._read_window, source, frames)
                 samples = (
                     await self._native.run(self._read_window, source, frames)
                     if self._native is not None
                     else await NativeExecutor.run_blocking_to_completion(operation)
                 )
+                performance["decode_resample_seconds"] += time.perf_counter() - window_started
+                inference_started = time.perf_counter()
                 result = await self._model_client.transcribe_window(
                     samples, batch_size, language or "en"
                 )
                 if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
                     raise RuntimeError("invalid_transcription_window_result")
+                performance["asr_and_alignment_seconds"] += time.perf_counter() - inference_started
+                for name in ("model_window_seconds", "executor_wait_seconds"):
+                    performance[name] += result.get("_runtime_timing", {}).get(name, 0.0)
+                performance["windows"] += 1
                 append_shifted_result(combined, result, offset_seconds=offset)
                 if progress is not None:
                     await progress.publish(source.tell() / source.frames * 100.0)
@@ -131,6 +147,13 @@ class TranscriptionService:
             finalize_combined_result(combined), language=language, short_utterance=short_utterance
         )
         result["audio_duration"] = duration
+        result["performance"] = {
+            **{k: round(v, 6) for k, v in performance.items()},
+            "total_seconds": round(time.perf_counter() - started, 6),
+            "batch_size": batch_size,
+            "window_seconds": self._chunk_seconds,
+            "alignment_enabled": True,
+        }
         return result
 
     async def transcribe(

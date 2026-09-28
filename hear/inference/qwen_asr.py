@@ -4,6 +4,7 @@ import gc
 import importlib
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -165,12 +166,12 @@ class QwenAsrEngine:
             raise ValueError("invalid_transcription_window")
         if not 1 <= batch_size <= self._max_batch_size:
             raise ValueError("invalid_transcription_batch")
-        return await self._worker.run(
-            self._transcribe_window,
-            samples,
-            batch_size,
-            language,
-        )
+        started = time.perf_counter()
+        result = await self._worker.run(self._transcribe_window, samples, batch_size, language)
+        elapsed = time.perf_counter() - started
+        timings = result.setdefault("_runtime_timing", {})
+        timings["executor_wait_seconds"] = max(0.0, elapsed - timings["model_window_seconds"])
+        return result
 
     async def transcribe(self, audio_bytes: bytes, batch_size: int) -> dict:
         if len(audio_bytes) > 16 * 1024 * 1024:
@@ -188,6 +189,7 @@ class QwenAsrEngine:
         language: str,
     ) -> dict:
         try:
+            started = time.perf_counter()
             with torch.inference_mode():
                 result = self._asr.transcribe(
                     samples,
@@ -196,6 +198,7 @@ class QwenAsrEngine:
                 )
             if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
                 raise RuntimeError("invalid_transcription_window_result")
+            result["_runtime_timing"] = {"model_window_seconds": time.perf_counter() - started}
             return result
         except RuntimeError as exc:
             if "cuda" in str(exc).lower() or "out of memory" in str(exc).lower():
