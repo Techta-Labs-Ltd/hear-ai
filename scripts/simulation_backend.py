@@ -210,7 +210,10 @@ class SimulationBackend:
         if bucket != self.config["bucket"]:
             raise HTTPException(403, "simulation_bucket_mismatch")
         # Loopback-only minimal S3 transport emulator, not AWS authentication.
-        if "Credential=HEAR_SIMULATION_ONLY/" not in request.headers.get("authorization", ""):
+        if (
+            request.method != "GET"
+            and "Credential=HEAR_SIMULATION_ONLY/" not in request.headers.get("authorization", "")
+        ):
             raise HTTPException(403, "fake_s3_credential_required")
         path = self.root / "objects" / self.safe(key)
         metadata = self.root / "metadata" / (hashlib.sha256(key.encode()).hexdigest() + ".json")

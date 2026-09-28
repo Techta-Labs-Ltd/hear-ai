@@ -124,6 +124,18 @@ class SimulatedJobs:
             "http://127.0.0.1:8000/v1/attempts", json=requests[0], timeout=10
         ).status_code
         assert report["negative_auth_status"] == 403
+        public_checks = []
+        for row in report["attempts"]:
+            if row["attempt_id"] not in identities:
+                continue
+            for artifact in row.get("outcome", {}).get("artifacts", []):
+                if not artifact.get("audio_url"):
+                    continue
+                response = backend.get(artifact["audio_url"])
+                response.raise_for_status()
+                assert hashlib.sha256(response.content).hexdigest() == artifact["sha256"]
+                public_checks.append({"key": artifact["object_key"], "sha256_verified": True})
+        report["returned_audio_urls_verified"] = public_checks
         report["all_four_real_job_types_completed"] = True
         report["real_cloud_backblaze_tested"] = False
         report["updated_api_running"] = True
