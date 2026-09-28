@@ -21,6 +21,16 @@ elif [[ "${HEAR_RUNTIME_MODE:-production}" == "production" ]]; then
   exit 1
 fi
 
+# The image owns model locations. Host env files may carry stale paths from
+# previous mutable-Pod deployments, but they must not override embedded assets.
+if [[ -d /models && -d /opt/fish-speech ]]; then
+  export HEAR_MODEL_ROOT=/models
+  export FISH_SPEECH_MODEL_ROOT=/root/hear-ai-v11/models
+  export FISH_SPEECH_HOME=/opt/fish-speech
+  export HEAR_SOUND_CLEANUP_BUNDLE=/models/sound-cleanup-v1-runtime
+  export HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime
+fi
+
 roles="${HEAR_POD_STACK_ROLES:-pipeline}"
 declare -a children=()
 declare -a started_roles=()
@@ -58,6 +68,12 @@ for role in "${role_list[@]}"; do
   if [[ ! -x "$role_python" ]]; then
     printf 'Skipping %s: runtime environment is missing at %s\n' "$role" "$role_python" >&2
     continue
+  fi
+  if [[ "$role" == "reconstruction" && "${HEAR_RUNTIME_MODE:-production}" == "production" ]]; then
+    if "$role_python" -c 'from pathlib import Path; import sys; from hear.inference.manifest import ModelManifest; from hear.runtime.roles import WorkerRole; blockers=ModelManifest(Path(sys.argv[1])).license_blockers(WorkerRole.RECONSTRUCTION); sys.exit(0 if blockers else 1)' "$project_root/hear/model_manifest.json"; then
+      printf 'Skipping reconstruction: Fish licence approval is still required.\n' >&2
+      continue
+    fi
   fi
   replicas=$("$role_python" -c 'import json,os,sys; n=json.loads(os.environ.get("HEAR_WORKER_REPLICAS","{}")).get(sys.argv[1],1); assert type(n) is int and 1<=n<=10; print(n)' "$role")
   for replica in $(seq 1 "$replicas"); do
