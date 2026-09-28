@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 from dotenv import dotenv_values
 
+from hear.config import RuntimeSettings
 from hear.inference.manifest import ModelManifest
 from hear.runtime.ownership import BackendRegistry, DeploymentOwnership
 from hear.runtime.roles import WorkerRole
@@ -37,7 +38,8 @@ class JobRuntimeCheck:
             blockers.append("unsupported_or_retired_worker_role")
         if not roles:
             blockers.append("no_worker_roles_configured")
-        model_root = Path(os.environ.get("HEAR_MODEL_ROOT", "/models"))
+        settings = RuntimeSettings.from_environment(dict(os.environ))
+        model_root = settings.model_root
         manifest = ModelManifest(root / "hear/model_manifest.json")
         checks = {}
         for role in roles:
@@ -49,11 +51,18 @@ class JobRuntimeCheck:
                 missing = [str(p.relative_to(model_root)) for p in files if not p.is_file()]
                 licences = []
             else:
-                missing = list(manifest.validate_local(model_root, role))
+                role_root = (
+                    (settings.fish_speech_model_root or model_root)
+                    if role == WorkerRole.RECONSTRUCTION
+                    else model_root
+                )
+                missing = list(manifest.validate_local(role_root, role))
                 licences = list(manifest.license_blockers(role))
             checks[role.value] = {"missing_models": missing, "license_blockers": licences}
-            if missing or licences:
-                blockers.append("role_not_provisioned:" + role.value)
+            if missing:
+                blockers.append("role_missing_models:" + role.value)
+            if licences:
+                blockers.append("role_license_review_required:" + role.value)
         callbacks = []
         try:
             owner = DeploymentOwnership.load()
@@ -97,6 +106,13 @@ class JobRuntimeCheck:
             "blockers": blockers,
             "roles": checks,
             "backends": backend_checks,
+            "admission": {
+                "per_worker_limit": settings.pod_max_concurrent_jobs,
+                "host_total_limit": 1,
+                "mechanism": "exclusive_process_shared_file_lock",
+                "configured_roles": [r.value for r in roles],
+                "configured_is_not_load_tested_capacity": True,
+            },
             "live_inference_verified": False,
             "cloud_roundtrip_verified": False,
             "note": "Configuration inspection only. Require an authenticated canary before enabling app dispatch.",

@@ -154,6 +154,13 @@ class RuntimeSettings(BaseModel):
     enable_docs: bool = Field(default=False, alias="HEAR_ENABLE_DOCS")
     log_level: str = Field(default="info", min_length=1, alias="LOG_LEVEL")
 
+    @field_validator("model_root", "fish_speech_model_root", "fish_speech_home", mode="after")
+    @classmethod
+    def reject_workspace_model_storage(cls, value: Path | None) -> Path | None:
+        if value is not None and value.expanduser().resolve().is_relative_to("/workspace"):
+            raise ValueError("model_storage_must_not_use_workspace")
+        return value
+
     @field_validator("model_features", mode="before")
     @classmethod
     def parse_model_features(cls, value: object) -> frozenset[str]:

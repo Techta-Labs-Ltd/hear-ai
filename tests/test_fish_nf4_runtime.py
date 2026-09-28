@@ -69,3 +69,28 @@ def test_both_provider_images_use_pinned_nf4_loader():
     dependencies = Path("deploy/runtime/pyproject.toml").read_text()
     assert '"bitsandbytes==0.49.2"' in dependencies
     assert '"inflect==7.5.0"' in dependencies
+
+
+@pytest.mark.parametrize("key", ["HEAR_MODEL_ROOT", "FISH_SPEECH_MODEL_ROOT", "FISH_SPEECH_HOME"])
+def test_model_paths_reject_workspace(key):
+    with pytest.raises(ValueError, match="model_storage_must_not_use_workspace"):
+        RuntimeSettings.from_environment({key: "/workspace/forbidden-models"})
+
+
+def test_provisioner_rejects_workspace_before_download(monkeypatch):
+    from scripts.provision_fish_nf4 import ProvisionFishNF4
+
+    def forbidden_download(**kwargs):
+        pytest.fail("must reject model destination before any download")
+
+    monkeypatch.setattr("scripts.provision_fish_nf4.snapshot_download", forbidden_download)
+    with pytest.raises(ValueError, match="model_storage_must_not_use_workspace"):
+        ProvisionFishNF4.run(Path("/workspace/forbidden-models"))
+
+
+@pytest.mark.parametrize(
+    "root", ["/models", "/root/hear-ai-v11/models", "/runpod-volume/hear-ai/models"]
+)
+def test_root_and_serverless_model_storage_allowed(root):
+    result = RuntimeSettings.from_environment({"FISH_SPEECH_MODEL_ROOT": root})
+    assert result.fish_speech_model_root == Path(root)

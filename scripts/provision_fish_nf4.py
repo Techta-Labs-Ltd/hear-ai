@@ -19,6 +19,7 @@ from hear.runtime.roles import WorkerRole
 class ProvisionFishNF4:
     @classmethod
     def run(cls, model_root: Path) -> Path:
+        model_root = FishNF4Assets.validate_model_root(model_root)
         root = Path(__file__).resolve().parents[1]
         spec = FishNF4Assets
         original = model_root / spec.RELATIVE_PATH
@@ -70,7 +71,7 @@ class ProvisionFishNF4:
     @classmethod
     def main(cls) -> None:
         parser = argparse.ArgumentParser(description=__doc__)
-        parser.add_argument("--model-root", type=Path, required=True)
+        parser.add_argument("--model-root", type=Path, default=Path("/root/hear-ai-v11/models"))
         args = parser.parse_args()
         path = cls.run(args.model_root.resolve())
         print(

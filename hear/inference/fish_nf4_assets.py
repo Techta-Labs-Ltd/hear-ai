@@ -23,8 +23,16 @@ class FishNF4Assets:
         "LICENSE.md",
     )
 
+    @staticmethod
+    def validate_model_root(model_root: Path) -> Path:
+        resolved = model_root.expanduser().resolve()
+        if resolved.is_relative_to("/workspace"):
+            raise ValueError("model_storage_must_not_use_workspace")
+        return resolved
+
     @classmethod
     def runtime_path(cls, model_root: Path) -> Path:
+        model_root = cls.validate_model_root(model_root)
         original = model_root / cls.RELATIVE_PATH
         runtime = original.with_name(original.name + "-runtime")
         if not runtime.is_dir() or not runtime.resolve().is_relative_to(model_root.resolve()):

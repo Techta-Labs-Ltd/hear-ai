@@ -16,7 +16,7 @@ Run outside job execution, in the reconstruction environment:
 
 ```bash
 HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1 python -m scripts.provision_fish_nf4 \
-  --model-root /workspace/hear-ai-v11-models
+  --model-root /root/hear-ai-v11/models
 ```
 
 Provisioning verifies every required file's SHA-256. The runtime view hardlinks
@@ -28,8 +28,8 @@ A generic model download alone does not prepare this required runtime view.
 Pod configuration is saved at /root/hear-ai-v11/fish-nf4.env:
 
 ```text
-FISH_SPEECH_HOME=/workspace/hear-ai-v11-models/fish-speech/source-nf4
-FISH_SPEECH_MODEL_ROOT=/workspace/hear-ai-v11-models
+FISH_SPEECH_HOME=/root/hear-ai-v11/models/fish-speech/source-nf4
+FISH_SPEECH_MODEL_ROOT=/root/hear-ai-v11/models
 FISH_SPEECH_BNB_MODE=nf4
 ```
 
