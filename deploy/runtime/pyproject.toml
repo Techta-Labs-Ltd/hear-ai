@@ -98,6 +98,14 @@ magic-clean-natural = [
     "torch==2.8.0",
     "torchaudio==2.8.0",
 ]
+sound-cleanup-provisioning = [
+    "panns-inference==0.1.1",
+    "torchlibrosa==0.1.0",
+    "transformers==4.57.6",
+    "librosa==0.11.0",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+]
 dev = [
     "huggingface-hub>=0.24,<1",
     "mypy>=1.14,<2",
@@ -109,6 +117,7 @@ dev = [
 package = false
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 conflicts = [
+    [{ group = "sound-cleanup-provisioning" }, { group = "reconstruction" }],
     [{ group = "transcription" }, { group = "reconstruction" }],
     [{ group = "pipeline" }, { group = "reconstruction" }],
     [{ group = "pipeline-llm" }, { group = "reconstruction" }],

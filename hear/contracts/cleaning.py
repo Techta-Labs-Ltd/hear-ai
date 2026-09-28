@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from hear.contracts.sound_cleanup import SoundCleanupOptions
+
 
 class MagicCleanProfile(StrEnum):
     NATURAL = "natural"
@@ -72,6 +74,7 @@ class CleaningProfiles:
             "remove_clicks",
             "trim_silence",
             "cleaner_ticket",
+            "sound_cleanup",
         }
         if set(options) - allowed:
             raise ValueError("unsupported_magic_clean_options")
@@ -89,6 +92,16 @@ class CleaningProfiles:
             if type(value) is not bool:
                 raise ValueError(f"invalid_{name}")
             result[name] = value
+        sound = SoundCleanupOptions.model_validate(options.get("sound_cleanup", {}))
+        if sound.enabled:
+            if profile == MagicCleanProfile.CLEAN_RAW:
+                raise ValueError("clean_raw_is_denoise_only")
+            if result["trim_silence"]:
+                raise ValueError("sound_cleanup_preserves_timeline_disable_trimming")
+            if "cleaner_ticket" in options:
+                raise ValueError("sound_cleanup_requires_available_engine_mode")
+        if "sound_cleanup" in options:
+            result["sound_cleanup"] = sound.model_dump(mode="json")
         if profile == MagicCleanProfile.CLEAN_RAW and any(
             result[n] for n in ("auto_level", "remove_clicks", "trim_silence")
         ):

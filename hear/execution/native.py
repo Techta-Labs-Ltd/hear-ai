@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from functools import partial
+from threading import Event
 
 
 class NativeExecutor:
@@ -21,6 +22,16 @@ class NativeExecutor:
                 raise RuntimeError("native_executor_closed")
             return await self.run_blocking_to_completion(
                 partial(function, *args, **kwargs), executor=self._executor
+            )
+
+    async def run_cancellable(self, function, *args, cancelled: Event, **kwargs):
+        async with self._slot:
+            if self._closed:
+                raise RuntimeError("native_executor_closed")
+            return await self.run_blocking_to_completion(
+                partial(function, *args, cancelled=cancelled, **kwargs),
+                on_cancel=cancelled.set,
+                executor=self._executor,
             )
 
     @staticmethod

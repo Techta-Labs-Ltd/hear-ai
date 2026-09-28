@@ -14,6 +14,9 @@ from hear.workflows.available_magic_clean import AvailableMagicCleanWorkflow
 
 
 class InlineNative:
+    async def run_cancellable(self, function, *args, cancelled, **kwargs):
+        return function(*args, cancelled=cancelled, **kwargs)
+
     async def run(self, function, *args, **kwargs):
         return function(*args, **kwargs)
 
@@ -35,7 +38,7 @@ class ReportFixture:
         self.invalid = invalid
         self.called = False
 
-    def clean(self, source, master, workspace, options, deadline, timeout):
+    def clean(self, source, master, workspace, options, deadline, timeout, **kwargs):
         self.called = True
         master.write_bytes(b"fake-master-for-transport-test-only")
         if self.invalid != "missing_delivery":

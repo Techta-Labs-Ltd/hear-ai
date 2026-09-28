@@ -31,11 +31,15 @@ class PodGateway:
         *,
         enable_docs: bool = False,
         cleaning_mode: str = "available",
+        sound_cleanup_available: bool = False,
+        overlap_preview_available: bool = False,
     ) -> None:
         self._runtime = runtime
         self._api_key = api_key.strip()
         self.enable_docs = enable_docs
         self._cleaning_mode = cleaning_mode
+        self._sound_cleanup_available = sound_cleanup_available
+        self._overlap_preview_available = overlap_preview_available
         self.router = APIRouter(tags=["gateway"])
         self.router.add_api_route("/v1/attempts/stream", self.stream_attempt, methods=["POST"])
         self.router.add_api_route("/healthz", self.healthz, methods=["GET"])
@@ -66,6 +70,24 @@ class PodGateway:
                 self._cleaning_mode == "available" or name == "natural"
             )
         catalogue["engine_mode"] = self._cleaning_mode
+        catalogue["sound_cleanup"] = {
+            "available": available
+            and self._cleaning_mode == "available"
+            and self._sound_cleanup_available,
+            "version": "sound-cleanup-local-v1",
+            "enabled_by_default": False,
+            "targets": ["handling", "impact", "animal", "cough", "click"],
+            "supports_selected_regions": True,
+            "preserves_stereo": True,
+            "preserves_duration": True,
+            "requires_approval": True,
+            "overlapping_speech_repair": False,
+            "selected_overlap_preview": self._overlap_preview_available
+            and self._sound_cleanup_available
+            and available
+            and self._cleaning_mode == "available",
+            "coughs_require_explicit_consent": True,
+        }
         return {
             "status": "ready" if ready else "loading",
             "lanes": lanes,
@@ -134,6 +156,19 @@ class PodGateway:
         authorization: str | None = Header(default=None),
     ) -> StreamingResponse:
         self._authenticate(authorization)
+        sound = envelope.options.get("sound_cleanup", {})
+        if (
+            envelope.job_type.value == "magic_clean"
+            and sound.get("enabled")
+            and (not self._sound_cleanup_available or self._cleaning_mode != "available")
+        ):
+            raise HTTPException(status_code=503, detail="sound_cleanup_not_provisioned")
+        if (
+            envelope.job_type.value == "magic_clean"
+            and sound.get("preview_overlaps")
+            and not self._overlap_preview_available
+        ):
+            raise HTTPException(status_code=503, detail="overlap_separator_not_provisioned")
         if envelope.job_type.value == "magic_clean" and self._cleaning_mode != "available":
             if envelope.options.get("profile") != "natural" or any(
                 envelope.options.get(key) for key in ("auto_level", "remove_clicks", "trim_silence")

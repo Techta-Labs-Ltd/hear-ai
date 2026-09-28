@@ -19,6 +19,14 @@ The runtime supports four durable job types: `pipeline`, `transcription`, `recon
 
 The Pod accepts authenticated `AttemptEnvelope` requests at `POST /v1/attempts/stream`, publishes them to a durable RabbitMQ role queue, and streams queued and canonical execution events as SSE. Its local worker consumes that queue, claims attempts through the backend, and executes them. RabbitMQ is local to the Pod, and its AMQP listener binds to loopback. Serverless workers use RunPod dispatch and emit the same canonical events; they do not use RabbitMQ. The backend persists events, outcomes, and user-facing progress. The Pod also exposes `/healthz`, `/readyz`, `/capabilities`, `/metrics`, and `/drain`.
 
+## Optional Sound Cleanup
+
+Sound Cleanup adds bounded event-region repair after DeepFilterNet without changing
+existing profile defaults. It supports pinned offline event/speech analysis, local
+repair, and explicitly selected AudioSep overlap previews. It is off by default;
+see [Sound Cleanup v1](docs/SOUND_CLEANUP_V1.md) for contracts, model provisioning,
+verified results, and the remaining backend/frontend migration boundary.
+
 ## Build runtime images
 
 Docker targets provide separate Pod and Serverless images for each supported role. Optional pipeline LLM images are also available.
