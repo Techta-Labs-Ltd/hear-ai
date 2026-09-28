@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,7 +12,7 @@ class FakeS3:
         self.head = {
             "ContentLength": 4,
             "Metadata": {
-                "sha256": "a" * 64,
+                "sha256": hashlib.sha256(b"test").hexdigest(),
             },
         }
         self.read_back_called = False
@@ -46,7 +47,7 @@ class TestB2Storage:
         artifact = storage.upload_file(
             local,
             storage.key("jobs", "a.mp3"),
-            sha256="a" * 64,
+            sha256=hashlib.sha256(b"test").hexdigest(),
             content_type="audio/mpeg",
         )
         assert artifact.size_bytes == 4

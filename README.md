@@ -1,5 +1,7 @@
 # Hear AI Runtime
 
+Fish TTS editing and deployment audit: see [Fish reconstruction](docs/FISH_TTS_RECONSTRUCTION.md) and [Pod deployment audit](docs/POD_DEPLOYMENT_AUDIT.md).
+
 Hear AI is a Python 3.12 execution runtime for audio intelligence jobs. It runs as a capability-specific Pod worker or a RunPod Serverless handler. Both entrypoints use the same contracts, executor, workflows, local inference engines, and artifact storage.
 
 ## Runtime layout

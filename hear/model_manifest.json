@@ -159,25 +159,6 @@
       "license_name": "Fish Audio Research License",
       "license_status": "permission_required",
       "license_url": "https://huggingface.co/fishaudio/s2-pro/blob/1de9996b6be38b745688de084d87a5633f714e4e/LICENSE.md"
-    },
-    {
-      "logical_name": "dnsmos",
-      "source_type": "url",
-      "download_url": "https://raw.githubusercontent.com/microsoft/DNS-Challenge/master/DNSMOS/DNSMOS/sig_bak_ovr.onnx",
-      "sha256": "269fbebdb513aa23cddfbb593542ecc540284a91849ac50516870e1ac78f6edd",
-      "filename": "sig_bak_ovr.onnx",
-      "relative_path": "dnsmos",
-      "roles": [
-        "reconstruction"
-      ],
-      "required_files": [
-        "sig_bak_ovr.onnx"
-      ],
-      "engine_adapter": "onnx_dnsmos",
-      "provenance_url": "https://github.com/microsoft/DNS-Challenge",
-      "license_name": "DNS-Challenge model license",
-      "license_status": "review_required",
-      "license_url": "https://github.com/microsoft/DNS-Challenge/blob/master/LICENSE-CODE"
     }
   ]
 }

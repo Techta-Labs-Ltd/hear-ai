@@ -27,7 +27,6 @@ class TestModelManifest:
         names = {model.logical_name for model in manifest.models_for(WorkerRole.RECONSTRUCTION)}
         assert names == {
             "fish-speech-s2-pro",
-            "dnsmos",
         }
 
     def test_pipeline_llm_is_opt_in(self):
@@ -52,7 +51,6 @@ class TestModelManifest:
         assert manifest.license_blockers(WorkerRole.TRANSCRIPTION) == ()
         assert manifest.license_blockers(WorkerRole.RECONSTRUCTION) == (
             "fish-speech-s2-pro:permission_required",
-            "dnsmos:review_required",
         )
         assert all("sam-audio" not in model.logical_name for model in manifest.models)
 

@@ -37,7 +37,7 @@ class RabbitMQTopology:
         suffixes = {
             WorkerRole.PIPELINE: "pipeline",
             WorkerRole.TRANSCRIPTION: "transcription",
-            WorkerRole.RECONSTRUCTION: "reconstruction",
+            WorkerRole.RECONSTRUCTION: "reconstruction.fish_tts",
             WorkerRole.MAGIC_CLEAN_NATURAL: "magic_clean.natural",
         }
         suffix = suffixes[role]
@@ -58,6 +58,8 @@ class RabbitMQTopology:
         if envelope.job_type == JobType.PIPELINE:
             return WorkerRole.PIPELINE
         if envelope.job_type == JobType.TRANSCRIPTION:
+            if available_roles is not None and WorkerRole.TRANSCRIPTION in available_roles:
+                return WorkerRole.TRANSCRIPTION
             if available_roles is not None and WorkerRole.PIPELINE in available_roles:
                 return WorkerRole.PIPELINE
             return WorkerRole.TRANSCRIPTION

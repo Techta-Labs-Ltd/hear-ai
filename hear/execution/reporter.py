@@ -8,6 +8,7 @@ import httpx
 from hear.contracts.events import ExecutionEvent
 from hear.contracts.jobs import AttemptClaim, AttemptEnvelope, WorkerIdentity
 from hear.contracts.outcomes import ExecutionOutcome
+from hear.runtime.ownership import BackendRegistry, DeploymentOwnership
 
 
 class BackendAttemptClient:
@@ -20,6 +21,9 @@ class BackendAttemptClient:
         normalized_base = backend_internal_url.strip().rstrip("/")
         if not normalized_base:
             raise ValueError("backend_internal_url_required")
+        self._ownership = DeploymentOwnership.load()
+        if self._ownership is not None:
+            self._ownership.require_reporting_origin(normalized_base)
         self._worker = worker
         self._backend_internal_url = normalized_base
         self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(20.0))
@@ -27,10 +31,12 @@ class BackendAttemptClient:
 
     def _url(self, envelope: AttemptEnvelope, suffix: str) -> str:
         attempt_id = quote(envelope.attempt_id, safe="")
-        return (
-            f"{self._backend_internal_url}/internal/ai/attempts/"
-            f"{attempt_id}/{suffix}"
+        base = (
+            self._ownership.callback_url(envelope)
+            if isinstance(self._ownership, BackendRegistry)
+            else self._backend_internal_url
         )
+        return f"{base}/internal/ai/attempts/{attempt_id}/{suffix}"
 
     @staticmethod
     def _headers(envelope: AttemptEnvelope) -> dict[str, str]:
@@ -42,6 +48,8 @@ class BackendAttemptClient:
         suffix: str,
         payload: dict[str, Any],
     ) -> httpx.Response:
+        if self._ownership is not None:
+            self._ownership.validate(envelope)
         response = await self._client.post(
             self._url(envelope, suffix),
             headers=self._headers(envelope),
@@ -74,6 +82,20 @@ class BackendAttemptClient:
         await self._post(envelope, "events", event.model_dump(mode="json"))
 
     async def outcome(self, envelope: AttemptEnvelope, outcome: ExecutionOutcome) -> None:
+        if (
+            outcome.job_id,
+            outcome.attempt_id,
+            outcome.track_id,
+            outcome.source_revision,
+            outcome.job_type,
+        ) != (
+            envelope.job_id,
+            envelope.attempt_id,
+            envelope.track_id,
+            envelope.source.revision,
+            envelope.job_type,
+        ):
+            raise ValueError("outcome_identity_mismatch")
         await self._post(envelope, "outcome", outcome.model_dump(mode="json"))
 
     async def close(self) -> None:

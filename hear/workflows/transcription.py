@@ -49,7 +49,7 @@ class TranscriptionWorkflow:
 
     async def stream(self, envelope: AttemptEnvelope):
         workspace = AudioWorkspace(
-            self._workspace_root,
+            self._workspace_root / envelope.workspace_namespace,
             envelope.job_id,
             envelope.attempt_id,
         )

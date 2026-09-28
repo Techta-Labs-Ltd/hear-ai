@@ -75,6 +75,7 @@ class CleaningProfiles:
             "trim_silence",
             "cleaner_ticket",
             "sound_cleanup",
+            "reduce_stationary_noise",
         }
         if set(options) - allowed:
             raise ValueError("unsupported_magic_clean_options")
@@ -92,6 +93,13 @@ class CleaningProfiles:
             if type(value) is not bool:
                 raise ValueError(f"invalid_{name}")
             result[name] = value
+        background = options.get("reduce_stationary_noise", False)
+        if type(background) is not bool:
+            raise ValueError("invalid_reduce_stationary_noise")
+        if background and (profile == MagicCleanProfile.CLEAN_RAW or "cleaner_ticket" in options):
+            raise ValueError("stationary_cleanup_requires_nonraw_available_profile")
+        if "reduce_stationary_noise" in options:
+            result["reduce_stationary_noise"] = background
         sound = SoundCleanupOptions.model_validate(options.get("sound_cleanup", {}))
         if sound.enabled:
             if profile == MagicCleanProfile.CLEAN_RAW:

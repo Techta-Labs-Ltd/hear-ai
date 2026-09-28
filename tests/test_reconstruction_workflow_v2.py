@@ -176,6 +176,7 @@ def test_reconstruction_rebuild_uses_existing_transcript_context(tmp_path):
         envelope(
             "rebuild",
             {
+                "same_speaker": False,
                 "edited_transcript": "New complete transcript",
                 "original_transcript": "Original complete transcript",
             },

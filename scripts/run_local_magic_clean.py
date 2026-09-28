@@ -31,6 +31,7 @@ class LocalMagicCleanCli:
         parser.add_argument("--device", choices=("cpu", "cuda:0"), default="cuda:0")
         parser.add_argument("--auto-level", action=argparse.BooleanOptionalAction, default=None)
         parser.add_argument("--remove-clicks", action="store_true")
+        parser.add_argument("--reduce-stationary-noise", action="store_true")
         parser.add_argument("--trim-silence", action="store_true")
         parser.add_argument("--sound-cleanup-options", type=Path)
         parser.add_argument("--sound-cleanup-bundle", type=Path)
@@ -49,11 +50,13 @@ class LocalMagicCleanCli:
         }
         if args.auto_level is not None:
             options["auto_level"] = args.auto_level
+        options["reduce_stationary_noise"] = args.reduce_stationary_noise
         sound_service = None
-        if args.sound_cleanup_options:
-            if args.sound_cleanup_options.stat().st_size > 65536:
+        if args.sound_cleanup_options or args.reduce_stationary_noise:
+            if args.sound_cleanup_options and args.sound_cleanup_options.stat().st_size > 65536:
                 parser.error("sound-cleanup option file is too large")
-            options["sound_cleanup"] = json.loads(args.sound_cleanup_options.read_text())
+            if args.sound_cleanup_options:
+                options["sound_cleanup"] = json.loads(args.sound_cleanup_options.read_text())
             if not args.sound_cleanup_bundle or not args.sound_cleanup_bundle_sha256:
                 parser.error("a pinned sound-cleanup bundle is required")
             separator = (

@@ -32,7 +32,7 @@ class ReconstructionWorkflow:
         if operation is None:
             raise ValueError("reconstruction_operation_required")
         workspace = AudioWorkspace(
-            self._workspace_root,
+            self._workspace_root / envelope.workspace_namespace,
             envelope.job_id,
             envelope.attempt_id,
         )

@@ -202,6 +202,12 @@ class RuntimeBootstrap:
         )
         model_native = NativeExecutor("pipeline-models")
         audio_native = NativeExecutor("pipeline-audio")
+        catalog = PipelineCatalogClient(
+            self._settings.required("backend_internal_url"),
+            self._settings.required("backend_service_key"),
+        ).fetch()
+        if not catalog.categories:
+            raise RuntimeError("pipeline_catalog_has_no_categories")
         qwen_module = importlib.import_module("hear.inference.qwen_asr")
         small_module = importlib.import_module("hear.inference.small_models")
         text_module = importlib.import_module("hear.inference.text_generation")
@@ -244,12 +250,6 @@ class RuntimeBootstrap:
             enabled=text_generation.is_available,
             discovery_max_new_tokens=self._settings.discovery_max_new_tokens,
         )
-        catalog = PipelineCatalogClient(
-            self._settings.required("backend_internal_url"),
-            self._settings.required("backend_service_key"),
-        ).fetch()
-        if not catalog.categories:
-            raise RuntimeError("pipeline_catalog_has_no_categories")
         transcriber = TranscriptionService(
             asr,
             chunk_seconds=self._settings.whisper_chunk_seconds,
@@ -306,13 +306,10 @@ class RuntimeBootstrap:
         )
 
     def reconstruction_executor(self) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
-        if self._uses_available_engine(WorkerRole.RECONSTRUCTION):
-            return self.available_reconstruction_executor()
-        from hear.inference.client import LocalInferenceClient
-        from hear.services.reconstruction.dnsmos import DNSMOSScorer
-        from hear.services.reconstruction.synthesizer import SpeechSynthesizer
-        from hear.workflows.reconstruction import ReconstructionWorkflow
+        from hear.services.reconstruction.fish_renderer import FishReconstructionRenderer
+        from hear.workflows.fish_reconstruction import FishReconstructionWorkflow
 
+        # Cleaning's available/certified mode must never bypass Fish or its assets.
         self.ensure_ready(WorkerRole.RECONSTRUCTION)
         scratch_root = self._settings.temp_dir
         client = httpx.AsyncClient(
@@ -336,36 +333,23 @@ class RuntimeBootstrap:
         )
         readiness = self.readiness(WorkerRole.RECONSTRUCTION)
         readiness.add_check("fish_speech", lambda: self._engine_healthy(fish))
-        model_client = LocalInferenceClient(speech_generation=fish)
-        dnsmos = DNSMOSScorer(self._model_root / "dnsmos" / "sig_bak_ovr.onnx")
-        synthesizer = SpeechSynthesizer(
-            model_client,
-            dnsmos_scorer=dnsmos,
-        )
-        synthesizer.load()
-        readiness.add_check("dnsmos", dnsmos.load)
         audio = AudioIO(
             client,
             audio_native,
             max_download_bytes=self._settings.audio_download_max_bytes,
             decode_timeout_seconds=self._settings.audio_decode_timeout_seconds,
         )
-        workflow = ReconstructionWorkflow(
-            synthesizer,
+        workflow = FishReconstructionWorkflow(
+            FishReconstructionRenderer(fish, audio_native),
             audio,
             B2StorageFactory(),
+            audio_native,
             workspace_root=scratch_root,
         )
-        backend = self._attempt_reporter(client)
         return (
             JobExecutor({JobType.RECONSTRUCTION: workflow}),
-            backend,
-            [
-                fish,
-                fish_native,
-                audio_native,
-                client,
-            ],
+            self._attempt_reporter(client),
+            [fish, fish_native, audio_native, client],
         )
 
     def magic_clean_executor(
@@ -428,46 +412,6 @@ class RuntimeBootstrap:
                 native,
                 client,
             ],
-        )
-
-    def available_reconstruction_executor(
-        self,
-    ) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
-        from hear.workflows.available_reconstruction import AvailableReconstructionWorkflow
-
-        role = WorkerRole.RECONSTRUCTION
-        readiness = self.readiness(role)
-        readiness.add_check("ffmpeg", self._ffmpeg_ready)
-        readiness.initialize()
-        if not readiness.is_ready():
-            raise RuntimeError("runtime_not_ready")
-        client = httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=httpx.Timeout(
-                connect=15.0,
-                read=self._settings.audio_download_read_timeout_seconds,
-                write=30.0,
-                pool=30.0,
-            ),
-        )
-        native = NativeExecutor("available-reconstruction")
-        audio = AudioIO(
-            client,
-            native,
-            max_download_bytes=self._settings.audio_download_max_bytes,
-            decode_timeout_seconds=self._settings.audio_decode_timeout_seconds,
-        )
-        workflow = AvailableReconstructionWorkflow(
-            audio,
-            B2StorageFactory(),
-            native,
-            workspace_root=self._settings.temp_dir,
-            timeout_seconds=self._settings.audio_decode_timeout_seconds,
-        )
-        return (
-            JobExecutor({JobType.RECONSTRUCTION: workflow}),
-            self._attempt_reporter(client),
-            [native, client],
         )
 
     def available_magic_clean_executor(
@@ -566,7 +510,6 @@ class RuntimeBootstrap:
 
     def _uses_available_engine(self, role: WorkerRole) -> bool:
         return self._settings.optional_engine_mode == "available" and role in {
-            WorkerRole.RECONSTRUCTION,
             WorkerRole.MAGIC_CLEAN_NATURAL,
         }
 

@@ -5,6 +5,7 @@ import importlib
 import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
@@ -203,7 +204,11 @@ class PodRuntime:
         if not self.uses_rabbitmq:
             raise PodRuntimeUnavailable("rabbitmq_not_configured")
         async with self._lock:
-            if not self._accepting() or not self._readiness.is_ready() or not self._rabbitmq_ready():
+            if (
+                not self._accepting()
+                or not self._readiness.is_ready()
+                or not self._rabbitmq_ready()
+            ):
                 raise PodRuntimeUnavailable("runtime_not_ready")
             subscriber: asyncio.Queue[ExecutionEvent | AttemptRejection | None] = asyncio.Queue()
             self._subscribers.setdefault(envelope.attempt_id, set()).add(subscriber)
@@ -350,7 +355,9 @@ class PodRuntime:
         try:
             attempt = await self.prepare_attempt(envelope)
         except PodRuntimeBusy:
-            dead, retry_count = await self._retry_or_dead_letter(message)
+            dead, retry_count = await self._retry_or_dead_letter(
+                message, capacity_wait=True, expired=envelope.deadline <= datetime.now(UTC)
+            )
             await self._publish_local(
                 envelope.attempt_id,
                 AttemptRejection(
@@ -436,12 +443,14 @@ class PodRuntime:
         if not self._readiness.is_ready():
             self._fatal.set()
 
-    async def _retry_or_dead_letter(self, message) -> tuple[bool, int]:
+    async def _retry_or_dead_letter(
+        self, message, *, capacity_wait: bool = False, expired: bool = False
+    ) -> tuple[bool, int]:
         binding = self._topology.binding(self._role)
         headers = dict(message.headers or {})
-        retry_count = int(headers.get("x-hear-retry-count") or 0) + 1
+        retry_count = int(headers.get("x-hear-retry-count") or 0) + (0 if capacity_wait else 1)
         headers["x-hear-retry-count"] = retry_count
-        dead = retry_count > self._topology.max_retries
+        dead = expired or retry_count > self._topology.max_retries
         exchange = self._rabbitmq_dead_exchange if dead else self._rabbitmq_retry_exchange
         routing_key = binding.dead_routing_key if dead else binding.routing_key
         provider = self._rabbitmq()

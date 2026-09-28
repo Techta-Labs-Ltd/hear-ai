@@ -15,6 +15,7 @@ from pydantic import (
 
 from hear.contracts.cleaning import CleaningProfiles
 from hear.contracts.cleaning import MagicCleanProfile as MagicCleanProfile
+from hear.contracts.reconstruction import ReconstructionOptions
 
 
 class JobType(StrEnum):
@@ -68,6 +69,8 @@ class ArtifactStorage(BaseModel):
 
     @model_validator(mode="after")
     def validate_prefix(self):
+        if self.expires_at.utcoffset() is None:
+            raise ValueError("storage_expiry_must_include_timezone")
         prefix = self.folder_prefix.strip().strip("/")
         parts = prefix.split("/")
         if not prefix or any(part in {"", ".", ".."} for part in parts):
@@ -113,6 +116,11 @@ class AttemptEnvelope(BaseModel):
     deadline: datetime
     reporting_grant: str = Field(min_length=1, max_length=4096)
     backend_base_url: HttpUrl
+    backend_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+    @property
+    def workspace_namespace(self) -> str:
+        return self.backend_id or "legacy"
 
     @model_validator(mode="after")
     def validate_operation(self):
@@ -121,6 +129,10 @@ class AttemptEnvelope(BaseModel):
         if self.job_type == JobType.RECONSTRUCTION:
             if self.operation is None:
                 raise ValueError("invalid reconstruction operation")
+            validated = ReconstructionOptions.validate_operation(self.operation.value, self.options)
+            object.__setattr__(
+                self, "options", validated.model_dump(mode="json", exclude_none=True)
+            )
         elif self.operation is not None:
             raise ValueError("operation is only supported for reconstruction")
         if self.job_type == JobType.MAGIC_CLEAN:

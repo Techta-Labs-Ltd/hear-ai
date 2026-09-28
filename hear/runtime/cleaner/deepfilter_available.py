@@ -20,6 +20,7 @@ from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepF
 from hear.services.magic_clean.mastering import AudioMasteringService
 from hear.services.magic_clean.profile_dsp import ProfileDspService, TrimResult
 from hear.services.magic_clean.quality import AudioQualityGate
+from hear.services.sound_cleanup.background import BackgroundCleanup
 from hear.services.sound_cleanup.service import SoundCleanupService
 
 
@@ -94,7 +95,9 @@ class DeepFilterNetCleaner:
     ) -> dict:
         options = CleaningProfiles.validate(options)
         sound_options = SoundCleanupOptions.model_validate(options.get("sound_cleanup", {}))
-        if sound_options.enabled and self._sound_cleanup is None:
+        if (sound_options.enabled or options.get("reduce_stationary_noise")) and getattr(
+            self, "_sound_cleanup", None
+        ) is None:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "sound_cleanup_not_provisioned")
         remaining = (deadline - datetime.now(UTC)).total_seconds()
         guard = ResourceGuard(
@@ -155,6 +158,30 @@ class DeepFilterNetCleaner:
                 prepared, processed, repaired, sound_options, guard
             )
             processed = repaired
+        background_report = {"enabled": False, "status": "not_requested"}
+        if options.get("reduce_stationary_noise"):
+            assert self._sound_cleanup is not None
+            if progress:
+                progress("background_cleanup", 65)
+            background_evidence = self._sound_cleanup.analyser.analyse(
+                prepared, processed, guard, detect_events=False
+            )
+            background_output = workspace / "background_cleaned.wav"
+            background_report = {
+                "enabled": True,
+                **BackgroundCleanup().render(
+                    processed, background_output, background_evidence, guard
+                ),
+            }
+            background_probability, _ = self._sound_cleanup.analyser._vad(background_output, guard)
+            anchors = background_evidence.speech >= 0.8
+            lost = anchors & (background_probability.max(axis=1) < 0.1)
+            background_report["lost_high_confidence_speech_frames"] = int(lost.sum())
+            if int(lost.sum()) > 1:
+                background_report["status"] = "rejected_speech_activity_loss"
+                background_output.unlink(missing_ok=True)
+            else:
+                processed = background_output
         finish_filters = self._dsp.finishing_filters(options)
         master_input = processed
         if finish_filters:
@@ -193,6 +220,7 @@ class DeepFilterNetCleaner:
             "profile": options["profile"],
             "profile_version": PROFILE_VERSION,
             "sound_cleanup": sound_report,
+            "background_cleanup": background_report,
             "effective_options": {k: v for k, v in options.items() if k != "cleaner_ticket"},
             "input_measurement": asdict(original_measurement),
             "master_measurement": asdict(mastered.master_measurement),

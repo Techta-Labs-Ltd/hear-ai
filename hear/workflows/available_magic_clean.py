@@ -38,7 +38,7 @@ class AvailableMagicCleanWorkflow:
 
     async def stream(self, envelope: AttemptEnvelope):
         profile = MagicCleanProfile(str(envelope.options.get("profile") or ""))
-        workspace = AudioWorkspace(self._workspace_root, envelope.job_id, envelope.attempt_id)
+        workspace = AudioWorkspace(self._workspace_root / envelope.workspace_namespace, envelope.job_id, envelope.attempt_id)
         sequence = 1
         yield self._event(envelope, sequence, "preparing", 0, ExecutionEventType.STARTED)
         sequence += 1
@@ -60,6 +60,12 @@ class AvailableMagicCleanWorkflow:
             ):
                 raise CleanExecutionError(
                     ErrorCode.ENGINE_UNAVAILABLE, "overlap_separator_not_provisioned"
+                )
+            if envelope.options.get("reduce_stationary_noise") and not getattr(
+                self._model_cleaner, "sound_cleanup_available", False
+            ):
+                raise CleanExecutionError(
+                    ErrorCode.ENGINE_UNAVAILABLE, "background_analyser_not_provisioned"
                 )
             source = await self._audio.download_source(str(envelope.source.url), workspace)
             source_digest = await self._native.run(self._sha256, source)

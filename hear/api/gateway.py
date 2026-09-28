@@ -21,6 +21,7 @@ from hear.runtime.gateway import (
     GatewayUnavailable,
     RabbitMQGateway,
 )
+from hear.runtime.ownership import BackendOwnershipPolicy, BackendRegistry
 
 
 class PodGateway:
@@ -30,6 +31,7 @@ class PodGateway:
         api_key: str,
         *,
         enable_docs: bool = False,
+        ownership_policy: BackendOwnershipPolicy | BackendRegistry | None = None,
         cleaning_mode: str = "available",
         sound_cleanup_available: bool = False,
         overlap_preview_available: bool = False,
@@ -37,6 +39,7 @@ class PodGateway:
         self._runtime = runtime
         self._api_key = api_key.strip()
         self.enable_docs = enable_docs
+        self._ownership = ownership_policy
         self._cleaning_mode = cleaning_mode
         self._sound_cleanup_available = sound_cleanup_available
         self._overlap_preview_available = overlap_preview_available
@@ -92,6 +95,23 @@ class PodGateway:
             "status": "ready" if ready else "loading",
             "lanes": lanes,
             "magic_clean": catalogue,
+            "reconstruction": {
+                "engine": "fish_speech_s2_pro",
+                "mode": "text_to_speech_editing",
+                "available": bool(lanes.get("reconstruction"))
+                and lanes["reconstruction"]["status"] == "ready",
+                "max_concurrent_jobs_per_worker": 1,
+                "requires_approval": True,
+                "input_audio_replacement_required": False,
+                "source_output_timeline": True,
+                "operations": [
+                    "replace_segments",
+                    "edit_transcript",
+                    "rebuild",
+                    "remove_segments",
+                    "preview",
+                ],
+            },
         }
 
     async def drain(self, authorization: str | None = Header(default=None)) -> dict[str, str]:
@@ -155,7 +175,18 @@ class PodGateway:
         envelope: AttemptEnvelope,
         authorization: str | None = Header(default=None),
     ) -> StreamingResponse:
-        self._authenticate(authorization)
+        if isinstance(self._ownership, BackendRegistry):
+            try:
+                self._ownership.authenticate(envelope, authorization)
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+        else:
+            self._authenticate(authorization)
+        if self._ownership is not None:
+            try:
+                self._ownership.validate(envelope)
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
         sound = envelope.options.get("sound_cleanup", {})
         if (
             envelope.job_type.value == "magic_clean"
@@ -169,9 +200,17 @@ class PodGateway:
             and not self._overlap_preview_available
         ):
             raise HTTPException(status_code=503, detail="overlap_separator_not_provisioned")
+        if envelope.options.get("reduce_stationary_noise") and not self._sound_cleanup_available:
+            raise HTTPException(status_code=503, detail="background_analyser_not_provisioned")
         if envelope.job_type.value == "magic_clean" and self._cleaning_mode != "available":
             if envelope.options.get("profile") != "natural" or any(
-                envelope.options.get(key) for key in ("auto_level", "remove_clicks", "trim_silence")
+                envelope.options.get(key)
+                for key in (
+                    "auto_level",
+                    "remove_clicks",
+                    "trim_silence",
+                    "reduce_stationary_noise",
+                )
             ):
                 raise HTTPException(status_code=422, detail="preset_requires_available_engine_mode")
         try:

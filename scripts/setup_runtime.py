@@ -57,6 +57,40 @@ class RuntimeSetup:
                         install.extend(("--group", "pipeline-llm"))
                 subprocess.run(install, cwd=root, check=True, env=environment)
 
+            if args.role == "reconstruction":
+                fish_root = Path(environment.get("FISH_SPEECH_HOME", "/fish-speech"))
+                revision = subprocess.run(
+                    ["git", "-C", str(fish_root), "rev-parse", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+                if revision != "214da3cd841bda85da2496b96cd3c4d7edb1337e":
+                    raise RuntimeError("fish_source_revision_mismatch")
+                python = str(Path(environment["UV_PROJECT_ENVIRONMENT"]) / "bin" / "python")
+                if not args.check:
+                    subprocess.run(
+                        [
+                            uv,
+                            "pip",
+                            "install",
+                            "--python",
+                            python,
+                            "--no-deps",
+                            "-e",
+                            str(fish_root),
+                        ],
+                        cwd=root,
+                        check=True,
+                        env=environment,
+                    )
+                subprocess.run(
+                    [python, "-c", "from fish_speech.inference_engine import TTSInferenceEngine"],
+                    cwd=root,
+                    check=True,
+                    env=environment,
+                )
+
             if args.role in {"pipeline", "transcription"}:
                 command = [
                     uv,

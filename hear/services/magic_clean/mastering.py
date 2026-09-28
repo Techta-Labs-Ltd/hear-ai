@@ -18,6 +18,11 @@ from hear.services.magic_clean.contracts import CleanExecutionError, CleanPlan, 
 
 
 @dataclass(frozen=True)
+class MasteringSettings:
+    adjust_loudness: bool = False
+
+
+@dataclass(frozen=True)
 class LoudnessMeasurement:
     integrated_lufs: float | None
     unavailable_reason: str | None
@@ -131,7 +136,9 @@ class AudioMasteringService:
                 ErrorCode.INVALID_AUDIO, "encoded audio decode failed"
             ) from exc
 
-    def master(self, source: Path, plan: CleanPlan, guard: ResourceGuard) -> MasteredAudio:
+    def master(
+        self, source: Path, plan: CleanPlan | MasteringSettings, guard: ResourceGuard
+    ) -> MasteredAudio:
         try:
             return self._master(source, plan, guard)
         except (OSError, RuntimeError, ValueError) as exc:
@@ -139,7 +146,9 @@ class AudioMasteringService:
                 raise
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "audio mastering failed") from exc
 
-    def _master(self, source: Path, plan: CleanPlan, guard: ResourceGuard) -> MasteredAudio:
+    def _master(
+        self, source: Path, plan: CleanPlan | MasteringSettings, guard: ResourceGuard
+    ) -> MasteredAudio:
         guard.check()
         source = source.resolve()
         if not source.is_relative_to(guard.workspace.resolve()):

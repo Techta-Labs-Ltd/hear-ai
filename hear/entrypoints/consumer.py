@@ -8,6 +8,7 @@ from hear.bootstrap import RuntimeBootstrap
 from hear.config import RuntimeSettings
 from hear.runtime.host_admission import HostJobAdmission
 from hear.runtime.pod import PodRuntime
+from hear.runtime.roles import WorkerRole
 
 
 class ConsumerEntrypoint:
@@ -22,6 +23,8 @@ class ConsumerEntrypoint:
 
     async def run(self) -> None:
         role = self._settings.worker_role
+        if role == WorkerRole.RECONSTRUCTION and self._settings.pod_max_concurrent_jobs != 1:
+            raise ValueError("fish_reconstruction_requires_one_job_per_worker")
         readiness = self._bootstrap.readiness(role)
         executor, backend, resources = self._bootstrap.executor_for(role)
         runtime = PodRuntime(

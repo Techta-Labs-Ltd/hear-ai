@@ -77,6 +77,8 @@ CMD ["/usr/local/bin/run_pod.sh"]
 
 FROM reconstruction-base AS reconstruction-serverless
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction --group serverless
+RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
+RUN python -c "from fish_speech.inference_engine import TTSInferenceEngine"
 ENV HEAR_WORKER_ROLE=reconstruction
 ENV FISH_SPEECH_HOME=/opt/fish-speech
 CMD ["python", "-m", "hear.entrypoints.serverless"]

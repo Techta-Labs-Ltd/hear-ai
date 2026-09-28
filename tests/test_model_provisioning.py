@@ -85,7 +85,7 @@ def test_real_manifest_role_sets_are_isolated():
 
     assert transcription == {"qwen3-asr-1.7b", "qwen3-forced-aligner"}
     assert "fish-speech-s2-pro" not in transcription
-    assert reconstruction == {"fish-speech-s2-pro", "dnsmos"}
+    assert reconstruction == {"fish-speech-s2-pro"}
     assert "fish-speech-s2-pro" not in pipeline
     assert "dnsmos" not in pipeline
 

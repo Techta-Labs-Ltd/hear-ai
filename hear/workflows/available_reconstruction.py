@@ -34,7 +34,7 @@ class AvailableReconstructionWorkflow:
     async def stream(self, envelope: AttemptEnvelope):
         if envelope.operation is None:
             raise ValueError("reconstruction_operation_required")
-        workspace = AudioWorkspace(self._workspace_root, envelope.job_id, envelope.attempt_id)
+        workspace = AudioWorkspace(self._workspace_root / envelope.workspace_namespace, envelope.job_id, envelope.attempt_id)
         sequence = 1
         yield self._event(envelope, sequence, "preparing", 0, ExecutionEventType.STARTED)
         sequence += 1

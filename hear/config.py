@@ -127,7 +127,7 @@ class RuntimeSettings(BaseModel):
     )
     discovery_max_new_tokens: int = Field(default=1100, gt=0, alias="DISCOVERY_MAX_NEW_TOKENS")
     fish_speech_home: Path = Field(default=Path("/fish-speech"), alias="FISH_SPEECH_HOME")
-    fish_speech_bnb_mode: str = Field(default="nf4", min_length=1, alias="FISH_SPEECH_BNB_MODE")
+    fish_speech_bnb_mode: str = Field(default="none", min_length=1, alias="FISH_SPEECH_BNB_MODE")
     magic_clean_scratch_bytes: int = Field(
         default=8 * 1024**3, gt=0, alias="MAGIC_CLEAN_SCRATCH_BYTES"
     )

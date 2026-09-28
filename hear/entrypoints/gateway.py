@@ -14,6 +14,7 @@ from hear.api.body_limit import RequestBodyLimitMiddleware
 from hear.api.gateway import PodGateway
 from hear.runtime.cleaner.asset_probe import PinnedAssetProbe
 from hear.runtime.gateway import RabbitMQGateway
+from hear.runtime.ownership import DeploymentOwnership
 from hear.runtime.roles import WorkerRole
 from hear.services.sound_cleanup.assets import SoundCleanupAssets
 
@@ -77,6 +78,7 @@ class GatewayEntrypoint:
             os.environ.get("HEAR_POD_API_KEY", ""),
             sound_cleanup_available=cls.sound_cleanup_ready(),
             overlap_preview_available=cls.overlap_preview_ready(),
+            ownership_policy=DeploymentOwnership.load(),
             cleaning_mode=os.environ.get("HEAR_OPTIONAL_ENGINE_MODE", "available"),
             enable_docs=os.environ.get("HEAR_ENABLE_DOCS", "false").lower() == "true",
         )
