@@ -127,19 +127,36 @@ COPY hear /app/hear
 COPY scripts /app/scripts
 CMD ["python", "-m", "hear.entrypoints.serverless"]
 
-# Assemble once, remove byte-identical duplicated native libraries before the
-# final COPY, and retain separate Python dependency environments for each engine.
-FROM runtime-pod-base AS runpod-stack-assembly
-COPY --from=pipeline-pod /opt/venv /opt/hear-image-assembly/venvs/pipeline
-COPY --from=reconstruction-pod /opt/venv /opt/hear-image-assembly/venvs/reconstruction
-COPY --from=magic-clean-natural-pod /opt/venv /opt/hear-image-assembly/venvs/magic_clean_natural
-COPY scripts/deduplicate_image_dependencies.py /tmp/deduplicate_image_dependencies.py
-RUN HEAR_IMAGE_ASSEMBLY=1 python3.12 /tmp/deduplicate_image_dependencies.py
+# Build a complete RunPod payload from pinned sources. Models are fetched only
+# in this disposable image stage; /workspace and host model directories are irrelevant.
+FROM runtime-pod-base AS runpod-stack-builder
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential cargo rustc && rm -rf /var/lib/apt/lists/*
+ENV HF_HUB_OFFLINE=0
+ENV TRANSFORMERS_OFFLINE=0
+ENV HF_DATASETS_OFFLINE=0
+COPY hear /app/hear
+COPY scripts /app/scripts
+COPY patches /app/patches
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/pipeline uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pod
+RUN /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.dependency_patches && /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.dependency_patches --check
+RUN git clone https://github.com/groxaxo/fish-speech-int4-patch.git /opt/fish-speech && git -C /opt/fish-speech checkout fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/reconstruction uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction --group pod
+RUN uv pip install --python /opt/hear-image-assembly/venvs/reconstruction/bin/python --no-deps -e /opt/fish-speech
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/magic_clean_natural uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-natural --group pod
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-provision-venv uv sync --project /app/deploy/runtime --frozen --no-dev --group sound-cleanup-provisioning
+RUN uv pip install --python /opt/hear-provision-venv/bin/python "huggingface-hub>=0.24,<1" "silero-vad==6.2.1"
+RUN /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.model_provisioning --role pipeline --model-root /models --cache-dir /tmp/hear-hf-pipeline
+RUN /opt/hear-image-assembly/venvs/reconstruction/bin/python /app/scripts/provision_fish_nf4.py --model-root /root/hear-ai-v11/models
+RUN /opt/hear-image-assembly/venvs/magic_clean_natural/bin/python /app/scripts/provision_magic_clean_models.py --model-root /models --engine deepfilter
+RUN /opt/hear-provision-venv/bin/python /app/scripts/provision_release_sound_assets.py --model-root /models
+RUN HEAR_IMAGE_ASSEMBLY=1 python3.12 /app/scripts/deduplicate_image_dependencies.py
 
 FROM runtime-pod-base AS runpod-stack
-COPY --from=runpod-stack-assembly /opt/hear-image-assembly/venvs /opt/hear-ai-v11/venvs
-COPY --from=runpod-stack-assembly /opt/hear-image-assembly/shared /opt/hear-ai-v11/shared
-COPY --from=reconstruction-pod /opt/fish-speech /opt/fish-speech
+COPY --from=runpod-stack-builder /opt/hear-image-assembly/venvs /opt/hear-ai-v11/venvs
+COPY --from=runpod-stack-builder /opt/hear-image-assembly/shared /opt/hear-ai-v11/shared
+COPY --from=runpod-stack-builder /opt/fish-speech /opt/fish-speech
+COPY --from=runpod-stack-builder /models /models
+COPY --from=runpod-stack-builder /root/hear-ai-v11/models /root/hear-ai-v11/models
 RUN ln -s /opt/hear-ai-v11/venvs/pipeline /opt/hear-ai-v11/venvs/transcription
 COPY hear /app/hear
 COPY scripts /app/scripts

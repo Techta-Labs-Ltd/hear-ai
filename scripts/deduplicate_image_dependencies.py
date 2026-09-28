@@ -42,7 +42,12 @@ class ImageDependencyDeduplication:
             if len(identical) < 2:
                 continue
             first = identical[0]
-            first.rename(shared / package)
+            destination = shared / package
+            if destination.exists():
+                shutil.rmtree(destination)
+            # Docker COPY stages can place source and destination on different
+            # overlay filesystems. copytree works across devices; rename does not.
+            shutil.copytree(first, destination, symlinks=True)
             for path in identical:
                 if path.exists():
                     shutil.rmtree(path)

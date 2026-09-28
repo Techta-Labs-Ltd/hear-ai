@@ -3,12 +3,22 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 default_env_file="${project_root}/.env"
-if [[ -f /root/hear-ai-v11/runtime.env ]]; then
-  default_env_file=/root/hear-ai-v11/runtime.env
-fi
+for candidate in \
+  /root/hear-ai-config/production.env \
+  /root/hear-ai-config/runtime.env \
+  /root/hear-ai-v11/production.env \
+  /root/hear-ai-v11/runtime.env; do
+  if [[ -f "$candidate" ]]; then
+    default_env_file="$candidate"
+    break
+  fi
+done
 env_file="${HEAR_ENV_FILE:-${default_env_file}}"
 if [[ -f "$env_file" ]]; then
   source "$project_root/scripts/load-env.sh" "$env_file"
+elif [[ "${HEAR_RUNTIME_MODE:-production}" == "production" ]]; then
+  printf 'Production environment file is missing: %s\n' "$env_file" >&2
+  exit 1
 fi
 
 roles="${HEAR_POD_STACK_ROLES:-pipeline}"
