@@ -100,7 +100,7 @@ def test_cleaner_mode_never_changes_reconstruction_engine():
 
 def test_fish_uses_different_queue_from_legacy_splicing():
     queue = RabbitMQTopology().binding(WorkerRole.RECONSTRUCTION)
-    assert queue.routing_key == "reconstruction.fish_tts"
+    assert queue.routing_key == "reconstruction.fish_tts.v4"
     assert queue.queue != "hear.ai.reconstruction.v2"
 
 

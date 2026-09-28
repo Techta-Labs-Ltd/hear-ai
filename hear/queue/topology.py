@@ -20,7 +20,7 @@ class RabbitMQTopology:
         *,
         exchange: str = "hear.ai.jobs",
         queue_prefix: str = "hear.ai",
-        version: int = 3,
+        version: int = 4,
         max_queue_messages: int = 1000,
         retry_delay_ms: int = 5000,
         max_retries: int = 5,
@@ -44,13 +44,14 @@ class RabbitMQTopology:
             WorkerRole.MAGIC_CLEAN_NATURAL: "magic_clean.natural",
         }
         suffix = suffixes[role]
-        queue = f"{self._queue_prefix}.{suffix}.v{self._version}"
+        route = f"{suffix}.v{self._version}"
+        queue = f"{self._queue_prefix}.{route}"
         return QueueBinding(
             queue=queue,
-            routing_key=suffix,
+            routing_key=route,
             retry_queue=f"{queue}.retry",
             dead_queue=f"{queue}.dead",
-            dead_routing_key=f"{suffix}.dead",
+            dead_routing_key=f"{route}.dead",
         )
 
     def role_for(

@@ -78,7 +78,7 @@ def test_intake_does_not_accept_jobs_for_an_absent_worker(consumers, raises):
         with pytest.raises(GatewayUnavailable, match="worker_not_ready"):
             asyncio.run(runtime._admit(envelope("natural")))
     else:
-        assert asyncio.run(runtime._admit(envelope("natural"))).routing_key == "magic_clean.natural"
+        assert asyncio.run(runtime._admit(envelope("natural"))).routing_key == "magic_clean.natural.v4"
 
 
 def test_non_streaming_submission_creates_no_ephemeral_reply_queue():

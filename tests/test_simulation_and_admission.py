@@ -121,3 +121,13 @@ def test_transcription_is_supported_without_a_duplicate_worker():
     )
     assert "transcription" not in roles
     assert "JobType.TRANSCRIPTION: transcription" in Path("hear/bootstrap.py").read_text()
+
+
+def test_queue_version_is_part_of_every_routing_key():
+    v3 = RabbitMQTopology(version=3).binding(WorkerRole.PIPELINE)
+    v4 = RabbitMQTopology(version=4).binding(WorkerRole.PIPELINE)
+    assert v3.routing_key == "pipeline.v3"
+    assert v4.routing_key == "pipeline.v4"
+    assert v3.dead_routing_key == "pipeline.v3.dead"
+    assert v4.dead_routing_key == "pipeline.v4.dead"
+    assert v3.routing_key != v4.routing_key

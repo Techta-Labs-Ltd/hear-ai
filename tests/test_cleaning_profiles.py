@@ -50,7 +50,7 @@ def test_every_profile_has_a_real_worker_route(profile):
     role = RabbitMQTopology().role_for(envelope)
     assert role == WorkerRole.MAGIC_CLEAN_NATURAL
     assert WorkerCapabilityRegistry().get(role).accepts(envelope)
-    assert RabbitMQTopology().binding(role).routing_key == "magic_clean.natural"
+    assert RabbitMQTopology().binding(role).routing_key == "magic_clean.natural.v4"
     assert profile.value in DeepFilterNetCleaner.supported_profiles
 
 
