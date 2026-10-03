@@ -58,14 +58,14 @@ class RuntimeSetup:
                 subprocess.run(install, cwd=root, check=True, env=environment)
 
             if args.role == "reconstruction":
-                fish_root = Path(environment.get("FISH_SPEECH_HOME", "/fish-speech"))
+                fish_root = Path(environment.get("FISH_SPEECH_HOME", "/opt/fish-speech"))
                 revision = subprocess.run(
                     ["git", "-C", str(fish_root), "rev-parse", "HEAD"],
                     capture_output=True,
                     text=True,
                     check=True,
                 ).stdout.strip()
-                if revision != "fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb":
+                if revision != "214da3cd841bda85da2496b96cd3c4d7edb1337e":
                     raise RuntimeError("fish_source_revision_mismatch")
                 python = str(Path(environment["UV_PROJECT_ENVIRONMENT"]) / "bin" / "python")
                 if not args.check:

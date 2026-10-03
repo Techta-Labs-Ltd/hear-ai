@@ -68,8 +68,6 @@ class TestRuntimeBootstrap:
         assert bootstrap._model_path("toxic-bert") == tmp_path / "models" / "toxic-bert"
         with pytest.raises(ValueError, match="unknown_model_override"):
             RuntimeBootstrap({"HEAR_MODEL_PATHS_JSON": '{"missing": "/opt/x"}'})
-        with pytest.raises(ValueError, match="FISH_SPEECH_MODEL_ROOT"):
-            RuntimeBootstrap({"HEAR_MODEL_PATHS_JSON": '{"fish-speech-s2-pro": "/opt/x"}'})
 
     def test_cleaner_model_directory_defaults_under_model_root(self, tmp_path):
         from hear.config import RuntimeSettings

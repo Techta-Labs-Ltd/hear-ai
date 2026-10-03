@@ -1,38 +1,36 @@
-"""Low-VRAM loader configuration and immutable runtime-view tests."""
+"""Fish S2 Pro runtime configuration and model storage policy tests."""
 
-import hashlib
-import json
-import os
 from pathlib import Path
 
 import pytest
 
 from hear.bootstrap import RuntimeBootstrap
 from hear.config import PROJECT_ROOT, RuntimeSettings
-from hear.inference.fish_nf4_assets import FishNF4Assets
 from hear.inference.manifest import ModelManifest
 from hear.runtime.roles import WorkerRole
 
+UPSTREAM_REPO = "https://github.com/fishaudio/fish-speech.git"
+UPSTREAM_REVISION = "214da3cd841bda85da2496b96cd3c4d7edb1337e"
 
-def test_nf4_is_explicit_reconstruction_default():
+
+def test_fish_source_defaults_to_pinned_upstream_checkout():
     settings = RuntimeSettings.from_environment({})
-    assert settings.fish_speech_bnb_mode == "nf4"
-    with pytest.raises(ValueError):
-        RuntimeSettings.from_environment({"FISH_SPEECH_BNB_MODE": "nf8"})
+    assert settings.fish_speech_home == Path("/opt/fish-speech")
+    assert not hasattr(settings, "fish_speech_bnb_mode")
 
 
-def test_nf4_manifest_is_pinned_and_does_not_claim_commercial_permission():
+def test_official_bf16_manifest_is_fully_hashed_and_still_requires_permission():
     model = ModelManifest(Path("hear/model_manifest.json")).models_for(WorkerRole.RECONSTRUCTION)[0]
-    assert model.repo_id == FishNF4Assets.MODEL_REPO
-    assert model.revision == FishNF4Assets.MODEL_REVISION
-    assert model.relative_path == FishNF4Assets.RELATIVE_PATH
-    assert "model.pth" in model.required_files
-    assert "model.safetensors.index.json" not in model.required_files
+    assert model.repo_id == "fishaudio/s2-pro"
+    assert model.relative_path == "fish-speech/s2-pro"
+    assert "model.safetensors.index.json" in model.required_files
+    assert "codec.pth" in model.required_files
+    assert "model.pth" not in model.required_files
     assert set(model.required_files) == set(model.file_hashes)
     assert model.license_status == "permission_required"
 
 
-def test_reconstruction_can_use_persistent_model_root_without_changing_cleaner(tmp_path):
+def test_reconstruction_checkpoint_resolves_through_manifest_and_overrides(tmp_path):
     fish_root = tmp_path / "persistent"
     common_root = tmp_path / "common"
     bootstrap = RuntimeBootstrap(
@@ -40,34 +38,29 @@ def test_reconstruction_can_use_persistent_model_root_without_changing_cleaner(t
     )
     assert bootstrap.readiness(WorkerRole.RECONSTRUCTION)._model_root == fish_root
     assert bootstrap.readiness(WorkerRole.MAGIC_CLEAN_NATURAL)._model_root == common_root
-
-
-def test_runtime_requires_identical_hardlinked_weight_bytes(tmp_path, monkeypatch):
-    raw = tmp_path / FishNF4Assets.RELATIVE_PATH
-    raw.mkdir(parents=True)
-    runtime = raw.with_name(raw.name + "-runtime")
-    runtime.mkdir()
-    for name in FishNF4Assets.LINKED_FILES:
-        (raw / name).write_bytes(b"immutable-test-asset")
-        os.link(raw / name, runtime / name)
-    data = json.dumps({"tokenizer_class": "PreTrainedTokenizerFast"}).encode()
-    (runtime / "tokenizer_config.json").write_bytes(data)
-    monkeypatch.setattr(
-        FishNF4Assets, "TOKENIZER_METADATA_SHA256", hashlib.sha256(data).hexdigest()
+    custom = tmp_path / "custom-fish"
+    override = RuntimeBootstrap(
+        {
+            "HEAR_MODEL_ROOT": str(common_root),
+            "HEAR_MODEL_PATHS_JSON": f'{{"fish-speech-s2-pro": "{custom}"}}',
+        }
     )
-    assert FishNF4Assets.runtime_path(tmp_path) == runtime
-    (runtime / "model.pth").unlink()
-    (runtime / "model.pth").write_bytes(b"different-unverified-model")
-    with pytest.raises(RuntimeError, match="view_mismatch"):
-        FishNF4Assets.runtime_path(tmp_path)
+    assert override._model_path("fish-speech-s2-pro") == custom
 
 
-def test_both_provider_images_use_pinned_nf4_loader():
+def test_provisioning_requires_explicit_license_acknowledgement(tmp_path):
+    manifest = ModelManifest(Path("hear/model_manifest.json"))
+    with pytest.raises(RuntimeError, match="license approval required"):
+        manifest.provision(tmp_path, WorkerRole.RECONSTRUCTION)
+
+
+def test_images_pin_upstream_fish_source_without_quantisation_packages():
     docker = Path("Dockerfile").read_text()
-    assert FishNF4Assets.SOURCE_REPO in docker
-    assert FishNF4Assets.SOURCE_REVISION in docker
+    assert UPSTREAM_REPO in docker and UPSTREAM_REVISION in docker
+    assert "int4" not in docker and "nf4" not in docker.lower()
+    assert "--acknowledge-license-review" in docker
     dependencies = Path("deploy/runtime/pyproject.toml").read_text()
-    assert '"bitsandbytes==0.49.2"' in dependencies
+    assert "bitsandbytes" not in dependencies
     assert '"inflect==7.5.0"' in dependencies
 
 
@@ -75,17 +68,6 @@ def test_both_provider_images_use_pinned_nf4_loader():
 def test_model_paths_reject_source_checkout(key):
     with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
         RuntimeSettings.from_environment({key: str(PROJECT_ROOT / "models")})
-
-
-def test_provisioner_rejects_source_checkout_before_download(monkeypatch):
-    from scripts.provision_fish_nf4 import ProvisionFishNF4
-
-    def forbidden_download(**kwargs):
-        pytest.fail("must reject model destination before any download")
-
-    monkeypatch.setattr("scripts.provision_fish_nf4.snapshot_download", forbidden_download)
-    with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
-        ProvisionFishNF4.run(PROJECT_ROOT / "models")
 
 
 @pytest.mark.parametrize("root", ["/opt/hear-ai-models", "/root/hear-ai-models-test"])

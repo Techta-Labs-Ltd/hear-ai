@@ -124,7 +124,7 @@ CMD ["bash", "/app/scripts/run_serverless.sh"]
 FROM runtime-base AS reconstruction-base
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction
-RUN git clone https://github.com/groxaxo/fish-speech-int4-patch.git /opt/fish-speech && cd /opt/fish-speech && git checkout fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb
+RUN git clone https://github.com/fishaudio/fish-speech.git /opt/fish-speech && git -C /opt/fish-speech checkout 214da3cd841bda85da2496b96cd3c4d7edb1337e
 RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
 RUN python -c "from fish_speech.inference_engine import TTSInferenceEngine; from fish_speech.models.dac.inference import load_model; from fish_speech.models.text2semantic.inference import launch_thread_safe_queue; from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest"
 
@@ -149,7 +149,7 @@ ENV FISH_SPEECH_HOME=/opt/fish-speech
 COPY hear /app/hear
 COPY scripts /app/scripts
 ARG HEAR_FISH_LICENSE_APPROVED=false
-RUN mkdir -p /models && if [ "$HEAR_FISH_LICENSE_APPROVED" = "true" ]; then HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 HF_HOME=/tmp/hear-hf python /app/scripts/provision_fish_nf4.py --model-root /models; else echo "Fish model omitted because approval flag is not enabled"; fi && rm -rf /tmp/hear-hf /models/*/*/.cache
+RUN mkdir -p /models && if [ "$HEAR_FISH_LICENSE_APPROVED" = "true" ]; then HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 python -m hear.tools.model_provisioning --role reconstruction --model-root /models --cache-dir /tmp/hear-hf --acknowledge-license-review; else echo "Fish model omitted because approval flag is not enabled"; fi && rm -rf /tmp/hear-hf /models/.hub-cache /models/*/*/.cache
 
 FROM runtime-serverless-base AS reconstruction-serverless
 COPY --from=reconstruction-serverless-builder /opt/venv /opt/venv
@@ -212,13 +212,13 @@ COPY scripts /app/scripts
 COPY patches /app/patches
 RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/pipeline uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pod
 RUN /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.dependency_patches && /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.dependency_patches --check
-RUN git clone https://github.com/groxaxo/fish-speech-int4-patch.git /opt/fish-speech && git -C /opt/fish-speech checkout fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb
+RUN git clone https://github.com/fishaudio/fish-speech.git /opt/fish-speech && git -C /opt/fish-speech checkout 214da3cd841bda85da2496b96cd3c4d7edb1337e
 RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/reconstruction uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction --group pod
 RUN uv pip install --python /opt/hear-image-assembly/venvs/reconstruction/bin/python --no-deps -e /opt/fish-speech
 RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/magic_clean_natural uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-natural --group pod
 RUN /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.model_provisioning --role pipeline --model-root /models --cache-dir /tmp/hear-hf-pipeline
 ARG HEAR_FISH_LICENSE_APPROVED=false
-RUN if [ "$HEAR_FISH_LICENSE_APPROVED" = "true" ]; then /opt/hear-image-assembly/venvs/reconstruction/bin/python /app/scripts/provision_fish_nf4.py --model-root /models; else echo "Fish model omitted because approval flag is not enabled"; fi
+RUN if [ "$HEAR_FISH_LICENSE_APPROVED" = "true" ]; then /opt/hear-image-assembly/venvs/reconstruction/bin/python -m hear.tools.model_provisioning --role reconstruction --model-root /models --cache-dir /tmp/hear-hf-fish --acknowledge-license-review && rm -rf /tmp/hear-hf-fish; else echo "Fish model omitted because approval flag is not enabled"; fi
 RUN /opt/hear-image-assembly/venvs/magic_clean_natural/bin/python /app/scripts/provision_magic_clean_models.py --model-root /models --engine deepfilter
 COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-v1-runtime /models/sound-cleanup-v1-runtime
 COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-specialist /models/sound-cleanup-specialist
@@ -241,7 +241,6 @@ ENV HEAR_GATEWAY_PYTHON_BIN=/opt/hear-ai-v11/venvs/pipeline/bin/python
 ENV HEAR_MODEL_ROOT=/models
 ENV FISH_SPEECH_MODEL_ROOT=/models
 ENV FISH_SPEECH_HOME=/opt/fish-speech
-ENV FISH_SPEECH_BNB_MODE=nf4
 ENV HEAR_POD_MAX_CONCURRENT_JOBS=1
 ENV HEAR_HOST_MAX_CONCURRENT_JOBS=10
 ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4}
@@ -263,7 +262,7 @@ ENV HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime
 ENV HEAR_TEMP_DIR=/root/hear-ai-runtime/scratch
 ENV PATH=/opt/hear-ai-v11/venvs/pipeline/bin:/root/.local/bin:${PATH}
 RUN /opt/hear-ai-v11/venvs/pipeline/bin/python -c "import torch, aio_pika, uvicorn" && \
-    /opt/hear-ai-v11/venvs/reconstruction/bin/python -c "import torch, bitsandbytes; from fish_speech.inference_engine import TTSInferenceEngine" && \
+    /opt/hear-ai-v11/venvs/reconstruction/bin/python -c "import torch; from fish_speech.inference_engine import TTSInferenceEngine" && \
     /opt/hear-ai-v11/venvs/magic_clean_natural/bin/python -c "import torch; from df.enhance import init_df"
 EXPOSE 8000
 CMD ["bash", "/app/scripts/run_pod_stack.sh"]

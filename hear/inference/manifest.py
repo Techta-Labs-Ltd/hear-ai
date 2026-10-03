@@ -198,9 +198,10 @@ class ModelManifest:
         *,
         enabled_features: frozenset[str] = frozenset(),
         cache_dir: Path | None = None,
+        acknowledge_license_review: bool = False,
     ) -> dict[str, str]:
         blockers = self.license_blockers(role, enabled_features=enabled_features)
-        if blockers:
+        if blockers and not acknowledge_license_review:
             raise RuntimeError("model license approval required: " + ", ".join(blockers))
         model_root.mkdir(parents=True, exist_ok=True)
         resolved_cache = cache_dir or model_root / ".hub-cache"

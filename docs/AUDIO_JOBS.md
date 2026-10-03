@@ -147,8 +147,9 @@ paths and deploy source/model versions together. No downloads occur during jobs.
 Fish Speech S2 Pro generates narration edits using the same supervised workflow
 for Pod and Serverless. It runs in a warm child process with bounded startup and
 inference timeouts; cancellation terminates native inference. Restart an unhealthy
-worker after a failed/hung child. The compatible NF4 loader uses float16 compute
-and a 4096-token cache; its codec remains unquantized.
+worker after a failed/hung child. The model runs in bfloat16 with a 4096-token
+cache; measured on an A40 it holds about 20 GB of VRAM and renders a four-second
+sentence in roughly eight seconds.
 
 Example reconstruction-specific payload, inside a complete authenticated envelope:
 
@@ -195,23 +196,23 @@ source samples are copied before mastering. Final peak gain and MP3 encoding can
 change samples globally. Edited stereo speech is dual-mono rather than spatial
 reconstruction. Rejecting a candidate preserves the original.
 
-The pinned model is `groxaxo/s2-pro-BnB-4Bits` at
-`5c09659b9dbea2f64b90c1a611c4824560619ce7`; compatible source is
-`groxaxo/fish-speech-int4-patch` at
-`fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb`. Asset identities live in
-`hear/inference/fish_nf4_assets.py` and `hear/model_manifest.json`.
-Install the pinned source in the reconstruction environment, then provision:
+The pinned model is the official `fishaudio/s2-pro` bf16 release at
+`1de9996b6be38b745688de084d87a5633f714e4e`; the source is upstream
+`fishaudio/fish-speech` at `214da3cd841bda85da2496b96cd3c4d7edb1337e`. Every
+weight file is hashed in `hear/model_manifest.json`. Install the pinned source in
+the reconstruction environment, then provision:
 
 ```bash
-HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1 \
-  /opt/hear-ai-v11/venvs/reconstruction/bin/python -m scripts.provision_fish_nf4 \
-  --model-root /models
+HF_HUB_OFFLINE=0 /opt/hear-ai-v11/venvs/reconstruction/bin/python \
+  -m hear.tools.model_provisioning --role reconstruction --model-root /models \
+  --acknowledge-license-review
 ```
 
-Provisioning checks hashes and prepares a hardlinked runtime view with compatible
-pinned tokenizer metadata. A generic checkpoint download does not prepare this
-view. Set `FISH_SPEECH_HOME` to the pinned source, `FISH_SPEECH_MODEL_ROOT=/models`,
-and `FISH_SPEECH_BNB_MODE=nf4`. Models must be outside the source checkout.
+The flag only permits the download; readiness keeps reporting the licence blocker
+until approval is recorded. Set `FISH_SPEECH_HOME` to the pinned source checkout and
+`FISH_SPEECH_MODEL_ROOT=/models`. Models must be outside the source checkout and off
+network volumes. Quantized third-party builds are not supported; on smaller GPUs
+run Fish on its own Serverless endpoint rather than quantizing it.
 
 Serverless reconstruction images include model assets only when
 `HEAR_FISH_LICENSE_APPROVED=true` is supplied during the build. Downloading or

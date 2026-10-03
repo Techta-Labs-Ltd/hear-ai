@@ -112,8 +112,7 @@ class RuntimeSettings(BaseModel):
         default=12, ge=1, le=64, alias="DISCOVERY_MAX_SEARCH_PHRASES"
     )
     discovery_max_new_tokens: int = Field(default=1100, gt=0, alias="DISCOVERY_MAX_NEW_TOKENS")
-    fish_speech_home: Path = Field(default=Path("/fish-speech"), alias="FISH_SPEECH_HOME")
-    fish_speech_bnb_mode: Literal["nf4"] = Field(default="nf4", alias="FISH_SPEECH_BNB_MODE")
+    fish_speech_home: Path = Field(default=Path("/opt/fish-speech"), alias="FISH_SPEECH_HOME")
     fish_speech_model_root: Path | None = Field(default=None, alias="FISH_SPEECH_MODEL_ROOT")
     magic_clean_scratch_bytes: int = Field(
         default=8 * 1024**3, gt=0, alias="MAGIC_CLEAN_SCRATCH_BYTES"

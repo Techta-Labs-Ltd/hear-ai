@@ -12,7 +12,7 @@ report events and the outcome to the owning backend.
 | --- | --- | --- |
 | `pipeline` | `pipeline` | Transcription, moderation, categorization, discovery, and audio export |
 | `transcription` | `pipeline` or `transcription` | Qwen ASR with aligned timestamps |
-| `reconstruction` | `reconstruction` | Fish Speech NF4 edits and timeline assembly |
+| `reconstruction` | `reconstruction` | Fish Speech S2 Pro (bf16) edits and timeline assembly |
 | `magic_clean` | `magic_clean_natural` | DeepFilterNet3 with four cleaning profiles |
 
 See [audio jobs](docs/AUDIO_JOBS.md) for cleaning, optional event repair, and Fish
@@ -57,7 +57,7 @@ download caches outside the repo. Workers load models offline; model identities 
 status are in [model_manifest.json](hear/model_manifest.json).
 
 Serverless targets provision their role assets during image build. Fish requires
-its pinned compatible source, NF4 runtime view, and licensing approval before
+its pinned upstream source, the official bf16 weights, and licensing approval before
 production deployment; see the [Fish instructions](docs/AUDIO_JOBS.md#reconstruction).
 
 ## Configure and start
@@ -87,7 +87,7 @@ Production fails if its selected environment file is absent.
 | `HEAR_API_MAX_BODY_BYTES` | Bounded attempt request size |
 | `HEAR_MAGIC_CLEAN_MODEL_DEVICE` | Cleaner device, normally `cuda:0` |
 | `AUDIO_DOWNLOAD_MAX_BYTES`, `AUDIO_DOWNLOAD_READ_TIMEOUT_SECONDS`, `AUDIO_DECODE_TIMEOUT_SECONDS` | Download/decode resource limits |
-| `FISH_SPEECH_HOME`, `FISH_SPEECH_MODEL_ROOT`, `FISH_SPEECH_BNB_MODE` | Pinned Fish source, external model root, and `nf4` mode |
+| `FISH_SPEECH_HOME`, `FISH_SPEECH_MODEL_ROOT` | Pinned upstream Fish source checkout and optional separate model root |
 
 Configure the backend registry with distinct ingress-token hashes, correct
 callback/source origins, buckets, endpoints, public URLs, and attempt prefixes.

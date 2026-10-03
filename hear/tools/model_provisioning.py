@@ -24,12 +24,14 @@ class ModelProvisioner:
         role: WorkerRole,
         *,
         enabled_features: frozenset[str] = frozenset(),
+        acknowledge_license_review: bool = False,
     ) -> dict[str, str]:
         return self._manifest.provision(
             self._model_root,
             role,
             enabled_features=enabled_features,
             cache_dir=self._cache_dir,
+            acknowledge_license_review=acknowledge_license_review,
         )
 
     def verify(
@@ -56,6 +58,11 @@ class ModelProvisioner:
         parser.add_argument("--cache-dir", type=Path)
         parser.add_argument("--feature", action="append", default=[])
         parser.add_argument("--verify-only", action="store_true")
+        parser.add_argument(
+            "--acknowledge-license-review",
+            action="store_true",
+            help="download models whose licence needs permission; readiness still reports them",
+        )
         args = parser.parse_args()
         instance = cls(
             ModelManifest(args.manifest),
@@ -74,6 +81,7 @@ class ModelProvisioner:
         instance.provision(
             WorkerRole(args.role),
             enabled_features=features,
+            acknowledge_license_review=args.acknowledge_license_review,
         )
         missing = instance.verify(
             WorkerRole(args.role),

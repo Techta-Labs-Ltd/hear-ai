@@ -48,7 +48,7 @@ def test_role_provisioner_requests_only_selected_models(monkeypatch, tmp_path):
     )
     calls = []
 
-    def fake_provision(model_root, role, *, enabled_features, cache_dir):
+    def fake_provision(model_root, role, *, enabled_features, cache_dir, acknowledge_license_review=False):
         calls.append((model_root, role, enabled_features, cache_dir))
         return {"asr": str(model_root / "asr")}
 

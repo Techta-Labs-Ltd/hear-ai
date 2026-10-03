@@ -16,7 +16,7 @@ from hear.runtime.gpu_idle import AsyncIdleResource
 
 class FishProcess:
     @staticmethod
-    def serve(connection, source_root: str, checkpoint: str, codec: str, bnb_mode: str):
+    def serve(connection, source_root: str, checkpoint: str, codec: str):
         phase = "imports"
         try:
             sys.path.insert(0, source_root)
@@ -29,17 +29,12 @@ class FishProcess:
             from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
             from loguru import logger
 
-            if bnb_mode == "nf4":
-                from hear.inference.fish_nf4_loader import FishNF4Loader
-
-                FishNF4Loader.install()
-
             # Third-party INFO logs include complete job transcripts.
             logger.disable("fish_speech")
 
             if not torch.cuda.is_available():
                 raise RuntimeError("fish_speech_cuda_unavailable")
-            precision = torch.float16 if bnb_mode == "nf4" else torch.bfloat16
+            precision = torch.bfloat16
             kwargs = {
                 "checkpoint_path": checkpoint,
                 "device": "cuda",
@@ -47,12 +42,6 @@ class FishProcess:
                 "compile": False,
             }
             supported = inspect.signature(launch_thread_safe_queue).parameters
-            if bnb_mode == "nf4" and "bnb4" in supported:
-                kwargs["bnb4"] = True
-            elif bnb_mode not in ("", "none") and "bnb_mode" not in supported:
-                raise RuntimeError("requested_fish_quantisation_not_supported_by_pinned_source")
-            if "bnb_mode" in supported:
-                kwargs["bnb_mode"] = bnb_mode if bnb_mode not in ("", "none") else None
             if "max_seq_len" in supported:
                 kwargs["max_seq_len"] = 4096
             torch.set_num_threads(2)
@@ -71,7 +60,7 @@ class FishProcess:
             connection.send(
                 {
                     "status": "ready",
-                    "quantization": bnb_mode,
+                    "precision": "bfloat16",
                     "startup_cuda_allocated_bytes": torch.cuda.memory_allocated(),
                     "startup_cuda_reserved_bytes": torch.cuda.memory_reserved(),
                     "startup_peak_allocated_bytes": torch.cuda.max_memory_allocated(),
@@ -123,7 +112,7 @@ class FishProcess:
                     {
                         "status": "completed",
                         "audio": stream.getvalue(),
-                        "quantization": bnb_mode,
+                        "precision": "bfloat16",
                         "sample_rate": rate,
                         "frames": int(audio.size),
                         "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
@@ -144,7 +133,7 @@ class FishProcess:
 
 
 class FishSpeechEngine:
-    """One warm, cancellable Fish process per worker; no FFmpeg-only fallback."""
+    """One warm, cancellable Fish process per worker running the official bf16 weights."""
 
     def __init__(
         self,
@@ -153,12 +142,9 @@ class FishSpeechEngine:
         codec_path: Path,
         native: NativeExecutor,
         *,
-        bnb_mode: str = "none",
         startup_timeout: float = 300,
         inference_timeout: float = 180,
     ):
-        if bnb_mode not in ("none", "nf4"):
-            raise ValueError("unsupported_fish_quantization")
         if not (source_root / "fish_speech" / "inference_engine").is_dir():
             raise RuntimeError("fish_speech_source_not_provisioned")
         if (
@@ -177,7 +163,7 @@ class FishSpeechEngine:
         self._connection, child = context.Pipe()
         self._process = context.Process(
             target=FishProcess.serve,
-            args=(child, str(source_root), str(checkpoint_path), str(codec_path), bnb_mode),
+            args=(child, str(source_root), str(checkpoint_path), str(codec_path)),
             daemon=True,
         )
         self._process.start()
@@ -325,7 +311,6 @@ class LazyFishSpeechEngine:
         codec_path: Path,
         native: NativeExecutor,
         *,
-        bnb_mode: str = "nf4",
         startup_timeout: float = 300,
         inference_timeout: float = 180,
         idle_seconds: float,
@@ -335,7 +320,6 @@ class LazyFishSpeechEngine:
         self._checkpoint_path = checkpoint_path
         self._codec_path = codec_path
         self._native = native
-        self._bnb_mode = bnb_mode
         self._startup_timeout = startup_timeout
         self._inference_timeout = inference_timeout
         self._loader = NativeExecutor("fish-speech-lazy-loader")
@@ -354,7 +338,6 @@ class LazyFishSpeechEngine:
                 self._checkpoint_path,
                 self._codec_path,
                 self._native,
-                bnb_mode=self._bnb_mode,
                 startup_timeout=self._startup_timeout,
                 inference_timeout=self._inference_timeout,
             )

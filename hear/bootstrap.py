@@ -15,7 +15,6 @@ from hear.execution.executor import JobExecutor
 from hear.execution.native import NativeExecutor
 from hear.execution.reporter import BackendAttemptClient
 from hear.health.service import RuntimeReadiness
-from hear.inference.fish_nf4_assets import FishNF4Assets
 from hear.inference.manifest import ModelManifest
 from hear.runtime.roles import WorkerRole
 from hear.runtime.simulation import SimulationBoundary
@@ -37,8 +36,6 @@ class RuntimeBootstrap:
         self._model_root = self._settings.model_root
         self._manifest = ModelManifest(self._root / "hear" / "model_manifest.json")
         self._manifest.validate_overrides(self._settings.model_paths)
-        if "fish-speech-s2-pro" in self._settings.model_paths:
-            raise ValueError("fish_model_path_is_configured_through_FISH_SPEECH_MODEL_ROOT")
         self._patch_manager = DependencyPatchManager(self._root)
         self._readiness: dict[WorkerRole, RuntimeReadiness] = {}
 
@@ -344,13 +341,14 @@ class RuntimeBootstrap:
         audio_native = NativeExecutor("reconstruction-audio")
         fish_module = importlib.import_module("hear.inference.fish_speech")
         fish_root = self._settings.fish_speech_model_root or self._model_root
-        checkpoint = FishNF4Assets.runtime_path(fish_root)
+        checkpoint = self._manifest.local_path(
+            fish_root, "fish-speech-s2-pro", self._settings.model_paths
+        )
         fish = fish_module.LazyFishSpeechEngine(
             self._settings.fish_speech_home,
             checkpoint,
             checkpoint / "codec.pth",
             fish_native,
-            bnb_mode=self._settings.fish_speech_bnb_mode,
             idle_seconds=self._settings.reconstruction_idle_ttl_seconds,
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
