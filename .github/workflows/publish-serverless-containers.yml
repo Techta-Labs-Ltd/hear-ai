@@ -25,6 +25,7 @@ jobs:
     env:
       GHCR_TOKEN: ${{ github.token }}
       GHCR_USERNAME: ${{ github.actor }}
+      HEAR_IMAGE_TAR: /tmp/hear-serverless.tar
     steps:
       - uses: actions/checkout@v4
       - name: Prepare the ephemeral Docker builder
