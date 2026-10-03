@@ -1677,8 +1677,12 @@ signed HEAR job and GPU inference have not been verified.
 
 Backend PR 88 was merged and deployed successfully by
 [workflow 37131507076](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37131507076).
-The real backend canary driver and provider configuration are being prepared in
-an isolated operational workflow. Provider credentials are encrypted to a
+The real backend canary driver and protected provider configuration are prepared
+on the production backend. Live import of the Serverless adapter and disabled
+production runtime dispatch were verified by
+[workflow 37136562408](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37136562408).
+The canary driver has not executed because the RunPod image pull credential is
+still missing. Provider credentials are encrypted to a
 private key held only on the backend host; no plaintext key is committed.
 The canary changes settings only in its own driver process. General production
 runtime dispatch remains disabled pending real acceptance.

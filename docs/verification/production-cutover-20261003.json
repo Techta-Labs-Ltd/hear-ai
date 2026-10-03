@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T16:11:00Z",
+  "verified_at": "2026-10-03T16:22:26Z",
   "runtime_mode": "production",
   "ready_for_GPU_traffic_cutover": false,
   "production_dispatch_enabled": false,
@@ -171,6 +171,25 @@
       }
     },
     "worker_environments_readback_verified": true,
-    "worker_environment_settings_count_per_role": 37
+    "worker_environment_settings_count_per_role": 37,
+    "backend_canary_driver_prepared": true,
+    "backend_canary_driver_execution_verified": false,
+    "protected_provider_config_transferred": true,
+    "last_provider_health": {
+      "pipeline": {
+        "completed_jobs": 0,
+        "queued_jobs": 0,
+        "ready_workers": 0,
+        "unhealthy_workers": 1
+      },
+      "cleaner": {
+        "completed_jobs": 0,
+        "queued_jobs": 0,
+        "ready_workers": 0,
+        "unhealthy_workers": 1
+      }
+    },
+    "backend_live_adapter_import_verified": true,
+    "backend_canary_prepare_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37136562408"
   }
 }
