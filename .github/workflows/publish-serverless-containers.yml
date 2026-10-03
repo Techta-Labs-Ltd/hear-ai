@@ -1,4 +1,4 @@
-name: Build HEAR AI Serverless images
+name: Build HEAR AI images
 on:
   workflow_dispatch:
 permissions:
@@ -15,8 +15,13 @@ jobs:
         include:
           - target: pipeline-serverless
             tag: pipeline-serverless
+            serverless: true
           - target: magic-clean-natural-serverless
             tag: cleaner-serverless
+            serverless: true
+          - target: runpod-stack
+            tag: runpod-stack
+            serverless: false
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -40,7 +45,7 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
           image="ghcr.io/techta-labs-ltd/hear-ai:${{ matrix.tag }}-${{ github.sha }}"
           /tmp/hear-bazel run //:runpod_image -- --target "${{ matrix.target }}" --tag "$image" --push
-          /tmp/hear-bazel run //:check_serverless_image -- "$image"
+          if [ "${{ matrix.serverless }}" = "true" ]; then /tmp/hear-bazel run //:check_serverless_image -- "$image"; fi
           docker buildx imagetools inspect "$image" > "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
           sha256sum bazel-bin/hear-runtime-context.tar >> "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
       - uses: actions/upload-artifact@v4
