@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T13:59:13.480011+00:00",
+  "verified_at": "2026-10-03T16:11:00Z",
   "runtime_mode": "production",
   "ready_for_GPU_traffic_cutover": false,
   "production_dispatch_enabled": false,
@@ -73,9 +73,10 @@
     "tests_skipped": 26
   },
   "remaining_acceptance": [
-    "Access to RunPod account owning 0as9lqk138vfwz",
-    "Deploy the published image on GPU with registry pull access",
-    "Verify real Pipeline and cleaning jobs on the GPU image before switching traffic"
+    "Attach a valid GHCR read:packages pull credential to both Serverless templates",
+    "Verify real cleaner, pipeline and transcription attempts through RunPod with backend persistence and B2 readback",
+    "Verify duplicate delivery fencing and return to zero active workers",
+    "Enable production runtime dispatch only after all Serverless acceptance checks pass"
   ],
   "host_model_offload": {
     "verified_at": "2026-10-03T13:53:39.811869+00:00",
@@ -117,7 +118,7 @@
     "preload_models": true,
     "idle_eviction": false,
     "backend_submission_adapter_verified": true,
-    "provider_account_access_verified": false,
+    "provider_account_access_verified": true,
     "images": {
       "pipeline": {
         "tag": "ghcr.io/techta-labs-ltd/hear-ai:pipeline-serverless-20261003",
@@ -138,7 +139,7 @@
     },
     "image_publication_run": "https://github.com/Techta-Labs-Ltd/hear-ai/actions/runs/37130037490",
     "backend_adapter_pull_request": "https://github.com/Techta-Labs-Ltd/hear-backend/pull/88",
-    "backend_adapter_deployed": false,
+    "backend_adapter_deployed": true,
     "backend_tests": {
       "passed": 1995,
       "skipped": 26,
@@ -146,12 +147,30 @@
       "type_checking": "passed"
     },
     "provider_api_access_check": {
-      "checked_at": "2026-10-03T14:45:00Z",
-      "rest_v1_http_status": 401,
-      "graphql_http_status": 401,
-      "rest_v2_http_status": 403
+      "checked_at": "2026-10-03T15:55:20Z",
+      "rest_v1_http_status": 200
     },
-    "endpoints_created": false,
-    "real_serverless_job_verified": false
+    "endpoints_created": true,
+    "real_serverless_job_verified": false,
+    "backend_deployment_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37131507076",
+    "registry_pull_credential_configured": false,
+    "endpoints": {
+      "pipeline": {
+        "template_id": "rdumefwltc",
+        "endpoint_id": "8ewxonopk5ex1p",
+        "base_url": "https://api.runpod.ai/v2/8ewxonopk5ex1p",
+        "name": "hear-ai-pipeline-20261003",
+        "image": "ghcr.io/techta-labs-ltd/hear-ai@sha256:7e1a31a220cac843a47153435c502d96d2297a3f49bc783cd4fe594ef61be43c"
+      },
+      "cleaner": {
+        "template_id": "l1swqghx1x",
+        "endpoint_id": "e2ysmfujllh9ur",
+        "base_url": "https://api.runpod.ai/v2/e2ysmfujllh9ur",
+        "name": "hear-ai-cleaner-20261003",
+        "image": "ghcr.io/techta-labs-ltd/hear-ai@sha256:2eeefddf57476729f816681be90dc5f03674b13af33ed0ced44cb7a381443802"
+      }
+    },
+    "worker_environments_readback_verified": true,
+    "worker_environment_settings_count_per_role": 37
   }
 }

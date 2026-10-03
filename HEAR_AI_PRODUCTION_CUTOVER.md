@@ -7,15 +7,16 @@
 **Canonical source target:** `release/hear-ai-production-v11`
 
 **Current Serverless status, 2026-10-03:** Both role images were built, published
-and checked through Bazel → Docker in the `hear-ai` repository. Production
-worker environments and private deployment plans are prepared. Backend
-Serverless dispatch is implemented in draft PR 88 and passed full CI (1,995
-tests, lint and type checks). Endpoint creation and real Serverless GPU jobs
-remain unverified: the supplied RunPod key returned HTTP 401 on the management
-REST and GraphQL APIs, and HTTP 403 on the newer management API. No Serverless
-endpoint URL has been created. Keep production dispatch disabled. Sections 32
-and 33 record earlier Pod work; their startup commands and proxy URLs do not
-apply to this Serverless deployment.
+and checked through Bazel → Docker in the `hear-ai` repository. Both RunPod
+queue endpoints now exist: pipeline `8ewxonopk5ex1p`, cleaner `e2ysmfujllh9ur`.
+Each template's immutable image and all 37 live environment settings were read
+back and verified. Backend Serverless dispatch from PR 88 is merged and
+successfully deployed; full CI passed (1,995 tests, lint and type checks).
+The replacement RunPod API key is valid. Worker startup still requires a GHCR
+pull credential: the images are private and this RunPod account has no registry
+authentication configured. No real Serverless jobs have run. Production runtime
+dispatch remains disabled. See section 35 for created endpoint URLs. Sections
+32 and 33 record earlier Pod work and do not apply to Serverless.
 
 **Review:** 2026-10-03 — Bazel Docker build/publication, live backend transport
 and a real CPU cleaning job passed. GPU Pipeline and Serverless acceptance remain pending.
@@ -1580,10 +1581,9 @@ Use the JSON values as template/endpoint environment variables, or put sensitive
 values into RunPod secrets and reference them in the environment. Private REST
 API deployment plans, including the immutable images and actual worker envs,
 are `/root/hear-ai-config/serverless-pipeline-deployment.json` and
-`/root/hear-ai-config/serverless-cleaner-deployment.json`. They require a valid
-RunPod API key, a private-registry authentication ID and the template IDs
-returned by RunPod before the endpoint objects can be submitted. These plans
-have not been applied. Preserve these private files before replacing the
+`/root/hear-ai-config/serverless-cleaner-deployment.json`. These plans were applied using the accepted replacement RunPod key.
+The returned template and endpoint IDs are in section 35. The private-registry
+authentication ID still needs to be attached to each template. Preserve these private files before replacing the
 current container because `/root` is ephemeral.
 
 Common worker settings are:
@@ -1624,7 +1624,9 @@ It preserves the canonical signed envelope, uses the remaining attempt lifetime
 for RunPod execution timeout and queue TTL, validates acceptance, and records
 the provider job and endpoint IDs. Transcription uses the pipeline endpoint.
 Full CI passed: 1,995 tests passed, 26 skipped; lint and type checking passed.
-The adapter has not been merged or deployed. After deployment, configure:
+The adapter was merged and deployed successfully by workflow 37131507076.
+The isolated canary configuration is prepared with the actual endpoint IDs.
+Production runtime dispatch stays disabled pending acceptance. Configure:
 
 ```text
 HEAR_AI_TRANSPORT=serverless
@@ -1638,13 +1640,55 @@ heartbeat, progress, artifact readback and terminal outcome verified. Confirm
 workers return to zero afterward. The earlier real CPU cleaner canary validates
 the backend contract; it does not validate RunPod Serverless GPU execution.
 
-Current blocker: RunPod rejected the supplied key with HTTP 401 on REST v1 and
-GraphQL, and HTTP 403 on REST v2. No endpoints or real Serverless jobs have been
-created. A valid key with Serverless/template management access is needed to
-apply the prepared deployment and run the real canaries. Production is not yet
-ready to receive jobs through Serverless.
+The first RunPod key was rejected. Its replacement was accepted and both
+endpoints were created (section 35). Current blocker: the private GHCR images
+require a registry pull credential, which is absent from the RunPod account.
+Production is not yet ready to receive jobs through Serverless.
 
 References: [RunPod worker deployment](https://docs.runpod.io/serverless/workers/deploy),
 [endpoint settings](https://docs.runpod.io/serverless/endpoints/endpoint-configurations),
 [queue requests](https://docs.runpod.io/serverless/endpoints/send-requests),
 and [endpoint creation API](https://docs.runpod.io/api-reference/endpoints/POST/endpoints).
+
+
+## 35. Created Serverless endpoints, 2026-10-03
+
+The replacement RunPod API key was accepted by the management API at
+16:55 Africa/Lagos. Both queue endpoints were created in that account and their
+saved templates were independently read back. Each image digest and all 37
+worker environment values match its protected deployment plan.
+
+| Role | Endpoint name | Endpoint ID | Template ID |
+| --- | --- | --- | --- |
+| Pipeline + transcription | `hear-ai-pipeline-20261003` | `8ewxonopk5ex1p` | `rdumefwltc` |
+| Natural cleaner | `hear-ai-cleaner-20261003` | `e2ysmfujllh9ur` | `l1swqghx1x` |
+
+Actual job submission URLs:
+
+```text
+https://api.runpod.ai/v2/8ewxonopk5ex1p/run
+https://api.runpod.ai/v2/e2ysmfujllh9ur/run
+```
+
+Both endpoint `/health` routes accepted authenticated requests. Active workers
+is 0; maximum workers is 1 per endpoint; idle timeout is 5 seconds; GPU is A40
+with one GPU per worker; container disk is 50 GB. Queue acceptance of a real
+signed HEAR job and GPU inference have not been verified.
+
+Backend PR 88 was merged and deployed successfully by
+[workflow 37131507076](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37131507076).
+The real backend canary driver and provider configuration are being prepared in
+an isolated operational workflow. Provider credentials are encrypted to a
+private key held only on the backend host; no plaintext key is committed.
+The canary changes settings only in its own driver process. General production
+runtime dispatch remains disabled pending real acceptance.
+
+The remaining setup requirement is registry authentication. Anonymous GHCR
+pull was rejected, and the RunPod registry-auth list is empty. Add a GHCR
+credential at RunPod Credentials → Container Registry Auth, using a GitHub
+username and a classic token with `read:packages` access to the private
+`Techta-Labs-Ltd/hear-ai` package. Attach its ID to both templates, then validate
+real cleaning, pipeline and transcription jobs and worker scale-to-zero.
+
+Private endpoint receipt: `/root/hear-ai-config/serverless-endpoints.json`.
+Public verification receipt: `docs/verification/production-cutover-20261003.json`.
