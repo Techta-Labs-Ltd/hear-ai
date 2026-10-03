@@ -1359,7 +1359,7 @@ or confirm the external backend transport is deployed.
 | Full AI test suite | 687 passed, 12 skipped, 3 dependency/serialization warnings in 168.80 seconds; subsequent focused configuration and image checks also passed |
 | Static checks | Ruff, mypy (140 source files), architecture and shell syntax passed |
 | Bazel production input | `//:image_context`, `//:runpod_image`, `//:runpod_container` passed; context SHA256 `7ef75975d2ad2fbcfc7f8e8df1021f91566d8ee54b1900609175e66a5b53d2e6`, 173 runtime files; archive contents and file hashes verified; credentials, audio and host weights excluded |
-| Full Docker build | Actual Bazel → Docker build on backend Docker host; candidate image ID `sha256:ee06c90f6668bb0ff041a4bbd70375f4d47e64bc25f90e78ae8e9e74d3dfa5f4`; Docker layer export and unpack succeeded; the subsequent `docker save` exceeded the SSH 55-minute limit; [candidate publication workflow 37120696554](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37120696554) passed, with verified identical context and image configuration |
+| Full Docker build | Actual Bazel → Docker build on backend Docker host; candidate image ID `sha256:ee06c90f6668bb0ff041a4bbd70375f4d47e64bc25f90e78ae8e9e74d3dfa5f4`; Docker layer export and unpack succeeded; the subsequent `docker save` exceeded the SSH 55-minute limit; [hear-ai publication workflow 37125681683](https://github.com/Techta-Labs-Ltd/hear-ai/actions/runs/37125681683) passed, with verified unchanged runtime files and configuration except repository labels |
 | External production environment | 46 populated settings, matched to live backend credentials and storage ownership policy; mode 0600, parent 0700; configured on this Pod and Docker builder host |
 | Authenticated production preflight | HTTP 200; matching protocol; no configuration blockers, missing configured models or license blockers; configuration check does not establish image/GPU inference |
 | Live backend protocol/catalogue | [PR 87](https://github.com/Techta-Labs-Ltd/hear-backend/pull/87) merged and deployed at `dac6f7e73c2aaa35bad59ff824a2a91a6a6e89d5`; authenticated protocol and catalogue pass; catalogue version 1340458090, 2,587 categories, 21,218 tags, 5 keyword rules and 3 harm keywords |
@@ -1378,8 +1378,9 @@ supervised startup.
 
 The additive backend protocol/catalogue fix uses the existing internal service-key
 protection and live database catalogue. It does not enable runtime dispatch.
-The isolated ops branch stores bounded source and operational workflows; it is
-not the canonical AI release branch.
+The tested source archive and publishing workflow are stored in the `hear-ai`
+repository on `ops/hear-ai-runpod-access-20261003`. This remains an isolated
+ops branch rather than the canonical AI release branch.
 
 Private local configuration evidence is in
 `/root/hear-ai-build/production-live-config-accepted.json`. On the Docker builder,
@@ -1436,3 +1437,8 @@ are absent from image configuration. Its size is 14871298048 bytes.
 
 Archive verification workflow: [37121187717](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37121187717).
 Archive SHA256: `9d590fe8a6c1a4093583f618632907fc594a8b9d8234815507bd4043ef5aa0f5`.
+
+The obsolete `hear-ai-production` package and backend AI publishing files were
+removed after successful `hear-ai` publication. The temporary authenticated
+archive transfer service was stopped and removed.
+Cleanup verification: [37127018275](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37127018275).

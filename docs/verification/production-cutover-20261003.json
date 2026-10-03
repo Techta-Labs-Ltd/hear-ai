@@ -32,7 +32,11 @@
     "original_canary_configuration_sha256": "559feefe3008f198b773cfc20c54375b5285e468fa1265cbbf7d97f1602e4818",
     "runtime_filesystem_unchanged": true,
     "runtime_configuration_unchanged_except_OCI_labels": true,
-    "repository_association_verified": true
+    "repository_association_verified": true,
+    "obsolete_backend_package_removed": true,
+    "backend_publishing_files_removed": true,
+    "temporary_transfer_service_removed": true,
+    "cleanup_workflow": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37127018275"
   },
   "real_cleaning_canary": {
     "B2_bucket": "OldAlexa",
