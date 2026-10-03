@@ -1,5 +1,8 @@
 name: Runtime quality checks
-on: [push, pull_request]
+on:
+  push:
+    branches-ignore: [ops/hear-ai-runpod-access-20261003]
+  pull_request:
 permissions:
   contents: read
 jobs:

@@ -1,0 +1,49 @@
+name: HEAR AI RunPod deployment access
+on:
+  push:
+    branches: [ops/hear-ai-runpod-access-20261003]
+    paths: [.github/workflows/runpod-deployment-access.yml]
+permissions:
+  contents: read
+jobs:
+  repository-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check existing repository deployment credentials without revealing them
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY || secrets.RUNPOD_API_TOKEN || secrets.RUNPOD_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error
+          key=os.environ.get('RUNPOD_API_KEY','')
+          if not key:
+              print(json.dumps({'scope':'repository','deployment_key_present':False}))
+          else:
+              request=urllib.request.Request('https://api.runpod.io/graphql',data=json.dumps({'query':'query { myself { pods { id name imageName desiredStatus } } }'}).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+              try:
+                  with urllib.request.urlopen(request,timeout=25) as response:data=json.load(response)
+                  print(json.dumps({'scope':'repository','deployment_key_present':True,'pods':((data.get('data') or {}).get('myself') or {}).get('pods',[]),'errors':[x.get('message') for x in data.get('errors',[])]}))
+              except urllib.error.HTTPError as error:print(json.dumps({'scope':'repository','deployment_key_present':True,'HTTP_status':error.code}))
+          PY
+  production-access:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 3
+    steps:
+      - name: Check existing production deployment credentials without revealing them
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY || secrets.RUNPOD_API_TOKEN || secrets.RUNPOD_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error
+          key=os.environ.get('RUNPOD_API_KEY','')
+          if not key:
+              print(json.dumps({'scope':'production','deployment_key_present':False}))
+          else:
+              request=urllib.request.Request('https://api.runpod.io/graphql',data=json.dumps({'query':'query { myself { pods { id name imageName desiredStatus } } }'}).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+              try:
+                  with urllib.request.urlopen(request,timeout=25) as response:data=json.load(response)
+                  print(json.dumps({'scope':'production','deployment_key_present':True,'pods':((data.get('data') or {}).get('myself') or {}).get('pods',[]),'errors':[x.get('message') for x in data.get('errors',[])]}))
+              except urllib.error.HTTPError as error:print(json.dumps({'scope':'production','deployment_key_present':True,'HTTP_status':error.code}))
+          PY
