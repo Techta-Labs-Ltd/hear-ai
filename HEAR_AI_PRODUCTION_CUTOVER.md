@@ -6,33 +6,31 @@
 **Serverless runtime:** Same source and contracts, separate role images and startup policy (section 31)  
 **Canonical source target:** `release/hear-ai-production-v11`
 
-**Current Serverless status, 2026-10-03:** Both role images were built, published
-and checked through Bazel → Docker in the `hear-ai` repository. Both RunPod
-queue endpoints now exist: pipeline `8ewxonopk5ex1p`, cleaner `e2ysmfujllh9ur`.
-Each template's immutable image and all 37 live environment settings were read
-back and verified. Backend Serverless dispatch from PR 88 is merged and
-successfully deployed; full CI passed (1,995 tests, lint and type checks).
-The replacement RunPod API key is valid. Worker startup still requires a GHCR
-pull credential: the images are private and this RunPod account has no registry
-authentication configured. No real Serverless jobs have run. Production runtime
-dispatch remains disabled. See section 35 for created endpoint URLs. Sections
-32 and 33 record earlier Pod work and do not apply to Serverless.
+**Current Serverless status, 2026-10-03:** Real GPU cleaner, pipeline, and
+transcription jobs passed through the deployed backend and RunPod Serverless.
+Both role images were built, published and checked through Bazel → Docker in
+`hear-ai`. Registry authentication is attached to both templates; all 37 worker
+environment values and immutable image digests were read back and verified.
 
-**Review:** 2026-10-03 — Bazel Docker build/publication, live backend transport
-and a real CPU cleaning job passed. GPU Pipeline and Serverless acceptance remain pending.
+[Real acceptance workflow 37138828012](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37138828012)
+verified backend claims, persisted progress, completed outcomes, applied results,
+terminal SSE delivery, and duplicate fencing for all three jobs. The cleaner's
+B2 artifact hash matched and its original audio was preserved pending approval.
+Pipeline produced a real aligned transcript, moderation and compressed audio;
+its heartbeat returned HTTP 200. Both GPU workers stopped after execution.
 
-**Latest execution check:** 2026-10-03 — env setup, Docker publication and a
-real CPU cleaning job passed; GPU cutover remains pending.
-The full `runpod-stack` image has now been built and published through Bazel → Docker on the
-production backend's Docker host; image ID
-`sha256:ee06c90f6668bb0ff041a4bbd70375f4d47e64bc25f90e78ae8e9e74d3dfa5f4`.
-The external, mode-0600 `/root/hear-ai-config/production.env` is fully populated
-with the live backend service key, ingress token and ownership policy on both
-hosts. Authenticated protocol and catalogue routes have been fixed, deployed
-and accepted. A real CPU cleaning canary has passed against the Docker image, including live
-B2 readback and duplicate fencing.
-GPU acceptance remains pending, and `HEAR_AI_RUNTIME_V1` remains disabled.
-See section 32 for evidence.
+Pipeline/transcription endpoint: `8ewxonopk5ex1p`. Cleaner endpoint:
+`e2ysmfujllh9ur`. Actual URLs and evidence are in section 35. General production
+dispatch remains disabled (`HEAR_AI_RUNTIME_V1=false`); the tested deployment is
+ready for that activation. Optional Qwen LLM discovery and Fish reconstruction
+remain disabled in this deployment.
+
+Host models were offloaded to `/workspace/hear-ai-models`; all 173 files were
+verified by SHA256. Root storage recovered 12,826,763,264 bytes, and the host GPU
+uses 0 MiB. The Docker images retain their own `/models` assets.
+
+Sections 32 and 33 record earlier Pod work. The Serverless setup and acceptance
+in sections 34 and 35 supersede their pending GPU status.
 
 ---
 
@@ -1626,7 +1624,7 @@ the provider job and endpoint IDs. Transcription uses the pipeline endpoint.
 Full CI passed: 1,995 tests passed, 26 skipped; lint and type checking passed.
 The adapter was merged and deployed successfully by workflow 37131507076.
 The isolated canary configuration is prepared with the actual endpoint IDs.
-Production runtime dispatch stays disabled pending acceptance. Configure:
+Production runtime dispatch stays disabled pending activation. Configure:
 
 ```text
 HEAR_AI_TRANSPORT=serverless
@@ -1641,9 +1639,11 @@ workers return to zero afterward. The earlier real CPU cleaner canary validates
 the backend contract; it does not validate RunPod Serverless GPU execution.
 
 The first RunPod key was rejected. Its replacement was accepted and both
-endpoints were created (section 35). Current blocker: the private GHCR images
-require a registry pull credential, which is absent from the RunPod account.
-Production is not yet ready to receive jobs through Serverless.
+endpoints were created (section 35). Registry authentication is now attached
+to both templates and provider image pulls were verified. Real GPU jobs and
+worker scale-to-zero were subsequently verified (section 35).
+All three real GPU acceptance jobs have now passed (section 35). The deployment
+is ready for production dispatch activation.
 
 References: [RunPod worker deployment](https://docs.runpod.io/serverless/workers/deploy),
 [endpoint settings](https://docs.runpod.io/serverless/endpoints/endpoint-configurations),
@@ -1672,8 +1672,10 @@ https://api.runpod.ai/v2/e2ysmfujllh9ur/run
 
 Both endpoint `/health` routes accepted authenticated requests. Active workers
 is 0; maximum workers is 1 per endpoint; idle timeout is 5 seconds; GPU is A40
-with one GPU per worker; container disk is 50 GB. Queue acceptance of a real
-signed HEAR job and GPU inference have not been verified.
+with one GPU per worker; container disk is 50 GB. Real signed HEAR jobs and GPU inference have been verified for cleaner, pipeline
+and transcription. Both GPU worker containers subsequently reached `EXITED`.
+The provider health route can still count cached workers as idle/ready while
+their containers are stopped; container status was independently checked.
 
 Backend PR 88 was merged and deployed successfully by
 [workflow 37131507076](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37131507076).
@@ -1681,18 +1683,54 @@ The real backend canary driver and protected provider configuration are prepared
 on the production backend. Live import of the Serverless adapter and disabled
 production runtime dispatch were verified by
 [workflow 37136562408](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37136562408).
-The canary driver has not executed because the RunPod image pull credential is
-still missing. Provider credentials are encrypted to a
-private key held only on the backend host; no plaintext key is committed.
-The canary changes settings only in its own driver process. General production
-runtime dispatch remains disabled pending real acceptance.
+The real acceptance run used the current backend revision
+`5adf67e4dbee5b7f139a22b2d0c274a8272152ff` and a separate, memory-limited backend
+container with the same image, real environment, database, network and B2
+storage. This avoided interruptions from production API container rollouts.
+Provider credentials remain outside Git; only RSA-OAEP ciphertext was used for
+transfer to the production host.
 
-The remaining setup requirement is registry authentication. Anonymous GHCR
-pull was rejected, and the RunPod registry-auth list is empty. Add a GHCR
-credential at RunPod Credentials → Container Registry Auth, using a GitHub
-username and a classic token with `read:packages` access to the private
-`Techta-Labs-Ltd/hear-ai` package. Attach its ID to both templates, then validate
-real cleaning, pipeline and transcription jobs and worker scale-to-zero.
+| Job | Provider job ID | Outcome | Progress events | Duplicate fenced |
+| --- | --- | --- | --- | --- |
+| Natural cleaner | `52a13848-3ea9-495f-9b94-9c2699a832be-e2` | `awaiting_approval`, original preserved, B2 SHA256 matched | 5 | yes |
+| Pipeline | `47758c2a-0423-46ee-9123-78c05ad3851f-e2` | `completed`, aligned transcript, moderation, compressed audio | 10 | yes |
+| Transcription | `c149ce1c-0105-498d-b5d8-7df11d697f90-e2` | `completed`, real aligned transcript | 3 | yes |
+
+Each job's outcome was persisted and applied by the live backend and terminal
+SSE delivery was recorded. RunPod reported all six original/duplicate deliveries
+completed, with zero failed jobs. Pipeline's real heartbeat returned HTTP 200.
+
+RunPod registry credential `hear-ai-token` (`cmusm0r4r008o7xydkedy1g67`) is
+attached to both templates. Both exact image manifests were authenticated and
+RunPod system logs confirm their successful downloads.
+
+Production configuration uses the verified provider key and these values:
+
+```dotenv
+HEAR_AI_TRANSPORT=serverless
+HEAR_RUNPOD_ENDPOINTS_JSON={"pipeline":"8ewxonopk5ex1p","magic_clean_natural":"e2ysmfujllh9ur"}
+HEAR_AI_RUNTIME_V1=false
+```
+
+The protected production source environment is
+`/www/wwwroot/hear-backend/src/.env.production`. Configuration was persisted
+to Dokploy's stored environment and runtime environment file, rolled out to all
+17 backend services, and read back from all 25 running containers by
+[workflow 37139512704](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37139512704).
+The rollout completed at 18:15 Africa/Lagos. Every running backend container
+verified `HEAR_AI_TRANSPORT=serverless`, a populated provider key, the exact
+endpoint map above, and `HEAR_AI_RUNTIME_V1=false`. A protected environment
+backup and final receipt are under `/var/lib/hear/serverless-cutover`.
+
+The provider key is never included in this runbook. General production dispatch
+remains disabled; activation means setting `HEAR_AI_RUNTIME_V1=true` in that
+production environment and rolling the backend through its normal deployment
+procedure. Keep the current image revision when changing only configuration.
+
+Exact private canary receipts:
+`/var/lib/hear/serverless-cutover/real-serverless-canary-receipts.json`.
+GitHub masks a few non-secret UUID/count substrings in its log; the public JSON
+omits those masked fields instead of treating them as complete values.
 
 Private endpoint receipt: `/root/hear-ai-config/serverless-endpoints.json`.
 Public verification receipt: `docs/verification/production-cutover-20261003.json`.

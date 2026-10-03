@@ -1,7 +1,7 @@
 {
-  "verified_at": "2026-10-03T16:22:26Z",
+  "verified_at": "2026-10-03T17:15:04.776609+00:00",
   "runtime_mode": "production",
-  "ready_for_GPU_traffic_cutover": false,
+  "ready_for_GPU_traffic_cutover": true,
   "production_dispatch_enabled": false,
   "configuration": {
     "external_env_path": "/root/hear-ai-config/production.env",
@@ -73,10 +73,7 @@
     "tests_skipped": 26
   },
   "remaining_acceptance": [
-    "Attach a valid GHCR read:packages pull credential to both Serverless templates",
-    "Verify real cleaner, pipeline and transcription attempts through RunPod with backend persistence and B2 readback",
-    "Verify duplicate delivery fencing and return to zero active workers",
-    "Enable production runtime dispatch only after all Serverless acceptance checks pass"
+    "Activate general production dispatch by setting HEAR_AI_RUNTIME_V1=true and redeploying the backend."
   ],
   "host_model_offload": {
     "verified_at": "2026-10-03T13:53:39.811869+00:00",
@@ -126,7 +123,7 @@
         "immutable_ref": "ghcr.io/techta-labs-ltd/hear-ai@sha256:7e1a31a220cac843a47153435c502d96d2297a3f49bc783cd4fe594ef61be43c",
         "bazel_context_sha256": "7cbb82c9e43da883189ec4a5c6f63355dffc49079e345ec8c8a7622bb7226001",
         "docker_cpu_check_passed": true,
-        "gpu_inference_verified": false
+        "gpu_inference_verified": true
       },
       "cleaner": {
         "tag": "ghcr.io/techta-labs-ltd/hear-ai:cleaner-serverless-20261003",
@@ -134,7 +131,7 @@
         "immutable_ref": "ghcr.io/techta-labs-ltd/hear-ai@sha256:2eeefddf57476729f816681be90dc5f03674b13af33ed0ced44cb7a381443802",
         "bazel_context_sha256": "7cbb82c9e43da883189ec4a5c6f63355dffc49079e345ec8c8a7622bb7226001",
         "docker_cpu_check_passed": true,
-        "gpu_inference_verified": false
+        "gpu_inference_verified": true
       }
     },
     "image_publication_run": "https://github.com/Techta-Labs-Ltd/hear-ai/actions/runs/37130037490",
@@ -151,9 +148,9 @@
       "rest_v1_http_status": 200
     },
     "endpoints_created": true,
-    "real_serverless_job_verified": false,
+    "real_serverless_job_verified": true,
     "backend_deployment_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37131507076",
-    "registry_pull_credential_configured": false,
+    "registry_pull_credential_configured": true,
     "endpoints": {
       "pipeline": {
         "template_id": "rdumefwltc",
@@ -173,23 +170,154 @@
     "worker_environments_readback_verified": true,
     "worker_environment_settings_count_per_role": 37,
     "backend_canary_driver_prepared": true,
-    "backend_canary_driver_execution_verified": false,
+    "backend_canary_driver_execution_verified": true,
     "protected_provider_config_transferred": true,
     "last_provider_health": {
       "pipeline": {
-        "completed_jobs": 0,
+        "completed_jobs": 4,
         "queued_jobs": 0,
-        "ready_workers": 0,
-        "unhealthy_workers": 1
+        "failed_jobs": 0,
+        "unhealthy_workers": 0,
+        "GPU_worker_desired_status": "EXITED"
       },
       "cleaner": {
-        "completed_jobs": 0,
+        "completed_jobs": 2,
         "queued_jobs": 0,
-        "ready_workers": 0,
-        "unhealthy_workers": 1
+        "failed_jobs": 0,
+        "unhealthy_workers": 0,
+        "GPU_worker_desired_status": "EXITED"
       }
     },
     "backend_live_adapter_import_verified": true,
-    "backend_canary_prepare_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37136562408"
+    "backend_canary_prepare_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37136562408",
+    "registry_pull_credential_attached_to_both_templates": true,
+    "provider_image_pull_verified": true,
+    "registry_auth_id": "cmusm0r4r008o7xydkedy1g67",
+    "canary_driver_permissions_fixed": true,
+    "initial_canary_failure": {
+      "reason": "Backend container user could not read root-owned mode-0600 canary driver",
+      "before_provider_submission": true,
+      "workflow_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37137695186"
+    },
+    "current_canary_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37138471823",
+    "backend_gpu_canaries_verified": [
+      "magic_clean",
+      "pipeline",
+      "transcription"
+    ],
+    "backend_heartbeat_verified": true,
+    "pipeline_backend_heartbeat_http_200_count": 1,
+    "terminal_SSE_verified_for_all_canaries": true,
+    "duplicate_delivery_fenced_for_all_canaries": true,
+    "worker_scale_to_zero_verified": true,
+    "provider_GPU_workers_desired_status": "EXITED",
+    "canary_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37138828012",
+    "current_backend_revision": "5adf67e4dbee5b7f139a22b2d0c274a8272152ff",
+    "backend_canary_driver_private_receipts": "/var/lib/hear/serverless-cutover/real-serverless-canary-receipts.json",
+    "real_canary_receipts": [
+      {
+        "approval_required": true,
+        "attempt_id": "d2b80103-e8a5-40a1-a0a6-62dedb4b07cb",
+        "backend_job_status": "awaiting_approval",
+        "backend_outcome_persisted": true,
+        "backend_result_applied": true,
+        "delivery_sha256": "0909ee0b75df511dca7bb20733e28eff84e629d935ed962024f8f99b55e20754",
+        "delivery_size_bytes": 265581,
+        "duplicate_delivery_fenced": true,
+        "endpoint_id": "e2ysmfujllh9ur",
+        "event_sequence": 5,
+        "job_type": "magic_clean",
+        "mock_services_used": false,
+        "original_audio_preserved": true,
+        "provider_job_id": "52a13848-3ea9-495f-9b94-9c2699a832be-e2",
+        "recording_id": "a06f4359-da10-448b-83ca-5856e8ecddfe",
+        "status": "real_serverless_canary_passed",
+        "terminal_sse_delivered": true,
+        "track_id": "233bd366-abc4-4d5b-98a5-ea7b14aa8440",
+        "worker_id": "runpod-k8yz3yqphy7eb7-magic_clean_natural-01",
+        "job_id_masked_by_workflow": true
+      },
+      {
+        "aligned_segment_count": 1,
+        "attempt_id": "ec8fc4ae-650e-461c-8701-4711b1cbe78c",
+        "backend_job_status": "completed",
+        "backend_outcome_persisted": true,
+        "backend_result_applied": true,
+        "duplicate_delivery_fenced": true,
+        "endpoint_id": "8ewxonopk5ex1p",
+        "event_sequence": 10,
+        "job_id": "9ed396f7-ca07-4f56-bb07-926a5a4885b5",
+        "job_type": "pipeline",
+        "mock_services_used": false,
+        "moderation_and_compression_verified": true,
+        "provider_job_id": "47758c2a-0423-46ee-9123-78c05ad3851f-e2",
+        "recording_id": "68ff87fe-ecba-4232-a8bc-da6109b62947",
+        "status": "real_serverless_canary_passed",
+        "terminal_sse_delivered": true,
+        "track_id": "606ff09d-9b8b-4982-874c-0ab4d93b68de",
+        "worker_id": "runpod-3serpk52k0lp80-pipeline-01",
+        "minimum_verified_transcript_word_count": 8
+      },
+      {
+        "aligned_segment_count": 1,
+        "attempt_id": "f57f46b2-c45c-4efb-9cbd-1afec4d307d1",
+        "backend_job_status": "completed",
+        "backend_outcome_persisted": true,
+        "backend_result_applied": true,
+        "duplicate_delivery_fenced": true,
+        "endpoint_id": "8ewxonopk5ex1p",
+        "event_sequence": 3,
+        "job_id": "431863fa-7412-4e99-9d09-692d120c4c2f",
+        "job_type": "transcription",
+        "mock_services_used": false,
+        "provider_job_id": "c149ce1c-0105-498d-b5d8-7df11d697f90-e2",
+        "recording_id": "0e14a633-106c-4e16-8e28-73769552f4c4",
+        "status": "real_serverless_canary_passed",
+        "terminal_sse_delivered": true,
+        "track_id": "db0232bb-eafc-4374-94c8-a146fd94e4a5",
+        "worker_id": "runpod-3serpk52k0lp80-pipeline-01",
+        "minimum_verified_transcript_word_count": 8
+      }
+    ],
+    "persistent_configuration_workflow": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37139512704",
+    "general_production_dispatch_enabled": false,
+    "canary_interruptions": [
+      {
+        "workflow_run": 37137695186,
+        "reason": "Private driver ownership prevented backend container user from reading it; fixed."
+      },
+      {
+        "workflow_run": 37138471823,
+        "reason": "Docker exec canary interrupted with exit 137 during backend deployment; replaced by separate container."
+      },
+      {
+        "workflow_run": 37138729779,
+        "reason": "Canary pinned to previous backend revision while production changed; current replica selection fixed."
+      }
+    ],
+    "persistent_backend_configuration_verified": true,
+    "live_backend_serverless_configuration_verified": true,
+    "live_backend_containers_verified": 25,
+    "live_backend_services_verified": 17,
+    "configuration_finalization_run": "https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37139512704",
+    "configuration_finalization_receipt": {
+      "backend_outcomes_and_SSE_verified": true,
+      "checked_at": "2026-10-03T17:15:04.776609+00:00",
+      "duplicate_delivery_fenced": true,
+      "live_backend_containers_verified": 25,
+      "live_backend_services_verified": 17,
+      "persistent_backend_configured": true,
+      "production_env_backup": "/var/lib/hear/serverless-cutover/production-env.before-serverless-20261003T171020Z",
+      "production_runtime_dispatch_enabled": false,
+      "real_canaries_passed": 3,
+      "real_job_types_verified": [
+        "magic_clean",
+        "pipeline",
+        "transcription"
+      ],
+      "serverless_workers_stopped": true
+    },
+    "ready_for_production_dispatch_activation": true,
+    "production_runtime_dispatch_enabled": false
   }
 }
