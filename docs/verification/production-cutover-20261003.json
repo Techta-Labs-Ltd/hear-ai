@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-10-03T13:41:07.551023+00:00",
+  "verified_at": "2026-10-03T13:59:13.480011+00:00",
   "runtime_mode": "production",
   "ready_for_GPU_traffic_cutover": false,
   "production_dispatch_enabled": false,
@@ -76,5 +76,29 @@
     "Access to RunPod account owning 0as9lqk138vfwz",
     "Deploy the published image on GPU with registry pull access",
     "Verify real Pipeline and cleaning jobs on the GPU image before switching traffic"
-  ]
+  ],
+  "host_model_offload": {
+    "verified_at": "2026-10-03T13:53:39.811869+00:00",
+    "status": "host_models_offloaded",
+    "original_path": "/models",
+    "persistent_path": "/workspace/hear-ai-models",
+    "original_path_preserved_as_symlink": true,
+    "every_file_sha256_verified": true,
+    "regular_files": 173,
+    "root_free_bytes_before": 57379926016,
+    "root_free_bytes_after": 70206689280,
+    "docker_image_models_changed": false,
+    "gpu_compute_processes_at_switch": 0,
+    "root_bytes_recovered": 12826763264,
+    "archive_only_not_production_model_storage": true
+  },
+  "deployment_bootstrap": {
+    "startup_command": "bash /workspace/hear-ai-deploy/start-production.sh",
+    "encrypted_environment": "/workspace/hear-ai-deploy/production.env.enc",
+    "required_runpod_secret": "HEAR_CONFIG_KEY",
+    "private_key_file": "/root/hear-ai-config/config-decryption.key",
+    "decrypt_to": "/root/hear-ai-config/production.env",
+    "roundtrip_verified": true,
+    "plaintext_persistent_config_removed": true
+  }
 }

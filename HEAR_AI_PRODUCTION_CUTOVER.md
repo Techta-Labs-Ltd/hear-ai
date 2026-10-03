@@ -1442,3 +1442,76 @@ The obsolete `hear-ai-production` package and backend AI publishing files were
 removed after successful `hear-ai` publication. The temporary authenticated
 archive transfer service was stopped and removed.
 Cleanup verification: [37127018275](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37127018275).
+
+## 33. RunPod setup and host-model offload, 2026-10-03
+
+Use the already published Bazel-built image:
+
+```text
+ghcr.io/techta-labs-ltd/hear-ai@sha256:0fd7977c9e3b5f9225daf290206ef06ddaa75bf123fb6ce02781747dc6e1c3f5
+```
+
+Create or edit a RunPod custom template in the account owning the Pod. Configure
+its GHCR registry authentication with a GitHub username and a classic token with
+`read:packages` access to the private `hear-ai` package. Attach the existing
+persistent volume at `/workspace`; use a 100 GB container disk and expose HTTP
+port `8000`.
+
+The existing production environment has been encrypted at
+`/workspace/hear-ai-deploy/production.env.enc`. Its decryption key is stored only
+in `/root/hear-ai-config/config-decryption.key`, mode `0600`. Add the value from
+that key file to a RunPod secret, then provide it to the container as the
+`HEAR_CONFIG_KEY` environment variable. Copy it into the secret before replacing
+the current container, since `/root` is ephemeral. Keep the key outside Git.
+
+Set the container startup command to:
+
+```bash
+bash /workspace/hear-ai-deploy/start-production.sh
+```
+
+The startup script verifies the encrypted file checksum, decrypts the configured
+production environment, verifies the plaintext checksum, writes it under
+`/root/hear-ai-config/production.env` with mode `0600`, and starts the image's
+Pod stack. The encryption/decryption roundtrip and startup shell syntax passed.
+The persistent volume does not honor restrictive POSIX modes; its temporary
+plaintext configuration copy was removed. Only the encrypted environment is
+stored there.
+
+After deployment, the gateway base URL is:
+
+```text
+https://<POD_ID>-8000.proxy.runpod.net
+```
+
+Check `/healthz`, `/readyz`, and `/capabilities`. Require `/readyz` HTTP 200 with
+production mode and ready pipeline/cleaning lanes. Set the backend `HEAR_HTTP_URL`
+to that gateway base URL and ensure `HEAR_AI_INGRESS_TOKEN` matches the worker's
+`HEAR_POD_API_KEY`. Keep `HEAR_AI_RUNTIME_V1=false` until the deployed Docker image
+passes real GPU Pipeline and cleaning job acceptance. A live GPU deployment has
+not occurred in this workspace; nested Docker is unavailable in the current Pod.
+
+On a separate Docker-capable GPU host, the existing Bazel launcher remains valid:
+
+```bash
+bazel run //:runpod_container -- \
+  --image ghcr.io/techta-labs-ltd/hear-ai@sha256:0fd7977c9e3b5f9225daf290206ef06ddaa75bf123fb6ce02781747dc6e1c3f5 \
+  --env-file /root/hear-ai-config/production.env \
+  --publish 0.0.0.0:8000:8000 --detach
+```
+
+All 173 host-model files were copied and SHA256-verified at
+`/workspace/hear-ai-models`. Root disk space recovered: 12,826,763,264 bytes.
+`/models` is now a compatibility symlink to that archive. Pipeline and
+transcription model manifests validated with no missing assets after the move.
+The archive is a backup: the production runtime rejects model storage under
+`/workspace` and uses the models packaged at `/models` inside its Docker image.
+That storage guard remains in place. No models are currently loaded on the host
+GPU: 0 MiB memory used and no compute processes.
+
+Offload receipt: `/workspace/hear-ai-models-offload-20261003.json`.
+
+Reference documentation:
+- [RunPod custom templates](https://docs.runpod.io/pods/templates/create-custom-template)
+- [RunPod exposed ports](https://docs.runpod.io/pods/configuration/expose-ports)
+- [GHCR authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
