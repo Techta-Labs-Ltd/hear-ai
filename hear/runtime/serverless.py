@@ -69,7 +69,19 @@ class ServerlessRuntime:
         try:
             if self._readiness is not None and not self._readiness.is_ready():
                 raise RuntimeError("runtime_not_ready")
-            attempt = await self._attempt_stream.prepare(envelope)
+            try:
+                attempt = await self._attempt_stream.prepare(envelope)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in BackendAttemptClient.REJECTED_STATUSES:
+                    raise
+                # Same verdict the Pod consumer publishes: the backend disowned the attempt.
+                yield {
+                    "event": "backend_attempt_rejected",
+                    "job_id": envelope.job_id,
+                    "attempt_id": envelope.attempt_id,
+                    "http_status": exc.response.status_code,
+                }
+                return
             if isinstance(attempt, AttemptRejection):
                 yield {"event": attempt.event, **attempt.data}
                 return

@@ -13,6 +13,9 @@ from hear.runtime.ownership import BackendRegistry, DeploymentOwnership
 
 
 class BackendAttemptClient:
+    # Backend verdicts that mean "this attempt is not yours to run"; never retried.
+    REJECTED_STATUSES = frozenset({401, 403, 404, 409, 410, 422})
+
     def __init__(
         self,
         worker: WorkerIdentity,

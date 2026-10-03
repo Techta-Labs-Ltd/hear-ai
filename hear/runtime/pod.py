@@ -445,14 +445,10 @@ class PodRuntime:
             await self._publish_local(envelope.attempt_id, None, reply_to)
             await message.ack()
             return
-        if isinstance(failure, httpx.HTTPStatusError) and failure.response.status_code in {
-            401,
-            403,
-            404,
-            409,
-            410,
-            422,
-        }:
+        if (
+            isinstance(failure, httpx.HTTPStatusError)
+            and failure.response.status_code in BackendAttemptClient.REJECTED_STATUSES
+        ):
             await self._publish_local(
                 envelope.attempt_id,
                 AttemptRejection(
