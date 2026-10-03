@@ -1,7 +1,7 @@
 {
-  "verified_at": "2026-10-03T17:15:04.776609+00:00",
+  "verified_at": "2026-10-03T18:03:27.996755+00:00",
   "runtime_mode": "production",
-  "ready_for_GPU_traffic_cutover": true,
+  "ready_for_GPU_traffic_cutover": false,
   "production_dispatch_enabled": false,
   "configuration": {
     "external_env_path": "/root/hear-ai-config/production.env",
@@ -73,7 +73,9 @@
     "tests_skipped": 26
   },
   "remaining_acceptance": [
-    "Activate general production dispatch by setting HEAR_AI_RUNTIME_V1=true and redeploying the backend."
+    "Correct pipeline category/discovery quality exposed by the supplied 94.9-second MP3 and recheck representative audio.",
+    "Reconstruction remains disabled and has no deployed Serverless endpoint or real inference acceptance.",
+    "Activate general production dispatch only after required paths and quality gates pass."
   ],
   "host_model_offload": {
     "verified_at": "2026-10-03T13:53:39.811869+00:00",
@@ -317,7 +319,62 @@
       ],
       "serverless_workers_stopped": true
     },
-    "ready_for_production_dispatch_activation": true,
-    "production_runtime_dispatch_enabled": false
+    "ready_for_production_dispatch_activation": false,
+    "production_runtime_dispatch_enabled": false,
+    "transport_and_inference_acceptance_passed": true,
+    "all_four_job_types_ready": false,
+    "reconstruction_endpoint_deployed": false,
+    "reconstruction_gpu_inference_verified": false,
+    "user_audio_pipeline_evaluation": {
+      "job_id": "54f3ac6c-bf42-4682-85cd-df60b6ba56b3",
+      "attempt_id": "5bc7211f-1764-4137-9076-b76638b4420f",
+      "provider_job_id": "18a7027a-ec6e-4dba-b4aa-457a49b75a6e-e2",
+      "endpoint_id": "8ewxonopk5ex1p",
+      "status": "completed",
+      "event_sequence": 10,
+      "terminal_SSE_delivered": true,
+      "source_filename": "Bad Quality Tracks 0406 - Track 2.mp3",
+      "source_sha256": "07ef1c3a100befa5f3c2300bb04510e44012e881d908247ceee6f4d3b5ab38a2",
+      "source_duration_seconds": 94.92898,
+      "transcript_word_count": 188,
+      "aligned_segment_count": 4,
+      "audio_download_sha256_verified": true,
+      "generated_audio_sha256": "1de91996a3178422b9071e547364026a9d4a4943b0f719161481527101f0b0d5",
+      "generated_audio_size_bytes": 759782,
+      "provider_delay_seconds": 35.911,
+      "provider_execution_seconds": 31.0,
+      "result_keys": [
+        "flagged",
+        "discovery",
+        "moderation",
+        "transcription",
+        "categorization",
+        "compressed_audio",
+        "content_description"
+      ],
+      "quality_review": {
+        "transcription_generated": true,
+        "manual_transcription_accuracy_reviewed": false,
+        "moderation_returned": {
+          "intent": "safe",
+          "reason": "",
+          "flagged": false,
+          "severity": "none",
+          "flagged_categories": [],
+          "blocked_words_found": []
+        },
+        "category_returned": [
+          "Audio-Described"
+        ],
+        "tags_returned": [
+          "#audio-described"
+        ],
+        "metadata_quality_accepted": false,
+        "reason": "Returned Audio-Described category and generic discovery summary do not describe the political news transcript.",
+        "llm_discovery_enabled": false,
+        "confidence_score_entries": 23773
+      },
+      "provider_worker_stopped_after_job": true
+    }
   }
 }

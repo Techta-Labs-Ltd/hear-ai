@@ -6,6 +6,28 @@
 **Serverless runtime:** Same source and contracts, separate role images and startup policy (section 31)  
 **Canonical source target:** `release/hear-ai-production-v11`
 
+**Latest real-audio evaluation, 2026-10-03:** The supplied 94.9-second
+`Bad Quality Tracks 0406 - Track 2.mp3` completed through the real pipeline
+endpoint. It returned 188 English transcript words, four aligned segments,
+safe moderation, and a verified 759,782-byte mono 64 kbps MP3. Provider queue /
+startup delay was 35.911 seconds; execution was 31.0 seconds. Job ID:
+`54f3ac6c-bf42-4682-85cd-df60b6ba56b3`; provider ID:
+`18a7027a-ec6e-4dba-b4aa-457a49b75a6e-e2`.
+
+Transport and inference completed, but **metadata quality was not accepted**:
+the political news transcript was categorized as `Audio-Described`, with a
+generic discovery summary. The NLI result includes 23,773 confidence entries;
+Qwen LLM discovery is disabled. Fix category selection / threshold calibration
+and discovery quality before claiming pipeline quality readiness. Reconstruction
+also remains undeployed and untested; the previous three job canaries do not
+establish readiness for all four job types. Production dispatch stays disabled.
+
+Local returned artifacts: `outputs/pipeline-track2-20261003/` (excluded from Git).
+They include the redacted request, full returned JSON, transcript, aligned
+segments, verified compressed MP3 and receipt. The original upload / attempt
+artifacts were cleaned up by backend finalization; audio export uses the final
+track media location. The same provider job was used throughout export retries.
+
 **Current Serverless status, 2026-10-03:** Real GPU cleaner, pipeline, and
 transcription jobs passed through the deployed backend and RunPod Serverless.
 Both role images were built, published and checked through Bazel → Docker in
@@ -22,7 +44,8 @@ its heartbeat returned HTTP 200. Both GPU workers stopped after execution.
 Pipeline/transcription endpoint: `8ewxonopk5ex1p`. Cleaner endpoint:
 `e2ysmfujllh9ur`. Actual URLs and evidence are in section 35. General production
 dispatch remains disabled (`HEAR_AI_RUNTIME_V1=false`); the tested deployment is
-ready for that activation. Optional Qwen LLM discovery and Fish reconstruction
+accepted for transport tests; the newer metadata-quality gate above must pass
+before general activation. Optional Qwen LLM discovery and Fish reconstruction
 remain disabled in this deployment.
 
 Host models were offloaded to `/workspace/hear-ai-models`; all 173 files were
@@ -1642,8 +1665,9 @@ The first RunPod key was rejected. Its replacement was accepted and both
 endpoints were created (section 35). Registry authentication is now attached
 to both templates and provider image pulls were verified. Real GPU jobs and
 worker scale-to-zero were subsequently verified (section 35).
-All three real GPU acceptance jobs have now passed (section 35). The deployment
-is ready for production dispatch activation.
+All three real GPU transport / inference canaries passed (section 35). The
+latest supplied-audio evaluation at the top of this runbook exposed category
+and discovery quality issues; reconstruction remains undeployed and untested.
 
 References: [RunPod worker deployment](https://docs.runpod.io/serverless/workers/deploy),
 [endpoint settings](https://docs.runpod.io/serverless/endpoints/endpoint-configurations),
