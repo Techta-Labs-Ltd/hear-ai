@@ -99,6 +99,59 @@
     "private_key_file": "/root/hear-ai-config/config-decryption.key",
     "decrypt_to": "/root/hear-ai-config/production.env",
     "roundtrip_verified": true,
-    "plaintext_persistent_config_removed": true
+    "plaintext_persistent_config_removed": true,
+    "profile": "pod_only"
+  },
+  "serverless": {
+    "requested_deployment_profile": true,
+    "image_build_workflow": "https://github.com/Techta-Labs-Ltd/hear-ai/actions/workflows/publish-serverless-containers.yml",
+    "image_publication_verified": true,
+    "pipeline_target": "pipeline-serverless",
+    "cleaner_target": "magic-clean-natural-serverless",
+    "pipeline_env_file": "/root/hear-ai-config/serverless-pipeline.env",
+    "cleaner_env_file": "/root/hear-ai-config/serverless-cleaner.env",
+    "endpoint_type": "queue",
+    "active_workers": 0,
+    "initial_max_workers_per_endpoint": 1,
+    "serverless_max_concurrent_jobs": 1,
+    "preload_models": true,
+    "idle_eviction": false,
+    "backend_submission_adapter_verified": true,
+    "provider_account_access_verified": false,
+    "images": {
+      "pipeline": {
+        "tag": "ghcr.io/techta-labs-ltd/hear-ai:pipeline-serverless-20261003",
+        "digest": "sha256:7e1a31a220cac843a47153435c502d96d2297a3f49bc783cd4fe594ef61be43c",
+        "immutable_ref": "ghcr.io/techta-labs-ltd/hear-ai@sha256:7e1a31a220cac843a47153435c502d96d2297a3f49bc783cd4fe594ef61be43c",
+        "bazel_context_sha256": "7cbb82c9e43da883189ec4a5c6f63355dffc49079e345ec8c8a7622bb7226001",
+        "docker_cpu_check_passed": true,
+        "gpu_inference_verified": false
+      },
+      "cleaner": {
+        "tag": "ghcr.io/techta-labs-ltd/hear-ai:cleaner-serverless-20261003",
+        "digest": "sha256:2eeefddf57476729f816681be90dc5f03674b13af33ed0ced44cb7a381443802",
+        "immutable_ref": "ghcr.io/techta-labs-ltd/hear-ai@sha256:2eeefddf57476729f816681be90dc5f03674b13af33ed0ced44cb7a381443802",
+        "bazel_context_sha256": "7cbb82c9e43da883189ec4a5c6f63355dffc49079e345ec8c8a7622bb7226001",
+        "docker_cpu_check_passed": true,
+        "gpu_inference_verified": false
+      }
+    },
+    "image_publication_run": "https://github.com/Techta-Labs-Ltd/hear-ai/actions/runs/37130037490",
+    "backend_adapter_pull_request": "https://github.com/Techta-Labs-Ltd/hear-backend/pull/88",
+    "backend_adapter_deployed": false,
+    "backend_tests": {
+      "passed": 1995,
+      "skipped": 26,
+      "lint": "passed",
+      "type_checking": "passed"
+    },
+    "provider_api_access_check": {
+      "checked_at": "2026-10-03T14:45:00Z",
+      "rest_v1_http_status": 401,
+      "graphql_http_status": 401,
+      "rest_v2_http_status": 403
+    },
+    "endpoints_created": false,
+    "real_serverless_job_verified": false
   }
 }

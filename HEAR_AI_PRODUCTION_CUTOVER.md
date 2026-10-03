@@ -1,10 +1,21 @@
 # HEAR AI Production Cutover
 
 **Status:** Production cutover runbook  
-**Target:** Single RunPod/A40 now, role-specific RunPod Serverless workers for migration  
+**Requested target:** RunPod Serverless queue endpoints; use section 34 for the current setup  
 **Canonical Pod runtime:** Bazel-built `runpod-stack` image  
 **Serverless runtime:** Same source and contracts, separate role images and startup policy (section 31)  
 **Canonical source target:** `release/hear-ai-production-v11`
+
+**Current Serverless status, 2026-10-03:** Both role images were built, published
+and checked through Bazel → Docker in the `hear-ai` repository. Production
+worker environments and private deployment plans are prepared. Backend
+Serverless dispatch is implemented in draft PR 88 and passed full CI (1,995
+tests, lint and type checks). Endpoint creation and real Serverless GPU jobs
+remain unverified: the supplied RunPod key returned HTTP 401 on the management
+REST and GraphQL APIs, and HTTP 403 on the newer management API. No Serverless
+endpoint URL has been created. Keep production dispatch disabled. Sections 32
+and 33 record earlier Pod work; their startup commands and proxy URLs do not
+apply to this Serverless deployment.
 
 **Review:** 2026-10-03 — Bazel Docker build/publication, live backend transport
 and a real CPU cleaning job passed. GPU Pipeline and Serverless acceptance remain pending.
@@ -1443,7 +1454,7 @@ removed after successful `hear-ai` publication. The temporary authenticated
 archive transfer service was stopped and removed.
 Cleanup verification: [37127018275](https://github.com/Techta-Labs-Ltd/hear-backend/actions/runs/37127018275).
 
-## 33. RunPod setup and host-model offload, 2026-10-03
+## 33. Pod-only setup and host-model offload, 2026-10-03
 
 Use the already published Bazel-built image:
 
@@ -1515,3 +1526,125 @@ Reference documentation:
 - [RunPod custom templates](https://docs.runpod.io/pods/templates/create-custom-template)
 - [RunPod exposed ports](https://docs.runpod.io/pods/configuration/expose-ports)
 - [GHCR authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+
+## 34. Current RunPod Serverless setup, 2026-10-03
+
+Deploy two **queue-based Serverless endpoints** from these published images.
+The pipeline image handles pipeline and transcription jobs; the cleaner image
+handles natural cleaning jobs. Image build, publication and Docker startup
+structure checks passed through Bazel in
+[hear-ai workflow 37130037490](https://github.com/Techta-Labs-Ltd/hear-ai/actions/runs/37130037490).
+The RunPod SDK loads, required model files are packaged, and the default command
+is `bash /app/scripts/run_serverless.sh`. These checks ran without a GPU; they
+are not real Serverless inference acceptance.
+
+| Endpoint | Published Docker image |
+| --- | --- |
+| Pipeline + transcription | `ghcr.io/techta-labs-ltd/hear-ai:pipeline-serverless-20261003` |
+| Natural cleaner | `ghcr.io/techta-labs-ltd/hear-ai:cleaner-serverless-20261003` |
+
+Use immutable image references when creating templates:
+
+```text
+Pipeline:
+ghcr.io/techta-labs-ltd/hear-ai@sha256:7e1a31a220cac843a47153435c502d96d2297a3f49bc783cd4fe594ef61be43c
+
+Cleaner:
+ghcr.io/techta-labs-ltd/hear-ai@sha256:2eeefddf57476729f816681be90dc5f03674b13af33ed0ced44cb7a381443802
+```
+
+Both images used Bazel context SHA256
+`7cbb82c9e43da883189ec4a5c6f63355dffc49079e345ec8c8a7622bb7226001`.
+Publication receipts are in `docs/verification/production-cutover-20261003.json`.
+Images and image publishing remain owned by `Techta-Labs-Ltd/hear-ai`.
+
+In RunPod, select **Serverless → New Endpoint → Import from Docker Registry**.
+Create one endpoint for each image. Select queue mode, one A40 GPU per worker,
+a 50 GB container disk, active workers 0, max workers 1, idle timeout 5 seconds,
+and FlashBoot enabled. Start with an endpoint execution timeout of 7,200 seconds;
+the backend submission policy additionally limits each job to its attempt
+deadline. Leave Docker entrypoint/start command overrides empty so the image's
+Serverless command runs. No exposed HTTP port or Pod proxy URL is required.
+Configure RunPod registry authentication for the private GHCR package using a
+GitHub username and a classic token with `read:packages` access.
+
+The role environments are already populated with the live backend URL, service
+credential and ownership policy, outside Git, mode `0600`:
+
+- Pipeline: `/root/hear-ai-config/serverless-pipeline.env` and
+  `/root/hear-ai-config/serverless-pipeline.json`.
+- Cleaner: `/root/hear-ai-config/serverless-cleaner.env` and
+  `/root/hear-ai-config/serverless-cleaner.json`.
+
+Use the JSON values as template/endpoint environment variables, or put sensitive
+values into RunPod secrets and reference them in the environment. Private REST
+API deployment plans, including the immutable images and actual worker envs,
+are `/root/hear-ai-config/serverless-pipeline-deployment.json` and
+`/root/hear-ai-config/serverless-cleaner-deployment.json`. They require a valid
+RunPod API key, a private-registry authentication ID and the template IDs
+returned by RunPod before the endpoint objects can be submitted. These plans
+have not been applied. Preserve these private files before replacing the
+current container because `/root` is ephemeral.
+
+Common worker settings are:
+
+```text
+HEAR_RUNTIME_MODE=production
+HEAR_MODEL_ROOT=/models
+HEAR_TEMP_DIR=/audio
+HEAR_SERVERLESS_PRELOAD_MODELS=true
+HEAR_GPU_IDLE_EVICTION_ENABLED=false
+HEAR_SERVERLESS_MAX_CONCURRENT_JOBS=1
+```
+
+The pipeline role is `HEAR_WORKER_ROLE=pipeline`; the cleaner role is
+`HEAR_WORKER_ROLE=magic_clean_natural`. Serverless preloads its image models when
+a worker starts. RunPod terminates idle workers when active workers is zero,
+which releases all their GPU models. Keep HEAR's separate idle eviction disabled
+with Serverless preloading; the entrypoint rejects enabling both.
+The host root model offload is already complete (section 33).
+
+After RunPod creates each endpoint, its URL is:
+
+```text
+https://api.runpod.ai/v2/<ENDPOINT_ID>
+POST /run
+GET /status/<RUNPOD_JOB_ID>
+GET /health
+```
+
+The `/run` body must contain the backend's signed attempt under `input`.
+The provider API key authenticates requests to RunPod; the HEAR service key
+still authenticates worker callbacks to the backend. They serve separate roles.
+
+The backend previously submitted only to Pod `/v1/attempts`. The required
+Serverless transport is now in
+[draft backend PR 88](https://github.com/Techta-Labs-Ltd/hear-backend/pull/88).
+It preserves the canonical signed envelope, uses the remaining attempt lifetime
+for RunPod execution timeout and queue TTL, validates acceptance, and records
+the provider job and endpoint IDs. Transcription uses the pipeline endpoint.
+Full CI passed: 1,995 tests passed, 26 skipped; lint and type checking passed.
+The adapter has not been merged or deployed. After deployment, configure:
+
+```text
+HEAR_AI_TRANSPORT=serverless
+HEAR_RUNPOD_API_KEY=<valid RunPod provider key>
+HEAR_RUNPOD_ENDPOINTS_JSON={"pipeline":"<PIPELINE_ENDPOINT_ID>","magic_clean_natural":"<CLEANER_ENDPOINT_ID>"}
+```
+
+Keep `HEAR_AI_RUNTIME_V1=false` until a real pipeline, transcription and cleaner
+attempt has passed through the deployed Serverless workers with backend claim,
+heartbeat, progress, artifact readback and terminal outcome verified. Confirm
+workers return to zero afterward. The earlier real CPU cleaner canary validates
+the backend contract; it does not validate RunPod Serverless GPU execution.
+
+Current blocker: RunPod rejected the supplied key with HTTP 401 on REST v1 and
+GraphQL, and HTTP 403 on REST v2. No endpoints or real Serverless jobs have been
+created. A valid key with Serverless/template management access is needed to
+apply the prepared deployment and run the real canaries. Production is not yet
+ready to receive jobs through Serverless.
+
+References: [RunPod worker deployment](https://docs.runpod.io/serverless/workers/deploy),
+[endpoint settings](https://docs.runpod.io/serverless/endpoints/endpoint-configurations),
+[queue requests](https://docs.runpod.io/serverless/endpoints/send-requests),
+and [endpoint creation API](https://docs.runpod.io/api-reference/endpoints/POST/endpoints).

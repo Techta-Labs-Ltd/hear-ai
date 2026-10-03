@@ -11,3 +11,5 @@ sh_binary(
     srcs = ["scripts/publish_existing_runpod_image.sh"],
     data = [":image_relink_context"],
 )
+
+sh_binary(name="check_serverless_image", srcs=["scripts/check_serverless_image.sh"])
