@@ -1,0 +1,71 @@
+name: Build HEAR AI Serverless images
+on:
+  push:
+    branches: [ops/hear-ai-runpod-access-20261003]
+    paths: [.github/workflows/publish-serverless-containers.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: hear-ai-serverless-image-build
+  cancel-in-progress: false
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: pipeline-serverless
+            tag: pipeline-serverless-20261003
+          - target: magic-clean-natural-serverless
+            tag: cleaner-serverless-20261003
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GHCR_TOKEN: ${{ github.token }}
+      GHCR_USERNAME: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the ephemeral Docker builder
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          curl -fLsS https://github.com/bazelbuild/bazel/releases/download/8.4.2/bazel-8.4.2-linux-x86_64 -o /tmp/hear-bazel
+          printf '%s  %s\n' 4dc8e99dfa802e252dac176d08201fd15c542ae78c448c8a89974b6f387c282c /tmp/hear-bazel | sha256sum -c -
+          chmod 0755 /tmp/hear-bazel
+          df -h /
+      - name: Restore the verified runtime source and add hear-ai source ownership
+        run: |
+          printf '%s  %s\n' 6977364a59235175573e577bfb8cf2a528cf08deaf1b8959ca31fd65860682fe .codex/hear-ai-cutover-source.tar.gz | sha256sum -c -
+          mkdir /tmp/hear-serverless-source
+          tar -xzf .codex/hear-ai-cutover-source.tar.gz -C /tmp/hear-serverless-source
+          python - <<'LABEL'
+          from pathlib import Path
+          file=Path('/tmp/hear-serverless-source/Dockerfile')
+          text=file.read_text()
+          marker='FROM ${CUDA_IMAGE} AS runtime-base\n'
+          assert marker in text
+          text=text.replace(marker,marker+'LABEL org.opencontainers.image.source="https://github.com/Techta-Labs-Ltd/hear-ai"\n',1)
+          file.write_text(text)
+          LABEL
+          cp scripts/check_serverless_image.sh /tmp/hear-serverless-source/scripts/
+          python - <<'BAZEL_TARGET'
+          from pathlib import Path
+          file=Path('/tmp/hear-serverless-source/BUILD.bazel')
+          file.write_text(file.read_text()+'\nsh_binary(name="check_serverless_image", srcs=["scripts/check_serverless_image.sh"])\n')
+          BAZEL_TARGET
+      - name: Build and publish the Serverless target through Bazel
+        working-directory: /tmp/hear-serverless-source
+        run: |
+          export DOCKER_CONFIG="$(mktemp -d)"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          /tmp/hear-bazel run //:runpod_image -- --target "${{ matrix.target }}" --tag "ghcr.io/techta-labs-ltd/hear-ai:${{ matrix.tag }}" --push
+          /tmp/hear-bazel run //:check_serverless_image -- "ghcr.io/techta-labs-ltd/hear-ai:${{ matrix.tag }}"
+          docker buildx imagetools inspect "ghcr.io/techta-labs-ltd/hear-ai:${{ matrix.tag }}" > "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
+          sha256sum bazel-bin/hear-runtime-context.tar >> "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-publication
+          path: ${{ matrix.target }}-publication.txt
+          retention-days: 7
