@@ -1,15 +1,13 @@
-"""Cleaner v2 execution contract. Contains no transport or business persistence.
+"""Cleaning engine contracts: plan, runtime identity, and validation evidence.
 
-Tickets must be authenticated by the ingress before these values are used.
-Schema validation is not authorization. No profile options are inferred here.
+Schema validation is not authorization; options arrive validated by
+``CleaningProfiles`` and the engine identity is pinned by the loader.
 """
 
-from datetime import datetime
 from enum import StrEnum
-from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 Identity = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")]
@@ -84,7 +82,8 @@ class CleanPlan(Contract):
     profile_version: Identity
     catalogue_sha256: Digest
     runtime: RuntimeIdentity
-    attenuation_limit_db: Literal[12, 18, 24] | None
+    attenuation_limit_db: Annotated[int, Field(ge=6, le=60)] | None
+    post_filter: bool = False
     prompt_sha256: Digest | None
     prompt_text: str | None = Field(default=None, min_length=1, max_length=160)
     prompt_action: Literal["isolate", "remove"] = "isolate"
@@ -108,77 +107,6 @@ class CleanPlan(Contract):
         ):
             raise ValueError("prompt-conditioned separation is no longer supported")
         return self
-
-
-class AttemptTicket(Contract):
-    contract_version: Literal["hear.cleaner.v2"]
-    backend_id: Identity
-    tenant_scope: Identity
-    job_id: Identity
-    attempt_id: Identity
-    fence: int = Field(gt=0)
-    provider: Literal["pod", "serverless"]
-    purpose: Literal["sample_preview", "full_candidate"]
-    input: SourceIdentity
-    expected_active_audio_revision: Identity
-    plan: CleanPlan
-    sample: SampleInterval | None
-    artifact_prefix: str
-    manifest_key: str
-    deadline: datetime
-    heartbeat_seconds: int = Field(ge=1, le=60)
-    lease_seconds: int = Field(gt=1, le=3600)
-    correlation_id: Identity
-
-    @field_validator("deadline")
-    @classmethod
-    def aware_deadline(cls, value: datetime) -> datetime:
-        if value.utcoffset() is None:
-            raise ValueError("deadline requires a timezone")
-        return value
-
-    @model_validator(mode="after")
-    def validate_attempt(self):
-        parts = self.artifact_prefix.split("/")
-        if any(part in ("", ".", "..") for part in parts) or "\\" in self.artifact_prefix:
-            raise ValueError("artifact prefix must be a canonical relative object path")
-        if self.attempt_id not in parts or self.job_id not in parts or self.backend_id not in parts:
-            raise ValueError("artifact prefix must identify backend, job and attempt")
-        if self.manifest_key != str(PurePosixPath(self.artifact_prefix) / "manifest.json"):
-            raise ValueError("manifest must be inside the attempt prefix")
-        if self.lease_seconds <= self.heartbeat_seconds:
-            raise ValueError("lease must exceed heartbeat interval")
-        if (self.purpose == "sample_preview") != (self.sample is not None):
-            raise ValueError("only sample previews require a sample interval")
-        if self.sample and self.sample.end_frame > self.input.frames:
-            raise ValueError("sample exceeds the pinned source")
-        return self
-
-
-class StorageGrant(Contract):
-    """Separate from semantic identity; SecretStr prevents accidental logging."""
-
-    reference: Identity
-    token: SecretStr
-    expires_at: datetime
-
-    @field_validator("expires_at")
-    @classmethod
-    def aware_expiry(cls, value: datetime) -> datetime:
-        if value.utcoffset() is None:
-            raise ValueError("grant expiry requires a timezone")
-        return value
-
-
-class ArtifactIdentity(Contract):
-    role: Literal[
-        "cleaned_master", "delivery_audio", "comparison_source", "edit_map", "validation_report"
-    ]
-    object_key: str = Field(min_length=1, max_length=2048)
-    object_version: str = Field(min_length=1, max_length=1024)
-    sha256: Digest
-    size_bytes: int = Field(gt=0)
-    content_type: Literal["audio/flac", "audio/mpeg", "application/json"]
 
 
 class ContentWarningInterval(SampleInterval):
@@ -238,107 +166,4 @@ class ValidationSummary(Contract):
                 and "speech_evidence_incomplete" not in self.warning_codes
             ):
                 raise ValueError("truncated speech evidence requires a warning")
-        return self
-
-
-class CleanResultManifest(Contract):
-    contract_version: Literal["hear.cleaner.result.v2"]
-    backend_id: Identity
-    tenant_scope: Identity
-    job_id: Identity
-    attempt_id: Identity
-    fence: int = Field(gt=0)
-    purpose: Literal["sample_preview", "full_candidate"]
-    source: SourceIdentity
-    expected_active_audio_revision: Identity
-    plan: CleanPlan
-    plan_sha256: Digest
-    sample: SampleInterval | None
-    deadline: datetime
-    completed_at: datetime
-    outcome: Literal["succeeded", "failed", "cancelled"]
-    error_code: ErrorCode | None
-    validation: ValidationSummary
-    artifacts: tuple[ArtifactIdentity, ...]
-    timing: Literal["identity", "sample_identity"]
-    correlation_id: Identity
-
-    @model_validator(mode="after")
-    def validate_result(self):
-        if self.deadline.utcoffset() is None or self.completed_at.utcoffset() is None:
-            raise ValueError("result timestamps require a timezone")
-        if any(
-            interval.end_frame > self.source.frames
-            for interval in self.validation.source_warning_intervals
-        ):
-            raise ValueError("warning interval exceeds pinned source")
-        speech = self.validation.speech_activity
-        if speech:
-            output_channels = self.source.channels
-            if (
-                speech.source_sha256 != self.source.sha256
-                or len(speech.source_active_frames) != self.source.channels
-                or len(speech.output_active_frames) != output_channels
-                or any(
-                    v > self.source.frames
-                    for v in (*speech.source_active_frames, *speech.output_active_frames)
-                )
-                or any(
-                    v.end_frame > self.source.frames or v.channel >= self.source.channels
-                    for v in speech.source_loss_intervals
-                )
-            ):
-                raise ValueError("speech evidence does not match pinned source/layout")
-        if len({artifact.role for artifact in self.artifacts}) != len(self.artifacts):
-            raise ValueError("duplicate artifact role")
-        if len({artifact.object_key for artifact in self.artifacts}) != len(self.artifacts):
-            raise ValueError("duplicate artifact object")
-        if (self.purpose == "sample_preview") != (self.sample is not None):
-            raise ValueError("sample identity does not match purpose")
-        expected_timing = "sample_identity" if self.sample else "identity"
-        if self.timing != expected_timing:
-            raise ValueError("timing does not match purpose")
-        if self.outcome == "succeeded":
-            if self.error_code is not None or self.completed_at >= self.deadline:
-                raise ValueError("successful result requires no error and a live deadline")
-            if self.validation.hard_integrity != "passed":
-                raise ValueError("successful result requires hard integrity to pass")
-            if self.validation.wanted_content in ("rejected", "not_applicable"):
-                raise ValueError("successful result requires wanted-content checks")
-            required = {"cleaned_master", "delivery_audio", "validation_report"}
-            if not required.issubset({artifact.role for artifact in self.artifacts}):
-                raise ValueError("successful result is missing required artifacts")
-        elif self.error_code is None or self.artifacts:
-            raise ValueError("failed/cancelled results require an error and no candidate artifacts")
-        elif (self.outcome == "cancelled") != (self.error_code == ErrorCode.CANCELLED):
-            raise ValueError("cancelled outcome requires the cancelled error code")
-        elif (
-            self.validation.hard_integrity != "not_applicable"
-            or self.validation.wanted_content != "not_applicable"
-        ):
-            raise ValueError("failed/cancelled results cannot claim candidate validation")
-        return self
-
-
-class TerminalReference(Contract):
-    """Compact internal notice; backend must verify the referenced bundle."""
-
-    backend_id: Identity
-    tenant_scope: Identity
-    job_id: Identity
-    attempt_id: Identity
-    fence: int = Field(gt=0)
-    object_key: str = Field(min_length=1, max_length=2048)
-    object_version: str = Field(min_length=1, max_length=1024)
-    sha256: Digest
-    size_bytes: int = Field(gt=0, le=256 * 1024)
-    outcome: Literal["succeeded", "failed", "cancelled"]
-    error_code: ErrorCode | None
-
-    @model_validator(mode="after")
-    def validate_outcome(self):
-        if (self.outcome == "succeeded") != (self.error_code is None):
-            raise ValueError("terminal outcome/error mismatch")
-        if (self.outcome == "cancelled") != (self.error_code == ErrorCode.CANCELLED):
-            raise ValueError("cancelled outcome/error mismatch")
         return self

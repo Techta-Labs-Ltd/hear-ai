@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 
@@ -87,4 +88,5 @@ class ConsumerEntrypoint:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
     asyncio.run(ConsumerEntrypoint().run())

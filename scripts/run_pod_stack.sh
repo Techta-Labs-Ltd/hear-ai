@@ -3,12 +3,42 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 default_env_file="${project_root}/.env"
-if [[ -f /root/hear-ai-v11/runtime.env ]]; then
+if [[ -f /root/hear-ai-config/production.env ]]; then
+  default_env_file=/root/hear-ai-config/production.env
+elif [[ -f /root/hear-ai-config/runtime.env ]]; then
+  default_env_file=/root/hear-ai-config/runtime.env
+elif [[ -f /root/hear-ai-v11/runtime.env ]]; then
   default_env_file=/root/hear-ai-v11/runtime.env
 fi
 env_file="${HEAR_ENV_FILE:-${default_env_file}}"
 if [[ -f "$env_file" ]]; then
   source "$project_root/scripts/load-env.sh" "$env_file"
+elif [[ "${HEAR_RUNTIME_MODE:-}" == "production" ]]; then
+  printf 'Production environment file missing: %s\n' "$env_file" >&2
+  exit 1
+fi
+
+if [[ "${HEAR_RUNTIME_MODE:-}" == "production" ]]; then
+  test -n "${HEAR_IMAGE_REVISION:-}" || { echo "HEAR_IMAGE_REVISION missing" >&2; exit 1; }
+  export HEAR_MODEL_ROOT="${HEAR_MODEL_ROOT:-/models}"
+  export FISH_SPEECH_MODEL_ROOT="$HEAR_MODEL_ROOT"
+  export HEAR_TEMP_DIR="${HEAR_RUNTIME_ROOT:-/root/hear-ai-runtime}/scratch"
+  export HEAR_HOST_JOB_LOCK_PATH="${HEAR_RUNTIME_ROOT:-/root/hear-ai-runtime}/admission.lock"
+  mkdir -p "$HEAR_TEMP_DIR"
+  if [[ -f "$HEAR_MODEL_ROOT/sound-cleanup-release.env" ]]; then
+    # Values recorded after source verification and export during image build.
+    source "$project_root/scripts/load-env.sh" "$HEAR_MODEL_ROOT/sound-cleanup-release.env"
+  fi
+  if [[ -f "$HEAR_MODEL_ROOT/sound-cleanup-v1-runtime/manifest.json" ]]; then
+    export HEAR_SOUND_CLEANUP_BUNDLE="$HEAR_MODEL_ROOT/sound-cleanup-v1-runtime"
+  fi
+  if [[ -f "$HEAR_MODEL_ROOT/sound-cleanup-specialist/runtime/manifest.json" ]]; then
+    export HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE="$HEAR_MODEL_ROOT/sound-cleanup-specialist/runtime"
+  fi
+  if [[ "${HEAR_FISH_LICENSE_APPROVED:-false}" != "true" ]]; then
+    HEAR_POD_STACK_ROLES="$(printf '%s' "${HEAR_POD_STACK_ROLES:-pipeline,magic_clean_natural}" | tr ',' '\n' | grep -vx reconstruction | paste -sd, -)"
+    export HEAR_POD_STACK_ROLES
+  fi
 fi
 
 roles="${HEAR_POD_STACK_ROLES:-pipeline}"

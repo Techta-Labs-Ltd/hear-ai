@@ -26,8 +26,8 @@ class FishNF4Assets:
     @staticmethod
     def validate_model_root(model_root: Path) -> Path:
         resolved = model_root.expanduser().resolve()
-        if resolved.is_relative_to("/workspace"):
-            raise ValueError("model_storage_must_not_use_workspace")
+        if resolved.is_relative_to(Path(__file__).resolve().parents[2]):
+            raise ValueError("model_storage_must_not_use_source_checkout")
         return resolved
 
     @classmethod

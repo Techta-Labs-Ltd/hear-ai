@@ -38,6 +38,13 @@ class AudioQualityGate:
         warnings = {"wanted_content_requires_review"}
         intervals: list[ContentWarningInterval] = []
         truncated = False
+        # Block energies are collected first so that "content disappeared" and
+        # "possible wanted content loss" are judged only on blocks that carry
+        # programme material. A strong denoiser legitimately drives noise-only
+        # blocks towards silence; that is the job, not a defect.
+        original_blocks: list[np.ndarray] = []
+        output_blocks: list[np.ndarray] = []
+        block_frames: list[int] = []
         with sf.SoundFile(source) as original, sf.SoundFile(processed) as output:
             expected_channels = original.channels
             if (
@@ -73,49 +80,55 @@ class AudioQualityGate:
                     raise CleanExecutionError(
                         ErrorCode.INVALID_AUDIO, "generated content on silent source"
                     )
-                active_channels = original_rms > 1e-4
-                if np.any(active_channels & (output_rms < original_rms * 0.01)):
-                    raise CleanExecutionError(
-                        ErrorCode.INVALID_AUDIO, "channel content disappeared"
-                    )
-                code: Literal["possible_wanted_content_loss"] | None = None
-                ratio = 1.0
-                if np.any(active_channels):
-                    ratio = float(
-                        np.min(output_rms[active_channels] / original_rms[active_channels])
-                    )
-                    if ratio < 0.5:
-                        warnings.add("possible_wanted_content_loss")
-                        code = "possible_wanted_content_loss"
-                if code:
-                    start = frames - len(before)
-                    if (
-                        intervals
-                        and intervals[-1].code == code
-                        and intervals[-1].end_frame == start
-                    ):
-                        previous = intervals.pop()
-                        intervals.append(
-                            ContentWarningInterval(
-                                start_frame=previous.start_frame,
-                                end_frame=frames,
-                                code=code,
-                                minimum_rms_ratio=min(previous.minimum_rms_ratio, ratio),
-                            )
-                        )
-                    elif len(intervals) < 128:
-                        intervals.append(
-                            ContentWarningInterval(
-                                start_frame=start,
-                                end_frame=frames,
-                                code=code,
-                                minimum_rms_ratio=ratio,
-                            )
-                        )
-                    else:
-                        truncated = True
+                original_blocks.append(original_rms)
+                output_blocks.append(output_rms)
+                block_frames.append(len(before))
             if frames != original.frames:
                 raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "engine decode is incomplete")
+        source_rms = np.array(original_blocks)
+        result_rms = np.array(output_blocks)
+        # Energy alone cannot tell quiet speech from noise, so the hard rule is
+        # file-level; speech preservation is checked with a VAD by the caller.
+        total_source = np.sqrt(np.sum(source_rms**2, axis=0))
+        total_result = np.sqrt(np.sum(result_rms**2, axis=0))
+        active = total_source > 1e-4
+        if np.any(active & (total_result < total_source * 0.1)):
+            raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "channel content disappeared")
+        # Review hints only for blocks within 12 dB of the loudest block.
+        loud = source_rms >= np.maximum(source_rms.max(axis=0) * 0.25, 1e-4)
+        position = 0
+        for index, length in enumerate(block_frames):
+            start = position
+            position += length
+            judged = loud[index]
+            if not np.any(judged):
+                continue
+            ratio = float(np.min(result_rms[index][judged] / source_rms[index][judged]))
+            if ratio >= 0.5:
+                continue
+            warnings.add("possible_wanted_content_loss")
+            code: Literal["possible_wanted_content_loss"] = "possible_wanted_content_loss"
+            if intervals and intervals[-1].code == code and intervals[-1].end_frame == start:
+                previous = intervals.pop()
+                intervals.append(
+                    ContentWarningInterval(
+                        start_frame=previous.start_frame,
+                        end_frame=position,
+                        code=code,
+                        minimum_rms_ratio=min(previous.minimum_rms_ratio, ratio),
+                    )
+                )
+            elif len(intervals) < 128:
+                intervals.append(
+                    ContentWarningInterval(
+                        start_frame=start,
+                        end_frame=position,
+                        code=code,
+                        minimum_rms_ratio=ratio,
+                    )
+                )
+            else:
+                truncated = True
         speech = None
         if self.speech is None:
             warnings.add("speech_activity_unavailable")

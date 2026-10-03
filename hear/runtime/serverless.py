@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 from datetime import UTC, datetime
 
 import httpx
@@ -35,6 +36,7 @@ class ServerlessRuntime:
         self._attempt_stream = AttemptStream(role, executor, backend)
         self._provider = provider
         self._readiness = readiness
+        self._max_concurrent_jobs = max_concurrent_jobs
         self._admission = asyncio.Semaphore(max_concurrent_jobs)
 
     def _runpod(self):
@@ -63,6 +65,7 @@ class ServerlessRuntime:
                 "attempt_id": envelope.attempt_id,
             }
             return
+        prepared = None
         try:
             if self._readiness is not None and not self._readiness.is_ready():
                 raise RuntimeError("runtime_not_ready")
@@ -70,6 +73,7 @@ class ServerlessRuntime:
             if isinstance(attempt, AttemptRejection):
                 yield {"event": attempt.event, **attempt.data}
                 return
+            prepared = attempt
             async for event in self._attempt_stream.stream(attempt):
                 # Returning RunPod output alone does not persist the result in Hear.
                 if event.event == ExecutionEventType.OUTCOME:
@@ -85,16 +89,23 @@ class ServerlessRuntime:
                     ExecutionEventType.ARTIFACT_PREPARED,
                     ExecutionEventType.OUTCOME,
                 }:
-                    provider.serverless.progress_update(
-                        job,
-                        (
-                            f"{event.stage or event.event.value}:"
-                            f"{event.progress_pct if event.progress_pct is not None else ''}"
-                        ),
-                    )
+                    try:
+                        provider.serverless.progress_update(
+                            job,
+                            (
+                                f"{event.stage or event.event.value}:"
+                                f"{event.progress_pct if event.progress_pct is not None else ''}"
+                            ),
+                        )
+                    except (OSError, httpx.HTTPError):
+                        logging.getLogger(__name__).warning("Optional provider progress update failed")
                 yield event.model_dump(mode="json")
         finally:
-            self._admission.release()
+            try:
+                if prepared is not None:
+                    await prepared.close()
+            finally:
+                self._admission.release()
 
     @staticmethod
     async def _deliver(callback, *args) -> None:
@@ -124,6 +135,7 @@ class ServerlessRuntime:
             {
                 "handler": self.handler,
                 "return_aggregate_stream": False,
+                "concurrency_modifier": lambda current: self._max_concurrent_jobs,
             }
         )
 

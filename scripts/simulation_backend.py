@@ -12,7 +12,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from hear.contracts.jobs import AttemptEnvelope
 from hear.contracts.outcomes import ExecutionOutcome
@@ -35,6 +35,7 @@ class SimulationBackend:
         self.app.add_api_route("/simulation/register", self.register, methods=["POST"])
         self.app.add_api_route("/simulation/summary", self.summary, methods=["GET"])
         self.app.add_api_route("/source/{name}", self.source, methods=["GET"])
+        self.app.add_api_route("/api/v1/sse/tracks/{track_id}/events", self.sse, methods=["GET"])
         self.app.add_api_route(
             "/api/v1/internal/ai/runtime/protocol", self.protocol, methods=["GET"]
         )
@@ -79,8 +80,53 @@ class SimulationBackend:
                 "status": "pending",
                 "events": [],
                 "claims": 0,
+                "sse": [],
             }
+            self.record_sse(self.attempts[envelope.attempt_id], "submitted", {})
         return {"registered": True, "attempt_id": envelope.attempt_id}
+
+    @staticmethod
+    def record_sse(item: dict, event: str, data: dict) -> None:
+        history = item.setdefault("sse", [])
+        history.append({"id": len(history) + 1, "event": event, "data": data})
+
+    async def sse(self, track_id: str, request: Request):
+        self.authenticate(request)
+        item = next(
+            (
+                value
+                for value in self.attempts.values()
+                if value["envelope"]["track_id"] == track_id
+            ),
+            None,
+        )
+        if item is None:
+            raise HTTPException(404, "simulation_track_not_registered")
+        try:
+            cursor = int(request.headers.get("last-event-id", "0"))
+        except ValueError:
+            raise HTTPException(400, "invalid_last_event_id") from None
+
+        async def stream():
+            nonlocal cursor
+            while not await request.is_disconnected():
+                async with self.lock:
+                    events = [value.copy() for value in item.get("sse", []) if value["id"] > cursor]
+                    terminal = item["status"] in {"completed", "failed", "cancelled"}
+                for value in events:
+                    cursor = value["id"]
+                    yield f"id: {cursor}\nevent: {value['event']}\ndata: {json.dumps(value['data'])}\n\n"
+                if terminal:
+                    return
+                if not events:
+                    yield ": keepalive\n\n"
+                await asyncio.sleep(0.2)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     async def source(self, name: str):
         path = self.root / "sources" / self.safe(name)
@@ -141,6 +187,7 @@ class SimulationBackend:
                 self.max_active = max(
                     self.max_active, sum(self.lease_live(x) for x in self.attempts.values())
                 )
+                self.record_sse(item, "processing", {"attempt_id": attempt_id})
                 self.persist()
                 return {"decision": "execute", "lease_seconds": 90, "heartbeat_seconds": 15}
             if request.headers.get("x-ai-worker-id") != item.get("worker") or request.headers.get(
@@ -149,11 +196,13 @@ class SimulationBackend:
                 raise HTTPException(403, "worker_identity_mismatch")
             if action == "heartbeat":
                 item["last_heartbeat"] = time.time()
+                item["heartbeats"] = item.get("heartbeats", 0) + 1
                 return {"accepted": True}
             if action == "events":
                 item["events"].append(
                     {k: payload.get(k) for k in ("event", "stage", "sequence", "progress_pct")}
                 )
+                self.record_sse(item, payload.get("event", "progress"), item["events"][-1])
                 self.persist()
                 return {"accepted": True}
             if action != "outcome":
@@ -185,6 +234,9 @@ class SimulationBackend:
                 )
             item.update(
                 status=outcome.status, completed_at=time.time(), outcome=payload, readback=verified
+            )
+            self.record_sse(
+                item, str(outcome.status), {"attempt_id": attempt_id, "status": str(outcome.status)}
             )
             self.persist()
             return {"accepted": True, "simulation": True}

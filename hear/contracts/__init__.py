@@ -1,4 +1,3 @@
-from .errors import ExecutionError, ExecutionErrorCode
 from .events import ExecutionEvent, ExecutionEventType
 from .jobs import (
     ArtifactStorage,
@@ -17,8 +16,6 @@ __all__ = [
     "ArtifactStorage",
     "AttemptEnvelope",
     "ClaimDecision",
-    "ExecutionError",
-    "ExecutionErrorCode",
     "ExecutionEvent",
     "ExecutionEventType",
     "ExecutionOutcome",

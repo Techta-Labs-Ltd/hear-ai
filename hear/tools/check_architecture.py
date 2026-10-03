@@ -40,7 +40,8 @@ class ArchitectureChecker:
             allows_lazy_imports = relative in {
                 Path("hear/bootstrap.py"),
                 Path("hear/inference/fish_speech.py"),
-                Path("hear/inference/magic_clean.py"),
+                # Optional Fish dependencies load only in the supervised child.
+                Path("hear/inference/fish_nf4_loader.py"),
                 Path("hear/inference/text_generation.py"),
             }
             executable_seen = False

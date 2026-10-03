@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import os
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from hear.contracts.cleaning import PROFILE_VERSION, CleaningProfiles, MagicCleanProfile
 from hear.contracts.sound_cleanup import SoundCleanupOptions
+from hear.runtime.cleaner.asset_probe import PinnedAssetSet
 from hear.runtime.cleaner.deepfilter_loader import PinnedDeepFilterAssets, PinnedDeepFilterFactory
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
 from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
@@ -56,6 +58,12 @@ class DeepFilterNetCleaner:
             device,
         )
         self._assets = assets
+        self._pinned_assets = PinnedAssetSet(
+            (
+                (assets.config_path, self.config_sha256, 1024 * 1024),
+                (assets.checkpoint_path, self.checkpoint_sha256, None),
+            )
+        )
         self._sound_cleanup = sound_cleanup_service
         self._budget = budget
         self._policy = ContextualPolicy(480_000, 48_000)
@@ -80,12 +88,18 @@ class DeepFilterNetCleaner:
 
     def is_ready(self) -> bool:
         try:
-            self._verify_file(self._assets.config_path, self.config_sha256)
-            self._verify_file(self._assets.checkpoint_path, self.checkpoint_sha256)
+            self._pinned_assets.verify()
             self._factory.validate_identity(self._identity)
             return self._dsp.is_ready()
         except Exception:
             return False
+
+    def warmup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="hear-deepfilter-warmup-") as raw:
+            guard = ResourceGuard(
+                self._budget, Path(raw), time.monotonic() + 300, threading.Event()
+            )
+            self._factory.open(guard).close()
 
     def clean(
         self,
@@ -104,9 +118,9 @@ class DeepFilterNetCleaner:
         phase_started = started
         options = CleaningProfiles.validate(options)
         sound_options = SoundCleanupOptions.model_validate(options.get("sound_cleanup", {}))
-        if (sound_options.enabled or options.get("reduce_stationary_noise")) and getattr(
-            self, "_sound_cleanup", None
-        ) is None:
+        if (
+            sound_options.enabled or options.get("reduce_stationary_noise")
+        ) and self._sound_cleanup is None:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "sound_cleanup_not_provisioned")
         remaining = (deadline - datetime.now(UTC)).total_seconds()
         guard = ResourceGuard(
@@ -144,6 +158,7 @@ class DeepFilterNetCleaner:
             catalogue_sha256=hashlib.sha256(PROFILE_VERSION.encode()).hexdigest(),
             runtime=self._identity,
             attenuation_limit_db=options["attenuation_limit_db"],
+            post_filter=options["post_filter"],
             prompt_sha256=None,
             channel_policy="preserve",
             mono_acknowledged=False,
@@ -165,6 +180,11 @@ class DeepFilterNetCleaner:
         phase_started = time.perf_counter()
         AudioMasteringService.scan(processed, guard, rate=48000, channels=channels, frames=frames)
         quality = AudioQualityGate().evaluate(model_input, processed, plan, guard)
+        speech_report = {"status": "analyser_not_provisioned"}
+        if self._sound_cleanup is not None:
+            speech_report = self.speech_preservation(
+                self._sound_cleanup.analyser, model_input, processed, guard
+            )
         timings["quality_checks_seconds"] = time.perf_counter() - phase_started
         phase_started = time.perf_counter()
         sound_report = {"enabled": False, "status": "not_requested"}
@@ -192,9 +212,11 @@ class DeepFilterNetCleaner:
                     processed, background_output, background_evidence, guard
                 ),
             }
-            background_probability, _ = self._sound_cleanup.analyser._vad(background_output, guard)
+            background_probability = self._sound_cleanup.analyser.speech_probability(
+                background_output, guard
+            )
             anchors = background_evidence.speech >= 0.8
-            lost = anchors & (background_probability.max(axis=1) < 0.1)
+            lost = anchors & (background_probability < 0.1)
             background_report["lost_high_confidence_speech_frames"] = int(lost.sum())
             if int(lost.sum()) > 1:
                 background_report["status"] = "rejected_speech_activity_loss"
@@ -232,6 +254,11 @@ class DeepFilterNetCleaner:
         os.replace(mastered.master, target)
         os.replace(mastered.delivery, delivery)
         warnings = list(quality.warning_codes)
+        if speech_report.get("status") != "analyser_not_provisioned":
+            # The VAD comparison supersedes the energy gate's missing-analyser notice.
+            warnings = [code for code in warnings if code != "speech_activity_unavailable"]
+        if speech_report.get("status") == "review_required":
+            warnings.append("possible_speech_loss")
         if sound_report.get("status") == "partial":
             warnings.append("sound_cleanup_some_events_need_review")
         target_lufs = (-19.0 if channels == 1 else -16.0) if options["auto_level"] else None
@@ -271,18 +298,33 @@ class DeepFilterNetCleaner:
             "technical_validation": "passed",
             "perceptual_review_required": True,
             "content_validation": quality.model_dump(mode="json"),
+            "speech_preservation": speech_report,
+        }
+
+    @staticmethod
+    def speech_preservation(analyser, source: Path, processed: Path, guard) -> dict:
+        """Fail when confidently voiced frames vanish; energy checks cannot see this."""
+        before = analyser.speech_probability(source, guard)
+        after = analyser.speech_probability(processed, guard)
+        anchors = before >= 0.8
+        lost = anchors & (after < 0.1)
+        anchor_count = int(anchors.sum())
+        lost_count = int(lost.sum())
+        allowed = max(2, anchor_count // 100)
+        if lost_count > allowed:
+            raise CleanExecutionError(
+                ErrorCode.INVALID_AUDIO,
+                f"speech_activity_lost:{lost_count}_of_{anchor_count}_voiced_frames",
+            )
+        return {
+            "status": "review_required" if lost_count else "passed",
+            "voiced_frames": anchor_count,
+            "lost_voiced_frames": lost_count,
+            "allowed_lost_frames": allowed,
+            "step_frames": int(getattr(analyser, "STEP", 1536)),
         }
 
     def close(self) -> None:
         self._engine.close()
         if self._sound_cleanup is not None:
             self._sound_cleanup.close()
-
-    @staticmethod
-    def _verify_file(path: Path, expected: str) -> None:
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            while block := stream.read(1024 * 1024):
-                digest.update(block)
-        if digest.hexdigest() != expected:
-            raise RuntimeError("deepfilter_asset_digest_mismatch")

@@ -88,6 +88,11 @@ class SoundAnalyser:
             self.assets.manifest_sha256,
         )
 
+    def speech_probability(self, path: Path, guard: ResourceGuard) -> np.ndarray:
+        """Per-step Silero speech probability (max over channels) on the 48 kHz grid."""
+        probability, _ = self._vad(path, guard)
+        return probability.max(axis=1)
+
     def _vad(self, path: Path, guard: ResourceGuard) -> tuple[np.ndarray, np.ndarray]:
         model = torch.jit.load(str(self.assets.path("silero_vad.jit")), map_location="cpu").eval()
         with sf.SoundFile(path) as audio:

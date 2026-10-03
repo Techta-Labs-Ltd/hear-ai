@@ -57,3 +57,34 @@ class TestRuntimeBootstrap:
 
         assert snapshot["checks"]["scratch"] is False
         assert (tmp_path / "scratch").is_dir()
+
+
+    def test_model_paths_env_redirects_manifest_models(self, tmp_path):
+        custom = tmp_path / "asr"
+        bootstrap = RuntimeBootstrap(
+            {"HEAR_MODEL_ROOT": str(tmp_path / "models"), "HEAR_MODEL_PATHS_JSON": f'{{"qwen3-asr-1.7b": "{custom}"}}'}
+        )
+        assert bootstrap._model_path("qwen3-asr-1.7b") == custom
+        assert bootstrap._model_path("toxic-bert") == tmp_path / "models" / "toxic-bert"
+        with pytest.raises(ValueError, match="unknown_model_override"):
+            RuntimeBootstrap({"HEAR_MODEL_PATHS_JSON": '{"missing": "/opt/x"}'})
+        with pytest.raises(ValueError, match="FISH_SPEECH_MODEL_ROOT"):
+            RuntimeBootstrap({"HEAR_MODEL_PATHS_JSON": '{"fish-speech-s2-pro": "/opt/x"}'})
+
+    def test_cleaner_model_directory_defaults_under_model_root(self, tmp_path):
+        from hear.config import RuntimeSettings
+
+        settings = RuntimeSettings.from_environment({"HEAR_MODEL_ROOT": str(tmp_path)})
+        assert settings.magic_clean_model_directory == tmp_path / "magic-clean" / "DeepFilterNet3"
+        custom = RuntimeSettings.from_environment(
+            {"HEAR_MODEL_ROOT": str(tmp_path), "HEAR_MAGIC_CLEAN_MODEL_DIR": str(tmp_path / "df3")}
+        )
+        assert custom.magic_clean_model_directory == tmp_path / "df3"
+        with pytest.raises(ValueError, match="model_path_must_be_absolute"):
+            RuntimeSettings.from_environment({"HEAR_MODEL_PATHS_JSON": '{"toxic-bert": "hear/x"}'})
+        from hear.config import PROJECT_ROOT
+
+        with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
+            RuntimeSettings.from_environment(
+                {"HEAR_MODEL_PATHS_JSON": f'{{"toxic-bert": "{PROJECT_ROOT / "hear"}"}}'}
+            )

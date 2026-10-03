@@ -84,18 +84,19 @@ def test_runpod_stack_defaults_match_verified_runtime():
     from pathlib import Path
 
     docker = Path("Dockerfile").read_text()
-    assert "ENV HEAR_POD_STACK_ROLES=reconstruction,pipeline,magic_clean_natural" in docker
+    assert "ENV HEAR_POD_STACK_ROLES=pipeline,magic_clean_natural" in docker
+    assert "ARG HEAR_FISH_LICENSE_APPROVED=false" in docker
     assert "ENV HEAR_HOST_MAX_CONCURRENT_JOBS=10" in docker
     assert (
-        'ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4,"reconstruction":2}'
+        'ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4}'
         in docker
     )
     assert (
-        'ENV HEAR_POD_PROCESS_LIMITS={"pipeline":7,"magic_clean_natural":1,"reconstruction":1}'
+        'ENV HEAR_POD_PROCESS_LIMITS={"pipeline":7,"magic_clean_natural":1}'
         in docker
     )
     assert (
-        'ENV HEAR_WORKER_REPLICAS={"pipeline":1,"magic_clean_natural":4,"reconstruction":2}'
+        'ENV HEAR_WORKER_REPLICAS={"pipeline":1,"magic_clean_natural":4}'
         in docker
     )
     assert "ENV WHISPER_BATCH_SIZE=8" in docker

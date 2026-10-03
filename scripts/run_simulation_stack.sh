@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-root=/root/hear-ai-v11/simulation-20260928
+root="${HEAR_SIMULATION_ROOT:-/root/hear-ai-runtime/canary}"
 source scripts/load-env.sh "$root/runtime.env"
 export HEAR_ENV_FILE="$root/runtime.env" PYTHONPATH="$PWD"
-python=/opt/hear-ai-v11/venvs/test/bin/python
+python=/opt/hear-ai-v11/venvs/pipeline/bin/python
+scripts/ensure_rabbitmq.sh
 children=()
 cleanup() { for pid in "${children[@]}"; do kill "$pid" 2>/dev/null || true; done; wait || true; }
 trap cleanup EXIT INT TERM
@@ -14,7 +15,7 @@ for n in {1..30}; do
   if curl -fsS --cacert "$root/tls/cert.pem" https://127.0.0.1:18081/source/fish-reference.wav -o /dev/null; then break; fi
   sleep 1
 done
-export HTTP_HOST=0.0.0.0 HTTP_PORT=8000
+export HTTP_HOST=127.0.0.1 HTTP_PORT=8000
 "$python" -m hear.entrypoints.gateway >"$root/logs/gateway.log" 2>&1 &
 children+=("$!")
 IFS=',' read -r -a configured_roles <<< "${HEAR_POD_STACK_ROLES:-pipeline}"

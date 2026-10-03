@@ -85,7 +85,6 @@ _FORMAT_CATEGORIES = frozenset(
     {"podcast", "documentary", "entertainment", "lifestyle", "opinion", "media"}
 )
 
-
 class CategorizationService:
     def __init__(
         self,
@@ -140,12 +139,14 @@ class CategorizationService:
         layer1 = await loop.run_in_executor(
             None, self._keyword_layer, transcript, segments or [], data.keyword_rules
         )
+        catalog_cats = self._category_pool(transcript, catalog_cats)
         tag_pool = self._build_tag_pool(
             transcript, catalog_tags + list(custom_tags or []), layer1["scores"]
         )
         layer2_cat = await loop.run_in_executor(
             None, self._zero_shot_labels, transcript, catalog_cats
         )
+        layer2_cat["scores"] = self._ground_category_scores(transcript, layer2_cat["scores"])
         context_cats = self._build_context_category_shortlist(
             transcript, catalog_cats, layer1["scores"], layer2_cat.get("scores", {})
         )
@@ -178,8 +179,8 @@ class CategorizationService:
             layer1,
             layer2_cat,
             layer2_tag,
-            list(data.tags),
-            list(data.categories),
+            tag_labels,
+            catalog_cats,
             max_tags,
         )
         merged["tags"] = self._normalize_tags(merged["tags"])[:max_tags]
@@ -192,6 +193,12 @@ class CategorizationService:
         merged["categories"] = self._finalize_categories(
             transcript, merged["categories"], layer2_cat.get("scores", {}), max_categories=3
         )
+        merged["tags"] = self._subject_tags(
+            transcript, merged["tags"], merged["categories"], merged["confidence_scores"]
+        )
+        merged["tags"] = self._ensure_non_empty_tags(
+            merged["tags"], merged["categories"], transcript, max_tags
+        )
         merged["tags"], merged["categories"] = self._apply_editorial_rules(
             transcript, merged["tags"], merged["categories"], max_tags
         )
@@ -199,7 +206,11 @@ class CategorizationService:
         return {
             "tags": merged["tags"],
             "categories": merged["categories"],
-            "confidence_scores": merged["confidence_scores"],
+            "confidence_scores": {
+                label: merged["confidence_scores"].get(label, 0.0)
+                for label in merged["tags"] + merged["categories"]
+                if label in merged["confidence_scores"]
+            },
             "sentiment": sentiment,
             "llm_used": False,
             "categorizer_mode": "nli",
@@ -235,9 +246,11 @@ class CategorizationService:
             )
             tag_pool = self._build_tag_pool(t_text, catalog_tags, layer1["scores"])
             layer2_cat = await loop.run_in_executor(
-                None, self._zero_shot_labels, t_text, catalog_cats
+                None, self._zero_shot_labels, t_text, self._category_pool(t_text, catalog_cats)
             )
             zs_scores = layer2_cat.get("scores", {})
+            zs_scores = self._ground_category_scores(t_text, zs_scores)
+            layer2_cat["scores"] = zs_scores
             context_cats = self._build_context_category_shortlist(
                 t_text, catalog_cats, layer1["scores"], zs_scores
             )
@@ -281,9 +294,12 @@ class CategorizationService:
                         track_id[:16],
                         exc,
                     )
-            layer2_tag: dict = {"scores": {}}
+            layer2_tag = (
+                await loop.run_in_executor(None, self._zero_shot_labels, t_text, tag_pool)
+                if tag_pool else {"scores": {}}
+            )
             nli_merged = self._merge(
-                layer1, layer2_cat, layer2_tag, data.tags, data.categories, max_tags
+                layer1, layer2_cat, layer2_tag, tag_pool, list(zs_scores), max_tags
             )
             t_sent = await loop.run_in_executor(None, self._get_sentiment, t_text)
             t_tags = self._normalize_tags(nli_merged.get("tags", []))
@@ -346,7 +362,13 @@ class CategorizationService:
         seen_t: set[str] = set()
         for c in self._categories.flat_catalog_categories():
             key = c.strip().lower()
-            if c.strip() and key not in seen_c:
+            words = re.findall("[a-z]+", key)
+            if (
+                c.strip() and not c.startswith("#") and words
+                and key not in {"none", "neutral", "local"}
+                and len(words) <= 3 and len(set(words)) == len(words)
+                and key not in seen_c
+            ):
                 seen_c.add(key)
                 cats.append(c.strip())
         for t in data.tags:
@@ -355,6 +377,51 @@ class CategorizationService:
                 seen_t.add(nt.lower())
                 tags.append(nt)
         return (cats, tags)
+
+    def _category_pool(self, transcript: str, labels: list[str]) -> list[str]:
+        """Keep broad subjects and relevant specific labels within a bounded model call."""
+        if len(labels) <= 512:
+            return labels
+        words = self._extract_transcript_words(transcript)
+        broad = [label for label in labels if len(re.findall("[a-z]+", label.lower())) == 1]
+        specific = [label for label in labels if label not in broad]
+        specific.sort(key=lambda label: (
+            -len(set(re.findall("[a-z]+", label.lower())) & words),
+            len(re.findall("[a-z]+", label.lower())), len(label), label.lower(),
+        ))
+        relevant = [label for label in specific if set(re.findall("[a-z]+", label.lower())) & words]
+        return list(dict.fromkeys(broad[:384] + relevant[:128]))[:512]
+
+    def _ground_category_scores(self, transcript: str, scores: dict[str, float]) -> dict[str, float]:
+        words = self._subject_terms(transcript)
+        grounded = {}
+        for label, score in scores.items():
+            supported = bool(self._subject_terms(label) & words)
+            if supported or score >= 0.85:
+                grounded[label] = score
+        return grounded
+
+    @staticmethod
+    def _subject_terms(text: str) -> set[str]:
+        terms = set()
+        for word in re.findall("[a-z]+", text.lower()):
+            if word in _STOPWORDS:
+                continue
+            if len(word) > 6 and word.endswith("al"):
+                word = word[:-2]
+            elif len(word) > 4 and word.endswith("s"):
+                word = word[:-1]
+            terms.add(word)
+        return terms
+
+    def _subject_tags(self, transcript: str, tags: list[str], categories: list[str], scores: dict) -> list[str]:
+        if not categories:
+            return tags
+        subjects = self._subject_terms(" ".join(categories))
+        names = self._subject_terms(" ".join(re.findall(r"\b[A-Z][a-z]+\b", transcript)))
+        # Avoid turning ordinary verbs in the report into its primary subjects.
+        # Keep subject labels, named entities and strongly supported narrower tags.
+        return [tag for tag in tags if self._subject_terms(tag) & (subjects | names) or scores.get(tag, 0) >= 0.9]
 
     async def _categorize_qwen_primary(
         self,
@@ -708,6 +775,7 @@ class CategorizationService:
         if wildlife_media_narrative(transcript):
             cats = [c for c in cats if c.lower() not in {"veterinary", "podcast"}]
         ranked = sorted(zero_shot_scores.items(), key=lambda x: x[1], reverse=True)
+        additions = []
         for cat, score in ranked[:8]:
             if score < 0.32:
                 continue
@@ -716,33 +784,36 @@ class CategorizationService:
             if wildlife_media_narrative(transcript) and cat.lower() == "veterinary":
                 continue
             if cat not in cats:
-                cats.insert(0, cat)
-        return cats[:max_categories]
+                additions.append(cat)
+        candidates = list(dict.fromkeys(additions + cats))
+        # Prefer one readable label for the same subject (Politics/Political,
+        # Environment/Environmental), and omit redundant catalogue compounds.
+        for category in list(candidates):
+            terms = self._subject_terms(category)
+            equivalents = [c for c in candidates if self._subject_terms(c) == terms]
+            if len(equivalents) > 1:
+                preferred = min(equivalents, key=lambda c: (len(c), c.lower()))
+                candidates = [c for c in candidates if c == preferred or c not in equivalents]
+        ranked_candidates = sorted(candidates, key=lambda cat: zero_shot_scores.get(cat, 0), reverse=True)
+        return [
+            category for category in ranked_candidates
+            if not any(self._subject_terms(other) < self._subject_terms(category) for other in candidates)
+        ][:max_categories]
 
     def _build_tag_pool(
         self, transcript: str, all_tags: list[str], keyword_scores: dict
     ) -> list[str]:
         tx_words = self._extract_transcript_words(transcript)
-        priority: list[str] = []
-        seen: set[str] = set()
-        for tag in all_tags:
-            if tag in keyword_scores and tag not in seen:
-                priority.append(tag)
-                seen.add(tag)
-        for tag in all_tags:
-            if tag in seen:
+        relevant = []
+        for tag in dict.fromkeys(all_tags + list(keyword_scores)):
+            tag_words = re.findall("[a-z]+", tag.lower())
+            if len(tag_words) > 4 or len(set(tag_words)) != len(tag_words):
                 continue
-            tag_words = set(re.findall("[a-z]+", tag.lower()))
-            if tag_words & tx_words:
-                priority.append(tag)
-                seen.add(tag)
-        remaining = [t for t in all_tags if t not in seen]
-        fill_slots = max(0, 120 - len(priority))
-        if fill_slots and remaining:
-            step = max(1, len(remaining) // fill_slots)
-            filler = [remaining[i] for i in range(0, len(remaining), step)][:fill_slots]
-            priority.extend(filler)
-        return priority
+            overlap = len(set(tag_words) & tx_words)
+            if overlap or tag in keyword_scores:
+                relevant.append((tag, keyword_scores.get(tag, 0), overlap, len(tag_words)))
+        relevant.sort(key=lambda row: (-row[1], -row[2] / max(row[3], 1), row[3], row[0]))
+        return [row[0] for row in relevant[:120]]
 
     def _keyword_layer(
         self, transcript: str, segments: list[dict], keyword_rules: Mapping[str, str]
@@ -767,15 +838,33 @@ class CategorizationService:
                 scores[tag] = round(scores.get(tag, 0) * 0.6 + density * 0.4, 4)
         return {"scores": scores}
 
-    _ZS_TEMPLATE = "This audio recording is about {}."
+    _ZS_TEMPLATE = "This example is {}."
 
     def _zero_shot_labels(self, transcript: str, labels: list[str]) -> dict:
         if not labels:
             return {"scores": {}}
-        output = self._models().nli_sync(
-            transcript[:1024], labels, hypothesis_template=self._ZS_TEMPLATE
-        )
-        return {"scores": dict(zip(output["labels"], output["scores"], strict=False))}
+        # Sentence-sized evidence suits the pinned sentence-pair model. Sample the
+        # whole recording instead of discarding every subject after character 1024.
+        windows = [
+            sentence[start:start + 384]
+            for sentence in re.split(r"(?<=[.!?])\s+", transcript.strip())
+            for start in range(0, len(sentence), 384)
+            if sentence[start:start + 384].strip()
+        ]
+        if len(windows) > 6:
+            windows = [windows[index * (len(windows) - 1) // 5] for index in range(6)]
+        canonical = {label.lower().lstrip("#").replace("-", " "): label for label in labels}
+        evidence: dict[str, list[float]] = defaultdict(list)
+        for window in windows:
+            output = self._models().nli_sync(
+                window, list(canonical), hypothesis_template=self._ZS_TEMPLATE, multi_label=True
+            )
+            for label, score in zip(output["labels"], output["scores"], strict=False):
+                if label in canonical:
+                    evidence[canonical[label]].append(float(score))
+        # A passing mention must not dominate the subject of a whole recording.
+        scores = {label: sum(values) / len(values) for label, values in evidence.items()}
+        return {"scores": scores}
 
     def _get_sentiment(self, transcript: str) -> str:
         try:
@@ -793,7 +882,7 @@ class CategorizationService:
             return "negative"
         return "neutral"
 
-    _TAG_THRESHOLD = 0.5
+    _TAG_THRESHOLD = 0.6
     _CAT_THRESHOLD = 0.35
 
     def _merge(
@@ -809,23 +898,21 @@ class CategorizationService:
         l2c = layer2_cat.get("scores", {})
         l2t = layer2_tag.get("scores", {})
         merged_tag_scores: dict[str, float] = {}
-        for tag in all_tags:
+        for tag in dict.fromkeys(all_tags):
             s1 = l1.get(tag, 0)
             s2 = l2t.get(tag, 0)
-            score = s1 * 0.4 + s2 * 0.6 if s2 > 0 else s1 * 1.0
+            score = s1 * 0.4 + s2 * 0.6 if s1 > 0 and s2 > 0 else max(s1, s2)
             merged_tag_scores[tag] = round(min(1.0, score), 4)
         ranked_tags = sorted(merged_tag_scores.items(), key=lambda x: x[1], reverse=True)
         tags = [t for t, s in ranked_tags if s >= self._TAG_THRESHOLD][:max_tags]
         cat_scores: dict[str, float] = {}
         for c in all_categories:
-            s1 = l1.get(f"#{c}", 0)
+            s1 = l1.get(self._normalize_tag(c), 0)
             s2 = l2c.get(c, 0)
-            score = s1 * 0.4 + s2 * 0.6
+            score = s1 * 0.4 + s2 * 0.6 if s1 else s2
             cat_scores[c] = round(min(1.0, score), 4)
         ranked_cats = sorted(cat_scores.items(), key=lambda x: x[1], reverse=True)
         categories = [c for c, s in ranked_cats if s >= self._CAT_THRESHOLD][:3]
-        if not categories and ranked_cats:
-            categories = [c for c, _ in ranked_cats[:1]]
         logger.debug("[CATEGORIZER] top_tag_scores=%s", ranked_tags[:8])
         logger.debug(
             "[CATEGORIZER] top_cat_scores=%s",

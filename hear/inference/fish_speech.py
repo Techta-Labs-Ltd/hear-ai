@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import io
+import logging
 import multiprocessing
 import sys
 import threading
@@ -16,6 +17,7 @@ from hear.runtime.gpu_idle import AsyncIdleResource
 class FishProcess:
     @staticmethod
     def serve(connection, source_root: str, checkpoint: str, codec: str, bnb_mode: str):
+        phase = "imports"
         try:
             sys.path.insert(0, source_root)
             import numpy as np
@@ -26,6 +28,11 @@ class FishProcess:
             from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
             from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
             from loguru import logger
+
+            if bnb_mode == "nf4":
+                from hear.inference.fish_nf4_loader import FishNF4Loader
+
+                FishNF4Loader.install()
 
             # Third-party INFO logs include complete job transcripts.
             logger.disable("fish_speech")
@@ -50,8 +57,10 @@ class FishProcess:
                 kwargs["max_seq_len"] = 4096
             torch.set_num_threads(2)
             torch.cuda.reset_peak_memory_stats()
+            phase = "semantic_model_loading"
             queue_result = launch_thread_safe_queue(**kwargs)
             llama_queue = queue_result[0] if isinstance(queue_result, tuple) else queue_result
+            phase = "codec_loading"
             decoder = load_model(config_name="modded_dac_vq", checkpoint_path=codec, device="cuda")
             engine = TTSInferenceEngine(
                 llama_queue=llama_queue,
@@ -70,11 +79,13 @@ class FishProcess:
                 }
             )
             while True:
+                phase = "waiting_for_request"
                 values = connection.recv()
                 if values is None:
                     llama_queue.put(None)
                     return
                 torch.cuda.reset_peak_memory_stats()
+                phase = "inference"
                 request = ServeTTSRequest(
                     text=values["text"],
                     max_new_tokens=values["max_new_tokens"],
@@ -120,6 +131,9 @@ class FishProcess:
                     }
                 )
         except BaseException as exc:
+            logging.getLogger(__name__).error(
+                "fish_speech_process_failed phase=%s error_type=%s", phase, type(exc).__name__
+            )
             try:
                 # Do not send user text, references, credential-bearing paths or tracebacks.
                 connection.send({"status": "failed", "error_type": type(exc).__name__})
@@ -197,12 +211,22 @@ class FishSpeechEngine:
                 self._stop()
                 raise RuntimeError("fish_speech_timeout")
             if self._connection.poll(0.05):
-                response = self._connection.recv()
+                try:
+                    response = self._connection.recv()
+                except (EOFError, OSError):
+                    logging.getLogger(__name__).error(
+                        "fish_speech_process_exited exitcode=%s", self._process.exitcode
+                    )
+                    self._stop()
+                    raise RuntimeError("fish_speech_process_exited") from None
                 if not isinstance(response, dict) or response.get("status") == "failed":
                     self._stop()
                     raise RuntimeError("fish_speech_process_failed")
                 return response
             if not self._process.is_alive():
+                logging.getLogger(__name__).error(
+                    "fish_speech_process_exited exitcode=%s", self._process.exitcode
+                )
                 self._stop()
                 raise RuntimeError("fish_speech_process_exited")
 
@@ -339,6 +363,10 @@ class LazyFishSpeechEngine:
     @staticmethod
     async def _close_loaded(engine: FishSpeechEngine) -> None:
         await engine.close()
+
+    async def warmup(self) -> None:
+        await self._resource.acquire()
+        await self._resource.release()
 
     async def generate_speech(
         self,

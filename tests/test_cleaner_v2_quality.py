@@ -1,4 +1,3 @@
-import json
 import threading
 import time
 
@@ -7,16 +6,13 @@ import pytest
 import soundfile as sf
 
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
-from hear.services.magic_clean.contracts import AttemptTicket
 from hear.services.magic_clean.quality import AudioQualityGate
-from tests.test_cleaner_v2_contracts import ticket as ticket_fixture
-
-ticket = ticket_fixture
+from tests.cleaner_plans import natural_plan
 
 
 @pytest.mark.parametrize("blocks", [5, 260])
-def test_warning_locations_are_source_frames_and_bounded(tmp_path, ticket, blocks):
-    plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
+def test_warning_locations_are_source_frames_and_bounded(tmp_path, blocks):
+    plan = natural_plan()
     source, output = tmp_path / "in.wav", tmp_path / "out.wav"
     block = np.full((32768, 2), 0.1, dtype=np.float32)
     with (
@@ -42,8 +38,8 @@ def test_warning_locations_are_source_frames_and_bounded(tmp_path, ticket, block
     assert summary.wanted_content == "review_required"
 
 
-def test_adjacent_loss_blocks_merge_and_retain_partial_tail(tmp_path, ticket):
-    plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
+def test_adjacent_loss_blocks_merge_and_retain_partial_tail(tmp_path):
+    plan = natural_plan()
     source, output = tmp_path / "in.wav", tmp_path / "out.wav"
     frames = 65539
     samples = np.full((frames, 2), 0.1, dtype=np.float32)

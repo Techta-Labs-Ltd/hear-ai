@@ -9,6 +9,7 @@ import pytest
 from hear.contracts.jobs import WorkerIdentity
 from hear.execution.reporter import BackendAttemptClient
 from hear.runtime.ownership import BackendRegistry
+from hear.services.pipeline.catalog import PipelineCatalogClient
 from tests.test_deployment_boundaries import owned, policy
 
 
@@ -118,6 +119,15 @@ def test_pipeline_cannot_use_another_backends_catalogue():
     registry.validate(owned().model_copy(update={"job_type": JobType.PIPELINE}))
     with pytest.raises(ValueError, match="catalog_owner"):
         registry.validate(dev_request().model_copy(update={"job_type": JobType.PIPELINE}))
+
+
+def test_pipeline_catalog_fetch_cannot_select_other_registered_backend(monkeypatch):
+    monkeypatch.setenv("HEAR_BACKEND_REGISTRY_JSON", registry_json())
+    monkeypatch.setenv("HEAR_PIPELINE_CATALOG_BACKEND_ID", "backend-a")
+    monkeypatch.delenv("HEAR_BACKEND_POLICY_JSON", raising=False)
+    PipelineCatalogClient("https://api.hear.media", "service")
+    with pytest.raises(ValueError, match="reporter_configuration_mismatch"):
+        PipelineCatalogClient("https://api.hear.surf", "service")
 
 
 @pytest.mark.parametrize("kind", ["valid_dev", "dev_token_for_prod", "dev_with_prod_storage"])

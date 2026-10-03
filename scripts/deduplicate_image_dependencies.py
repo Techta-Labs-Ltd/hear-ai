@@ -25,7 +25,11 @@ class ImageDependencyDeduplication:
     def main(cls):
         if os.environ.get("HEAR_IMAGE_ASSEMBLY") != "1":
             raise RuntimeError("This command is for the disposable image build stage only")
-        root = Path("/opt/hear-image-assembly")
+        moved = cls.deduplicate(Path("/opt/hear-image-assembly"))
+        print("Byte-identical shared packages:", ", ".join(moved))
+
+    @classmethod
+    def deduplicate(cls, root: Path) -> list[str]:
         shared = root / "shared"
         shared.mkdir(exist_ok=True)
         roles = ("pipeline", "reconstruction", "magic_clean_natural")
@@ -42,13 +46,15 @@ class ImageDependencyDeduplication:
             if len(identical) < 2:
                 continue
             first = identical[0]
-            first.rename(shared / package)
+            # Overlay layers may live on different devices. Copy into the
+            # disposable assembly tree before removing the original packages.
+            shutil.copytree(first, shared / package, symlinks=True)
             for path in identical:
                 if path.exists():
                     shutil.rmtree(path)
                 path.symlink_to("/opt/hear-ai-v11/shared/" + package, target_is_directory=True)
             moved.append(package)
-        print("Byte-identical shared packages:", ", ".join(moved))
+        return moved
 
 
 if __name__ == "__main__":

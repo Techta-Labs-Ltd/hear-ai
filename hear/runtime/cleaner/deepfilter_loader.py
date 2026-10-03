@@ -3,6 +3,7 @@ import gc
 import hashlib
 import importlib
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -48,7 +49,7 @@ class PinnedDeepFilterAssets:
             "packages": dict(self.package_versions),
             "device": self.device,
             "precision_sha256": self.precision_sha256,
-            "postfilter": False,
+            "postfilter": "per_plan",
         }
         return hashlib.sha256(
             json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
@@ -174,6 +175,7 @@ class PinnedDeepFilterFactory:
                 raise
             else:
                 self._loaded = loaded
+                logging.getLogger(__name__).info("gpu_model_loaded name=deepfilternet3")
                 return loaded.borrow(guard, self._borrow_released)
 
         raise failure
@@ -200,6 +202,7 @@ class PinnedDeepFilterFactory:
             self._loaded = None
         if loaded is not None:
             loaded.close()
+            logging.getLogger(__name__).info("gpu_model_evicted name=deepfilternet3")
 
     def evict_now(self) -> bool:
         with self._cache_lock:
@@ -326,14 +329,23 @@ class LoadedDeepFilterRuntime:
         self,
         samples: np.ndarray,
         attenuation_limit_db: int,
+        post_filter: bool,
         guard: ResourceGuard,
     ) -> np.ndarray:
         guard.check()
-        if self.closed or self.model is None or attenuation_limit_db not in (0, 12, 18, 24):
+        if (
+            self.closed
+            or self.model is None
+            or type(attenuation_limit_db) is not int
+            or not 6 <= attenuation_limit_db <= 60
+        ):
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "invalid DF3 inference session")
         PinnedDeepFilterFactory.assert_healthy()
         output = None
         try:
+            # The DF3 module reads this flag at forward time; the runtime lease
+            # serialises calls, so each plan sets its own value.
+            self.model.post_filter = bool(post_filter)
             with (
                 torch.inference_mode(),
                 torch.autocast(device_type=self.device_type, enabled=False),
@@ -397,12 +409,14 @@ class LoadedDeepFilter:
     def model(self):
         return self.runtime.model
 
-    def enhance(self, samples: np.ndarray, attenuation_limit_db: int) -> np.ndarray:
+    def enhance(
+        self, samples: np.ndarray, attenuation_limit_db: int, post_filter: bool
+    ) -> np.ndarray:
         self.guard.check()
         if self.closed:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "DF3 attempt session is closed")
         try:
-            return self.runtime.enhance(samples, attenuation_limit_db, self.guard)
+            return self.runtime.enhance(samples, attenuation_limit_db, post_filter, self.guard)
         except BaseException:
             self.closed = True
             raise

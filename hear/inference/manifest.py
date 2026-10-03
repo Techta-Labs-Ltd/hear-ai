@@ -5,6 +5,7 @@ import importlib
 import os
 import tempfile
 import threading
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -108,6 +109,29 @@ class ModelManifest:
     def models(self) -> tuple[ModelSpec, ...]:
         return self._models
 
+    def spec(self, logical_name: str) -> ModelSpec:
+        for model in self._models:
+            if model.logical_name == logical_name:
+                return model
+        raise RuntimeError(f"unknown_model:{logical_name}")
+
+    def validate_overrides(self, overrides: Mapping[str, Path]) -> None:
+        names = {model.logical_name for model in self._models}
+        unknown = sorted(set(overrides) - names)
+        if unknown:
+            raise ValueError("unknown_model_override:" + ",".join(unknown))
+
+    def local_path(
+        self,
+        model_root: Path,
+        logical_name: str,
+        overrides: Mapping[str, Path] | None = None,
+    ) -> Path:
+        override = (overrides or {}).get(logical_name)
+        if override is not None:
+            return override
+        return model_root / self.spec(logical_name).relative_path
+
     def models_for(
         self,
         role: WorkerRole,
@@ -138,12 +162,14 @@ class ModelManifest:
         role: WorkerRole,
         *,
         enabled_features: frozenset[str] = frozenset(),
+        overrides: Mapping[str, Path] | None = None,
     ) -> tuple[str, ...]:
         missing: list[str] = []
-        resolved_root = model_root.resolve()
         for model in self.models_for(role, enabled_features=enabled_features):
-            root = model_root / model.relative_path
-            if not root.resolve().is_relative_to(resolved_root):
+            root = self.local_path(model_root, model.logical_name, overrides)
+            # An override is trusted as given; manifest-relative paths must stay inside the root.
+            boundary = root.resolve() if root != model_root / model.relative_path else model_root.resolve()
+            if not root.resolve().is_relative_to(boundary):
                 missing.append(f"{model.logical_name}:path_outside_model_root")
                 continue
             if not root.is_dir():
@@ -151,7 +177,7 @@ class ModelManifest:
                 continue
             for required_file in model.required_files:
                 path = root / required_file
-                if not path.resolve().is_relative_to(resolved_root):
+                if not path.resolve().is_relative_to(boundary):
                     missing.append(f"{model.logical_name}:{required_file}:path_outside_model_root")
                     continue
                 if not path.is_file():
@@ -189,6 +215,16 @@ class ModelManifest:
                     revision=str(model.revision),
                     local_dir=local_dir,
                     cache_dir=resolved_cache,
+                    # Package the declared weight format and small tokenizer/
+                    # configuration assets, avoiding duplicate binary exports.
+                    allow_patterns=[
+                        *model.required_files,
+                        "*.json",
+                        "*.txt",
+                        "*.jinja",
+                        "LICENSE*",
+                        "README.md",
+                    ],
                     ignore_patterns=[
                         "*.msgpack",
                         "flax_model*",

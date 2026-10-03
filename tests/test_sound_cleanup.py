@@ -303,8 +303,8 @@ def test_overlap_preview_cannot_be_enabled_without_selected_region():
         SoundCleanupOptions(enabled=True, preview_overlaps=True)
 
 
-@pytest.mark.parametrize("mode", ["available", "certified"])
-def test_capability_gates_do_not_advertise_overlap_in_certified_mode(mode):
+@pytest.mark.parametrize("provisioned", [False, True])
+def test_capability_gates_follow_provisioned_bundles(provisioned):
     from hear.api.gateway import PodGateway
 
     class Gateway:
@@ -315,15 +315,12 @@ def test_capability_gates_do_not_advertise_overlap_in_certified_mode(mode):
         PodGateway(
             Gateway(),
             "key",
-            cleaning_mode=mode,
-            sound_cleanup_available=True,
-            overlap_preview_available=True,
+            sound_cleanup_available=provisioned,
+            overlap_preview_available=provisioned,
         ).capabilities()
     )
-    assert result["magic_clean"]["sound_cleanup"]["available"] is (mode == "available")
-    assert result["magic_clean"]["sound_cleanup"]["selected_overlap_preview"] is (
-        mode == "available"
-    )
+    assert result["magic_clean"]["sound_cleanup"]["available"] is provisioned
+    assert result["magic_clean"]["sound_cleanup"]["selected_overlap_preview"] is provisioned
 
 
 def test_corrupt_model_digest_does_not_enable_a_bundle(tmp_path):

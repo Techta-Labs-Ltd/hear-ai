@@ -33,7 +33,6 @@ class PodGateway:
         *,
         enable_docs: bool = False,
         ownership_policy: BackendOwnershipPolicy | BackendRegistry | None = None,
-        cleaning_mode: str = "available",
         sound_cleanup_available: bool = False,
         overlap_preview_available: bool = False,
     ) -> None:
@@ -42,7 +41,6 @@ class PodGateway:
         self._api_key = api_key.strip()
         self.enable_docs = enable_docs
         self._ownership = ownership_policy
-        self._cleaning_mode = cleaning_mode
         self._sound_cleanup_available = sound_cleanup_available
         self._overlap_preview_available = overlap_preview_available
         self.router = APIRouter(tags=["gateway"])
@@ -77,15 +75,11 @@ class PodGateway:
         catalogue = CleaningProfiles.catalogue()
         natural_lane = lanes.get("magic_clean_natural")
         available = natural_lane is not None and natural_lane["status"] == "ready"
-        for name, profile in catalogue["profiles"].items():
-            profile["available"] = available and (
-                self._cleaning_mode == "available" or name == "natural"
-            )
-        catalogue["engine_mode"] = self._cleaning_mode
+        for profile in catalogue["profiles"].values():
+            profile["available"] = available
+        catalogue["engine_mode"] = "available"
         catalogue["sound_cleanup"] = {
-            "available": available
-            and self._cleaning_mode == "available"
-            and self._sound_cleanup_available,
+            "available": available and self._sound_cleanup_available,
             "version": "sound-cleanup-local-v1",
             "enabled_by_default": False,
             "targets": ["handling", "impact", "animal", "cough", "click"],
@@ -96,8 +90,7 @@ class PodGateway:
             "overlapping_speech_repair": False,
             "selected_overlap_preview": self._overlap_preview_available
             and self._sound_cleanup_available
-            and available
-            and self._cleaning_mode == "available",
+            and available,
             "coughs_require_explicit_consent": True,
         }
         return {
@@ -222,7 +215,7 @@ class PodGateway:
         if (
             envelope.job_type.value == "magic_clean"
             and sound.get("enabled")
-            and (not self._sound_cleanup_available or self._cleaning_mode != "available")
+            and not self._sound_cleanup_available
         ):
             raise HTTPException(status_code=503, detail="sound_cleanup_not_provisioned")
         if (
@@ -233,17 +226,6 @@ class PodGateway:
             raise HTTPException(status_code=503, detail="overlap_separator_not_provisioned")
         if envelope.options.get("reduce_stationary_noise") and not self._sound_cleanup_available:
             raise HTTPException(status_code=503, detail="background_analyser_not_provisioned")
-        if envelope.job_type.value == "magic_clean" and self._cleaning_mode != "available":
-            if envelope.options.get("profile") != "natural" or any(
-                envelope.options.get(key)
-                for key in (
-                    "auto_level",
-                    "remove_clicks",
-                    "trim_silence",
-                    "reduce_stationary_noise",
-                )
-            ):
-                raise HTTPException(status_code=422, detail="preset_requires_available_engine_mode")
 
     async def submit_attempt(
         self, envelope: AttemptEnvelope, authorization: str | None = Header(default=None)

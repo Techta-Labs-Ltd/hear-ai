@@ -28,7 +28,8 @@ class TestDockerRuntime:
     def test_production_image_excludes_tests_and_evidence(self):
         text = Path(".dockerignore").read_text().splitlines()
         assert "tests" in text
-        assert "deploy/cleaner/evidence" in text
+        assert "docs" in text
+        assert "outputs" in text
         assert "models" in text
 
     def test_ci_matrix_covers_every_pod_and_serverless_target(self):

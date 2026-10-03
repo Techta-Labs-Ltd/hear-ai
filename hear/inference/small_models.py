@@ -52,13 +52,16 @@ class SmallModelsEngine:
         text: str,
         candidates: list[str] | None = None,
         hypothesis_template: str | None = None,
+        *,
+        multi_label: bool = False,
     ) -> dict:
         return await self._native.run(
-            self._infer,
+            self.infer_sync,
             model_name,
             text,
             candidates,
             hypothesis_template,
+            multi_label=multi_label,
         )
 
     def infer_sync(
@@ -67,9 +70,11 @@ class SmallModelsEngine:
         text: str,
         candidates: list[str] | None = None,
         hypothesis_template: str | None = None,
+        *,
+        multi_label: bool = False,
     ) -> dict:
         with self._lock:
-            return self._infer(model_name, text, candidates, hypothesis_template)
+            return self._infer(model_name, text, candidates, hypothesis_template, multi_label)
 
     def _infer(
         self,
@@ -77,9 +82,10 @@ class SmallModelsEngine:
         text: str,
         candidates: list[str] | None,
         hypothesis_template: str | None,
+        multi_label: bool = False,
     ) -> dict:
         if model_name == "toxic_bert":
-            result = self._toxic(text[:512], truncation=True)
+            result = self._toxic(text[:512], truncation=True, top_k=None)
             return {
                 "labels": [item["label"] for item in result],
                 "scores": [float(item["score"]) for item in result],
@@ -87,6 +93,7 @@ class SmallModelsEngine:
         if model_name == "sentiment":
             result = self._sentiment(text[:512], truncation=True)
             return {
+                "label": result[0]["label"],
                 "labels": [item["label"] for item in result],
                 "scores": [float(item["score"]) for item in result],
             }
@@ -94,7 +101,9 @@ class SmallModelsEngine:
             kwargs: dict[str, Any] = {}
             if hypothesis_template:
                 kwargs["hypothesis_template"] = hypothesis_template
-            result = self._nli(text[:1024], candidates or [], **kwargs)
+            result = self._nli(
+                text[:1024], candidates or [], multi_label=multi_label, batch_size=16, **kwargs
+            )
             return {
                 "labels": list(result["labels"]),
                 "scores": [float(score) for score in result["scores"]],
@@ -143,16 +152,27 @@ class LazySmallModelsEngine:
             eviction_enabled=eviction_enabled,
         )
 
+    async def warmup(self) -> None:
+        def load() -> None:
+            self._resource.acquire()
+            self._resource.release()
+
+        await self._native.run(load)
+
     def infer_sync(
         self,
         model_name: str,
         text: str,
         candidates: list[str] | None = None,
         hypothesis_template: str | None = None,
+        *,
+        multi_label: bool = False,
     ) -> dict:
         engine = self._resource.acquire()
         try:
-            return engine.infer_sync(model_name, text, candidates, hypothesis_template)
+            return engine.infer_sync(
+                model_name, text, candidates, hypothesis_template, multi_label=multi_label
+            )
         finally:
             self._resource.release()
 
@@ -162,6 +182,8 @@ class LazySmallModelsEngine:
         text: str,
         candidates: list[str] | None = None,
         hypothesis_template: str | None = None,
+        *,
+        multi_label: bool = False,
     ) -> dict:
         return await self._native.run(
             self.infer_sync,
@@ -169,6 +191,7 @@ class LazySmallModelsEngine:
             text,
             candidates,
             hypothesis_template,
+            multi_label=multi_label,
         )
 
     def check_health(self) -> None:

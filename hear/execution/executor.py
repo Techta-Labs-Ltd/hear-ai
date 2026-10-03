@@ -19,5 +19,11 @@ class JobExecutor:
         workflow = self._workflows.get(envelope.job_type)
         if workflow is None:
             raise RuntimeError(f"workflow_unavailable:{envelope.job_type.value}")
-        async for event in workflow.stream(envelope):
-            yield event
+        iterator = workflow.stream(envelope)
+        try:
+            async for event in iterator:
+                yield event
+        finally:
+            close = getattr(iterator, "aclose", None)
+            if callable(close):
+                await close()

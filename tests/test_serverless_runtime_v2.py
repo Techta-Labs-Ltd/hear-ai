@@ -82,7 +82,8 @@ class TestServerlessRuntime:
         assert events[0]["output"]["event"] == "progress"
         assert updates == ["transcribing:20.0"]
 
-    def test_start_registers_readiness_and_streaming_handler(self):
+    @pytest.mark.parametrize("concurrency", [1, 4])
+    def test_start_registers_readiness_and_streaming_handler(self, concurrency):
         registered = []
         started = []
 
@@ -110,6 +111,7 @@ class TestServerlessRuntime:
             FakeBackend(),
             Provider(),
             readiness=Readiness(),
+            max_concurrent_jobs=concurrency,
         )
 
         runtime.start()
@@ -118,3 +120,4 @@ class TestServerlessRuntime:
         assert registered[0]() is None
         assert started[0]["handler"] == runtime.handler
         assert started[0]["return_aggregate_stream"] is False
+        assert started[0]["concurrency_modifier"](1) == concurrency

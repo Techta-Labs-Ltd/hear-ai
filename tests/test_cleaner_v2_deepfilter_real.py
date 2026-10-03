@@ -1,7 +1,6 @@
 """Opt-in offline real-checkpoint smoke; not a listening/GPU certification gate."""
 
 import hashlib
-import json
 import os
 import threading
 import time
@@ -14,11 +13,8 @@ import torch
 
 from hear.runtime.cleaner.deepfilter_loader import PinnedDeepFilterAssets, PinnedDeepFilterFactory
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
-from hear.services.magic_clean.contracts import AttemptTicket
 from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepFilterSession
-from tests.test_cleaner_v2_contracts import ticket as ticket_fixture
-
-ticket = ticket_fixture
+from tests.cleaner_plans import natural_plan
 
 
 @pytest.fixture(scope="module")
@@ -65,7 +61,7 @@ def real_model(tmp_path_factory):
 )
 def test_real_checkpoint_short_and_tail(real_model, channels, frames):
     samples = np.random.default_rng(123).normal(0, 0.01, (channels, frames)).astype(np.float32)
-    output = real_model.enhance(samples, 18)
+    output = real_model.enhance(samples, 18, False)
     assert output.shape == samples.shape
     assert output.dtype == np.float32
     assert np.isfinite(output).all()
@@ -73,9 +69,9 @@ def test_real_checkpoint_short_and_tail(real_model, channels, frames):
 
 def test_real_checkpoint_resets_state_and_keeps_silence(real_model):
     samples = np.random.default_rng(456).normal(0, 0.01, (2, 48001)).astype(np.float32)
-    first = real_model.enhance(samples, 12)
-    silence = real_model.enhance(np.zeros_like(samples), 24)
-    second = real_model.enhance(samples, 12)
+    first = real_model.enhance(samples, 12, False)
+    silence = real_model.enhance(np.zeros_like(samples), 24, False)
+    second = real_model.enhance(samples, 12, False)
     np.testing.assert_array_equal(first, second)
     assert np.isfinite(silence).all()
     assert np.max(np.abs(silence)) < 1e-7
@@ -83,20 +79,19 @@ def test_real_checkpoint_resets_state_and_keeps_silence(real_model):
 
 def test_real_checkpoint_does_not_inherit_caller_autocast(real_model):
     samples = np.random.default_rng(987).normal(0, 0.01, (1, 48000)).astype(np.float32)
-    baseline = real_model.enhance(samples, 18)
+    baseline = real_model.enhance(samples, 18, False)
     with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-        nested = real_model.enhance(samples, 18)
+        nested = real_model.enhance(samples, 18, False)
     np.testing.assert_array_equal(nested, baseline)
     assert nested.dtype == np.float32
 
 
 @pytest.mark.parametrize("rate", [44100, 96000])
 def test_real_checkpoint_file_session_resamples_and_preserves_tail(
-    real_model, tmp_path, ticket, rate
+    real_model, tmp_path, rate
 ):
     policy = ContextualPolicy(48000, 4800)
-    ticket["plan"]["runtime"]["longform_policy_sha256"] = policy.digest
-    plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
+    plan = natural_plan(policy.digest)
     guard = ResourceGuard(
         ResourceBudget(20000000, 5000000, 600000),
         tmp_path,

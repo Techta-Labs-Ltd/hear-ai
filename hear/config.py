@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -13,45 +13,23 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hear.runtime.roles import WorkerRole
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIGURED_ENV_FILE = os.environ.get("HEAR_ENV_FILE", "").strip()
-ENV_FILES = (
-    (Path(CONFIGURED_ENV_FILE),)
-    if CONFIGURED_ENV_FILE
-    else (PROJECT_ROOT / ".env", PROJECT_ROOT.parent / ".env")
-)
-
-
-class Settings(BaseSettings):
-    WHISPER_MIN_AVG_LOGPROB: float = -0.75
-    DISCOVERY_METADATA_ENABLED: bool = True
-    DISCOVERY_MAX_SEARCH_PHRASES: int = 12
-    DISCOVERY_MAX_NEW_TOKENS: int = 1100
-    FISH_SPEECH_TTS_ENABLED: bool = True
-    EDIT_PHRASE_EXPANSION_WORDS: int = 1
-    EDIT_MERGE_GAP_SECONDS: float = 1.5
-    EDIT_MAX_BATCH_WORDS: int = 80
-    EDIT_MAX_BATCH_DURATION: float = 30.0
-    DNSMOS_MODEL_PATH: str = "/models/dnsmos/sig_bak_ovr.onnx"
-    HEAR_TEMP_DIR: str = "/audio"
-    AUDIO_MAX_AGE_SECONDS: float = 24 * 60 * 60
-
-    model_config = SettingsConfigDict(
-        env_file=ENV_FILES,
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-
-settings = Settings()
+# RunPod network volumes are FUSE mounts: slow, shared, and not where weights belong.
+# Models live on the container's root disk (/models), baked into images for Serverless.
+NETWORK_VOLUME_ROOTS = (Path("/workspace"), Path("/runpod-volume"))
 
 
 class RuntimeSettings(BaseModel):
+    """Process configuration read once from the environment; never from files at import time.
+
+    Launchers load an external env file before starting a worker. Model storage
+    is always outside the source checkout and every weight directory can be
+    redirected per logical model name through ``HEAR_MODEL_PATHS_JSON``.
+    """
+
     model_config = ConfigDict(
         extra="ignore",
         frozen=True,
@@ -65,6 +43,8 @@ class RuntimeSettings(BaseModel):
     image_revision: str | None = Field(default=None, alias="HEAR_IMAGE_REVISION")
     engine_revision: str | None = Field(default=None, alias="HEAR_ENGINE_REVISION")
     model_root: Path = Field(default=Path("/models"), alias="HEAR_MODEL_ROOT")
+    model_paths: dict[str, Path] = Field(default_factory=dict, alias="HEAR_MODEL_PATHS_JSON")
+    magic_clean_model_dir: Path | None = Field(default=None, alias="HEAR_MAGIC_CLEAN_MODEL_DIR")
     model_features: frozenset[str] = Field(default_factory=frozenset, alias="HEAR_MODEL_FEATURES")
     temp_dir: Path = Field(default=Path("/audio"), alias="HEAR_TEMP_DIR")
     min_free_scratch_bytes: int = Field(default=1024**3, ge=0, alias="HEAR_MIN_FREE_SCRATCH_BYTES")
@@ -82,24 +62,9 @@ class RuntimeSettings(BaseModel):
         le=64,
         alias="HEAR_SERVERLESS_MAX_CONCURRENT_JOBS",
     )
+    serverless_preload_models: bool = Field(default=False, alias="HEAR_SERVERLESS_PRELOAD_MODELS")
     backend_internal_url: AnyHttpUrl | None = Field(default=None, alias="HEAR_BACKEND_INTERNAL_URL")
     backend_service_key: SecretStr | None = Field(default=None, alias="HEAR_BACKEND_SERVICE_KEY")
-    cleaner_certification_path: Path | None = Field(
-        default=None, alias="HEAR_CLEANER_CERTIFICATION_PATH"
-    )
-    cleaner_certification_sha256: str | None = Field(
-        default=None,
-        min_length=64,
-        max_length=64,
-        pattern=r"^[a-f0-9]{64}$",
-        alias="HEAR_CLEANER_CERTIFICATION_SHA256",
-    )
-    cleaner_lock_dir: Path = Field(
-        default=Path("/tmp/hear-cleaner-locks"), alias="HEAR_CLEANER_LOCK_DIR"
-    )
-    optional_engine_mode: Literal["available", "certified"] = Field(
-        default="available", alias="HEAR_OPTIONAL_ENGINE_MODE"
-    )
     host_max_concurrent_jobs: int = Field(
         default=1, ge=1, le=16, alias="HEAR_HOST_MAX_CONCURRENT_JOBS"
     )
@@ -123,6 +88,7 @@ class RuntimeSettings(BaseModel):
     )
     whisper_vad_onset: float = Field(default=0.65, gt=0, lt=1, alias="WHISPER_VAD_ONSET")
     whisper_vad_offset: float = Field(default=0.50, ge=0, lt=1, alias="WHISPER_VAD_OFFSET")
+    whisper_min_avg_logprob: float = Field(default=-0.75, alias="WHISPER_MIN_AVG_LOGPROB")
     qwen_asr_dtype: str = Field(default="bfloat16", min_length=1, alias="QWEN_ASR_DTYPE")
     qwen_asr_device_map: str = Field(default="cuda:0", min_length=1, alias="QWEN_ASR_DEVICE_MAP")
     qwen_llm_gpu_memory_utilization: float = Field(
@@ -140,6 +106,10 @@ class RuntimeSettings(BaseModel):
     )
     audiosep_idle_ttl_seconds: float = Field(
         default=90, ge=1, le=86400, alias="HEAR_AUDIOSEP_IDLE_TTL_SECONDS"
+    )
+    discovery_metadata_enabled: bool = Field(default=True, alias="DISCOVERY_METADATA_ENABLED")
+    discovery_max_search_phrases: int = Field(
+        default=12, ge=1, le=64, alias="DISCOVERY_MAX_SEARCH_PHRASES"
     )
     discovery_max_new_tokens: int = Field(default=1100, gt=0, alias="DISCOVERY_MAX_NEW_TOKENS")
     fish_speech_home: Path = Field(default=Path("/fish-speech"), alias="FISH_SPEECH_HOME")
@@ -170,12 +140,53 @@ class RuntimeSettings(BaseModel):
     enable_docs: bool = Field(default=False, alias="HEAR_ENABLE_DOCS")
     log_level: str = Field(default="info", min_length=1, alias="LOG_LEVEL")
 
-    @field_validator("model_root", "fish_speech_model_root", "fish_speech_home", mode="after")
+    @field_validator(
+        "model_root",
+        "fish_speech_model_root",
+        "fish_speech_home",
+        "magic_clean_model_dir",
+        "sound_cleanup_bundle",
+        "sound_cleanup_separator_bundle",
+        mode="after",
+    )
     @classmethod
-    def reject_workspace_model_storage(cls, value: Path | None) -> Path | None:
-        if value is not None and value.expanduser().resolve().is_relative_to("/workspace"):
-            raise ValueError("model_storage_must_not_use_workspace")
-        return value
+    def canonical_model_storage(cls, value: Path | None) -> Path | None:
+        # Engines open pinned assets with O_NOFOLLOW and reject symlinked paths, so a
+        # model root that is itself a symlink (for example /models -> /workspace/...)
+        # must be canonicalized once here rather than failing readiness per asset.
+        if value is None:
+            return None
+        resolved = value.expanduser().resolve()
+        cls._require_root_storage(resolved)
+        return resolved
+
+    @staticmethod
+    def _require_root_storage(resolved: Path) -> None:
+        if resolved.is_relative_to(PROJECT_ROOT.resolve()):
+            raise ValueError("model_storage_must_not_use_source_checkout")
+        if any(resolved.is_relative_to(volume) for volume in NETWORK_VOLUME_ROOTS):
+            raise ValueError("model_storage_must_not_use_network_volume")
+
+    @field_validator("model_paths", mode="before")
+    @classmethod
+    def parse_model_paths(cls, value: object) -> dict[str, Path]:
+        if value is None or value == "":
+            return {}
+        raw = json.loads(value) if isinstance(value, str) else value
+        if not isinstance(raw, dict) or any(
+            not isinstance(name, str) or not name.strip() or not isinstance(path, (str, Path))
+            for name, path in raw.items()
+        ):
+            raise ValueError("invalid_model_paths")
+        paths = {}
+        for name, path in raw.items():
+            candidate = Path(str(path)).expanduser()
+            if not candidate.is_absolute():
+                raise ValueError(f"model_path_must_be_absolute:{name}")
+            resolved = candidate.resolve()
+            cls._require_root_storage(resolved)
+            paths[name] = resolved
+        return paths
 
     @field_validator("model_features", mode="before")
     @classmethod
@@ -192,7 +203,6 @@ class RuntimeSettings(BaseModel):
         "model_root",
         "temp_dir",
         "fish_speech_home",
-        "cleaner_lock_dir",
         "host_job_lock_path",
         mode="before",
     )
@@ -203,14 +213,14 @@ class RuntimeSettings(BaseModel):
         return value
 
     @field_validator(
-        "cleaner_certification_path",
         "sound_cleanup_bundle",
         "sound_cleanup_separator_bundle",
         "fish_speech_model_root",
+        "magic_clean_model_dir",
         mode="before",
     )
     @classmethod
-    def normalize_optional_certification_path(cls, value: object) -> object:
+    def normalize_optional_path(cls, value: object) -> object:
         if value is None or not str(value).strip():
             return None
         return value
@@ -237,6 +247,10 @@ class RuntimeSettings(BaseModel):
             role = values.get("HEAR_WORKER_ROLE", WorkerRole.TRANSCRIPTION.value).strip()
             values["HEAR_WORKER_ID"] = f"runpod-{identity}-{role}-01"
         return cls.model_validate(values)
+
+    @property
+    def magic_clean_model_directory(self) -> Path:
+        return self.magic_clean_model_dir or self.model_root / "magic-clean" / "DeepFilterNet3"
 
     def required(self, field_name: str) -> str:
         field = type(self).model_fields[field_name]

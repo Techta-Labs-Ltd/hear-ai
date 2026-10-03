@@ -1,6 +1,5 @@
 import pytest
 
-from hear.config import settings
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
 from hear.services.categorization.discovery import DiscoveryService
 from hear.services.categorization.service import CategorizationService
@@ -243,9 +242,8 @@ def test_taxonomy_label_terms_includes_leaf_segments(taxonomy_loader):
     assert "accessibility > visual impairment" in terms
 
 
-def test_fallback_profile_when_llm_disabled(monkeypatch):
-    monkeypatch.setattr(settings, "DISCOVERY_METADATA_ENABLED", False)
-    svc = DiscoveryService()
+def test_fallback_profile_when_llm_disabled():
+    svc = DiscoveryService(metadata_enabled=False)
     profile = svc._fallback_from_categorization(
         "I use smart glasses every day for navigation.",
         {"categories": ["Technology"], "tags": ["#Wearables"]},

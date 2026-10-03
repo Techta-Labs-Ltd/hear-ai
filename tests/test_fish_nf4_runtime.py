@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from hear.bootstrap import RuntimeBootstrap
-from hear.config import RuntimeSettings
+from hear.config import PROJECT_ROOT, RuntimeSettings
 from hear.inference.fish_nf4_assets import FishNF4Assets
 from hear.inference.manifest import ModelManifest
 from hear.runtime.roles import WorkerRole
@@ -72,25 +72,45 @@ def test_both_provider_images_use_pinned_nf4_loader():
 
 
 @pytest.mark.parametrize("key", ["HEAR_MODEL_ROOT", "FISH_SPEECH_MODEL_ROOT", "FISH_SPEECH_HOME"])
-def test_model_paths_reject_workspace(key):
-    with pytest.raises(ValueError, match="model_storage_must_not_use_workspace"):
-        RuntimeSettings.from_environment({key: "/workspace/forbidden-models"})
+def test_model_paths_reject_source_checkout(key):
+    with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
+        RuntimeSettings.from_environment({key: str(PROJECT_ROOT / "models")})
 
 
-def test_provisioner_rejects_workspace_before_download(monkeypatch):
+def test_provisioner_rejects_source_checkout_before_download(monkeypatch):
     from scripts.provision_fish_nf4 import ProvisionFishNF4
 
     def forbidden_download(**kwargs):
         pytest.fail("must reject model destination before any download")
 
     monkeypatch.setattr("scripts.provision_fish_nf4.snapshot_download", forbidden_download)
-    with pytest.raises(ValueError, match="model_storage_must_not_use_workspace"):
-        ProvisionFishNF4.run(Path("/workspace/forbidden-models"))
+    with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
+        ProvisionFishNF4.run(PROJECT_ROOT / "models")
+
+
+@pytest.mark.parametrize("root", ["/opt/hear-ai-models", "/root/hear-ai-models-test"])
+def test_root_storage_model_roots_allowed(root):
+    result = RuntimeSettings.from_environment({"FISH_SPEECH_MODEL_ROOT": root})
+    assert result.fish_speech_model_root == Path(root).resolve()
 
 
 @pytest.mark.parametrize(
-    "root", ["/models", "/root/hear-ai-v11/models", "/runpod-volume/hear-ai/models"]
+    "variable,value",
+    [
+        ("HEAR_MODEL_ROOT", "/workspace/hear-ai-models"),
+        ("FISH_SPEECH_MODEL_ROOT", "/runpod-volume/hear-ai/models"),
+        ("HEAR_MAGIC_CLEAN_MODEL_DIR", "/workspace/df3"),
+        ("HEAR_SOUND_CLEANUP_BUNDLE", "/workspace/bundle"),
+        ("HEAR_MODEL_PATHS_JSON", '{"toxic-bert": "/workspace/toxic"}'),
+    ],
 )
-def test_root_and_serverless_model_storage_allowed(root):
-    result = RuntimeSettings.from_environment({"FISH_SPEECH_MODEL_ROOT": root})
-    assert result.fish_speech_model_root == Path(root)
+def test_network_volume_model_storage_rejected(variable, value):
+    with pytest.raises(ValueError, match="model_storage_must_not_use_network_volume"):
+        RuntimeSettings.from_environment({variable: value})
+
+
+def test_model_symlink_cannot_hide_storage_inside_checkout(tmp_path):
+    link = tmp_path / "models"
+    link.symlink_to(PROJECT_ROOT / "models")
+    with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
+        RuntimeSettings.from_environment({"HEAR_MODEL_ROOT": str(link)})

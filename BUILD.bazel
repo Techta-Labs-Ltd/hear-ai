@@ -35,3 +35,13 @@ sh_binary(
     srcs = ["scripts/build_runpod_image.sh"],
     data = [":image_context"],
 )
+
+sh_binary(
+    name = "runpod_container",
+    srcs = ["scripts/run_production_container.sh"],
+)
+
+sh_binary(
+    name = "check_serverless_image",
+    srcs = ["scripts/check_serverless_image.sh"],
+)

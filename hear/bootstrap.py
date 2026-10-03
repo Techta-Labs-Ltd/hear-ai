@@ -36,6 +36,9 @@ class RuntimeBootstrap:
         self._root = root or Path(__file__).resolve().parents[1]
         self._model_root = self._settings.model_root
         self._manifest = ModelManifest(self._root / "hear" / "model_manifest.json")
+        self._manifest.validate_overrides(self._settings.model_paths)
+        if "fish-speech-s2-pro" in self._settings.model_paths:
+            raise ValueError("fish_model_path_is_configured_through_FISH_SPEECH_MODEL_ROOT")
         self._patch_manager = DependencyPatchManager(self._root)
         self._readiness: dict[WorkerRole, RuntimeReadiness] = {}
 
@@ -66,7 +69,8 @@ class RuntimeBootstrap:
             else self._model_root,
             self._patch_manager,
             enabled_features=self._settings.model_features,
-            require_manifest_models=not self._uses_available_engine(role),
+            model_paths=self._settings.model_paths,
+            require_manifest_models=role != WorkerRole.MAGIC_CLEAN_NATURAL,
             simulation=SimulationBoundary.enabled(),
         )
         scratch_root = self._settings.temp_dir
@@ -112,9 +116,7 @@ class RuntimeBootstrap:
             return self.transcription_executor()
         if role == WorkerRole.RECONSTRUCTION:
             return self.reconstruction_executor()
-        if role in {
-            WorkerRole.MAGIC_CLEAN_NATURAL,
-        }:
+        if role == WorkerRole.MAGIC_CLEAN_NATURAL:
             return self.magic_clean_executor(role)
         raise RuntimeError(f"unsupported_runtime_role:{role.value}")
 
@@ -137,8 +139,8 @@ class RuntimeBootstrap:
         )
         native = NativeExecutor("transcription-runtime")
         engine = qwen_engine(
-            model_path=self._model_root / "qwen3-asr-1.7b",
-            aligner_path=self._model_root / "qwen3-forced-aligner",
+            model_path=self._model_path("qwen3-asr-1.7b"),
+            aligner_path=self._model_path("qwen3-forced-aligner"),
             cache_dir=self._model_root,
             temp_dir=scratch_root,
             dtype=self._settings.qwen_asr_dtype,
@@ -159,6 +161,7 @@ class RuntimeBootstrap:
             batch_size=self._settings.whisper_batch_size,
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             native=native,
+            min_avg_logprob=self._settings.whisper_min_avg_logprob,
         )
         audio = AudioIO(
             client,
@@ -184,7 +187,7 @@ class RuntimeBootstrap:
             ],
         )
 
-    def pipeline_executor(self) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
+    def pipeline_executor(self, *, storage_factory=None) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
         from hear.inference.client import LocalInferenceClient
         from hear.services.categorization.discovery import DiscoveryService
         from hear.services.categorization.service import CategorizationService
@@ -219,8 +222,8 @@ class RuntimeBootstrap:
         small_module = importlib.import_module("hear.inference.small_models")
         text_module = importlib.import_module("hear.inference.text_generation")
         asr = qwen_module.LazyQwenAsrEngine(
-            model_path=self._model_root / "qwen3-asr-1.7b",
-            aligner_path=self._model_root / "qwen3-forced-aligner",
+            model_path=self._model_path("qwen3-asr-1.7b"),
+            aligner_path=self._model_path("qwen3-forced-aligner"),
             cache_dir=self._model_root,
             temp_dir=scratch_root,
             dtype=self._settings.qwen_asr_dtype,
@@ -234,9 +237,9 @@ class RuntimeBootstrap:
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
         small_models = small_module.LazySmallModelsEngine(
-            self._model_root / "toxic-bert",
-            self._model_root / "twitter-roberta-sentiment",
-            self._model_root / "nli-distilroberta",
+            self._model_path("toxic-bert"),
+            self._model_path("twitter-roberta-sentiment"),
+            self._model_path("nli-distilroberta"),
             model_native,
             idle_seconds=self._settings.pipeline_idle_ttl_seconds,
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
@@ -244,7 +247,7 @@ class RuntimeBootstrap:
         features = self._settings.model_features
         if "qwen_llm" in features:
             text_generation = text_module.VllmTextGenerationEngine(
-                self._model_root / "qwen2.5-7b-instruct",
+                self._model_path("qwen2.5-7b-instruct"),
                 gpu_memory_utilization=self._settings.qwen_llm_gpu_memory_utilization,
             )
         else:
@@ -267,6 +270,7 @@ class RuntimeBootstrap:
             batch_size=self._settings.whisper_batch_size,
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             native=audio_native,
+            min_avg_logprob=self._settings.whisper_min_avg_logprob,
         )
         audio = AudioIO(
             client,
@@ -274,7 +278,7 @@ class RuntimeBootstrap:
             max_download_bytes=self._settings.audio_download_max_bytes,
             decode_timeout_seconds=self._settings.audio_decode_timeout_seconds,
         )
-        storage_factory = B2StorageFactory()
+        storage_factory = storage_factory or B2StorageFactory()
         transcription = TranscriptionWorkflow(
             transcriber,
             audio,
@@ -291,7 +295,12 @@ class RuntimeBootstrap:
                 catalog.category_catalog,
                 catalog.taxonomy,
             ),
-            DiscoveryService(llm, catalog.taxonomy),
+            DiscoveryService(
+                llm,
+                catalog.taxonomy,
+                metadata_enabled=self._settings.discovery_metadata_enabled,
+                max_search_phrases=self._settings.discovery_max_search_phrases,
+            ),
             audio,
             storage_factory,
             audio_native,
@@ -320,7 +329,6 @@ class RuntimeBootstrap:
         from hear.services.reconstruction.fish_renderer import FishReconstructionRenderer
         from hear.workflows.fish_reconstruction import FishReconstructionWorkflow
 
-        # Cleaning's available/certified mode must never bypass Fish or its assets.
         self.ensure_ready(WorkerRole.RECONSTRUCTION)
         scratch_root = self._settings.temp_dir
         client = httpx.AsyncClient(
@@ -368,122 +376,53 @@ class RuntimeBootstrap:
         )
 
     def magic_clean_executor(
-        self, role: WorkerRole
-    ) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
-        if self._uses_available_engine(role):
-            return self.available_magic_clean_executor(role)
-        from hear.inference.magic_clean import MagicCleanRuntimeFactory
-        from hear.runtime.roles import WorkerCapabilityRegistry
-        from hear.workflows.magic_clean import MagicCleanWorkflow
-
-        if role not in {
-            WorkerRole.MAGIC_CLEAN_NATURAL,
-        }:
-            raise RuntimeError("unsupported_magic_clean_role")
-        self._settings.required("cleaner_certification_path")
-        scratch_root = self._settings.temp_dir
-        client = httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=httpx.Timeout(connect=15.0, read=60.0, write=30.0, pool=30.0),
-        )
-        native = NativeExecutor(f"{role.value}-runtime")
-        factory = MagicCleanRuntimeFactory(
-            Path(self._settings.required("cleaner_certification_path")),
-            self._settings.cleaner_lock_dir,
-            self._settings.required("cleaner_certification_sha256"),
-        )
-        worker = factory.build(role)
-        profile = WorkerCapabilityRegistry().get(role).magic_clean_profile
-        readiness = self.readiness(role)
-
-        def cleaner_ready() -> bool:
-            if profile is None:
-                return False
-            snapshot = worker.capabilities()
-            return any(
-                item.get("profile") == profile.value and item.get("ready") is True
-                for item in snapshot.get("profiles", [])
-            )
-
-        readiness.add_check("cleaner", cleaner_ready)
-        readiness.initialize()
-        if not readiness.is_ready():
-            worker.close()
-            factory.close()
-            raise RuntimeError("runtime_not_ready")
-        workflow = MagicCleanWorkflow(
-            worker,
-            native,
-            workspace_root=scratch_root,
-            resource_budget=self._magic_clean_budget(),
-        )
-        backend = self._attempt_reporter(client)
-        return (
-            JobExecutor({JobType.MAGIC_CLEAN: workflow}),
-            backend,
-            [
-                factory,
-                worker,
-                native,
-                client,
-            ],
-        )
-
-    def available_magic_clean_executor(
         self,
         role: WorkerRole,
     ) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
+        from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
         from hear.workflows.available_magic_clean import AvailableMagicCleanWorkflow
 
-        model_cleaner = None
-        if role == WorkerRole.MAGIC_CLEAN_NATURAL:
-            from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
+        if role != WorkerRole.MAGIC_CLEAN_NATURAL:
+            raise RuntimeError("unsupported_magic_clean_role")
+        sound_cleanup_service = None
+        if self._settings.sound_cleanup_bundle is not None:
+            from hear.services.sound_cleanup.analysis import SoundAnalyser
+            from hear.services.sound_cleanup.assets import SoundCleanupAssets
+            from hear.services.sound_cleanup.separator import EventSeparator
+            from hear.services.sound_cleanup.service import SoundCleanupService
 
-            sound_cleanup_service = None
-            if self._settings.sound_cleanup_bundle is not None:
-                from hear.services.sound_cleanup.analysis import SoundAnalyser
-                from hear.services.sound_cleanup.assets import SoundCleanupAssets
-                from hear.services.sound_cleanup.service import SoundCleanupService
-
-                assets = SoundCleanupAssets.load(
-                    self._settings.sound_cleanup_bundle,
-                    self._settings.sound_cleanup_bundle_sha256 or "",
-                )
-                from hear.services.sound_cleanup.separator import EventSeparator
-
-                separator = None
-                if self._settings.sound_cleanup_separator_bundle is not None:
-                    separator = EventSeparator(
-                        self._settings.sound_cleanup_separator_bundle,
-                        self._settings.sound_cleanup_separator_sha256 or "",
-                        self._settings.magic_clean_model_device,
-                        idle_seconds=self._settings.audiosep_idle_ttl_seconds,
-                        eviction_enabled=self._settings.gpu_idle_eviction_enabled,
-                    )
-                sound_cleanup_service = SoundCleanupService(
-                    SoundAnalyser(
-                        assets,
-                        device=self._settings.magic_clean_model_device,
-                    ),
-                    separator=separator,
-                )
-            model_cleaner = DeepFilterNetCleaner(
-                self._root / "deploy" / "cleaner" / "deepfilter3.ini",
-                self._model_root / "magic-clean" / "DeepFilterNet3",
-                self._magic_clean_budget(),
-                device=self._settings.magic_clean_model_device,
-                sound_cleanup_service=sound_cleanup_service,
-                idle_seconds=self._settings.magic_clean_idle_ttl_seconds,
-                eviction_enabled=self._settings.gpu_idle_eviction_enabled,
+            assets = SoundCleanupAssets.load(
+                self._settings.sound_cleanup_bundle,
+                self._settings.sound_cleanup_bundle_sha256 or "",
             )
+            separator = None
+            if self._settings.sound_cleanup_separator_bundle is not None:
+                separator = EventSeparator(
+                    self._settings.sound_cleanup_separator_bundle,
+                    self._settings.sound_cleanup_separator_sha256 or "",
+                    self._settings.magic_clean_model_device,
+                    idle_seconds=self._settings.audiosep_idle_ttl_seconds,
+                    eviction_enabled=self._settings.gpu_idle_eviction_enabled,
+                )
+            sound_cleanup_service = SoundCleanupService(
+                SoundAnalyser(assets, device=self._settings.magic_clean_model_device),
+                separator=separator,
+            )
+        model_cleaner = DeepFilterNetCleaner(
+            self._root / "deploy" / "cleaner" / "deepfilter3.ini",
+            self._settings.magic_clean_model_directory,
+            self._magic_clean_budget(),
+            device=self._settings.magic_clean_model_device,
+            sound_cleanup_service=sound_cleanup_service,
+            idle_seconds=self._settings.magic_clean_idle_ttl_seconds,
+            eviction_enabled=self._settings.gpu_idle_eviction_enabled,
+        )
         readiness = self.readiness(role)
         readiness.add_check("ffmpeg", self._ffmpeg_ready)
-        if model_cleaner is not None:
-            readiness.add_check("model_engine", model_cleaner.is_ready)
+        readiness.add_check("model_engine", model_cleaner.is_ready)
         readiness.initialize()
         if not readiness.is_ready():
-            if model_cleaner is not None:
-                model_cleaner.close()
+            model_cleaner.close()
             raise RuntimeError("runtime_not_ready")
         client = httpx.AsyncClient(
             follow_redirects=True,
@@ -509,13 +448,10 @@ class RuntimeBootstrap:
             timeout_seconds=self._settings.audio_decode_timeout_seconds,
             model_cleaner=model_cleaner,
         )
-        resources = [native, client]
-        if model_cleaner is not None:
-            resources.insert(0, model_cleaner)
         return (
             JobExecutor({JobType.MAGIC_CLEAN: workflow}),
             self._attempt_reporter(client),
-            resources,
+            [model_cleaner, native, client],
         )
 
     def _magic_clean_budget(self):
@@ -527,10 +463,8 @@ class RuntimeBootstrap:
             self._settings.magic_clean_max_frames,
         )
 
-    def _uses_available_engine(self, role: WorkerRole) -> bool:
-        return self._settings.optional_engine_mode == "available" and role in {
-            WorkerRole.MAGIC_CLEAN_NATURAL,
-        }
+    def _model_path(self, logical_name: str) -> Path:
+        return self._manifest.local_path(self._model_root, logical_name, self._settings.model_paths)
 
     @staticmethod
     def _ffmpeg_ready() -> bool:

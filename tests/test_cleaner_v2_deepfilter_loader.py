@@ -219,7 +219,7 @@ def test_inference_fault_closes_model_and_does_not_retain_native_traceback(
     backend = runtime.borrow(guard)
     del model
     with pytest.raises(CleanExecutionError) as error:
-        backend.enhance(np.zeros((1, 512), dtype=np.float32), 18)
+        backend.enhance(np.zeros((1, 512), dtype=np.float32), 18, False)
     assert error.value.code == code
     assert error.value.worker_restart_required == restart
     assert error.value.__context__ is None

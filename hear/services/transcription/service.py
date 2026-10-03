@@ -7,7 +7,6 @@ from typing import Protocol
 import soundfile as sf
 from scipy.signal import resample_poly
 
-from hear.config import settings
 from hear.execution.native import NativeExecutor
 from hear.utils.transcription_chunks import (
     adaptive_batch_size,
@@ -39,18 +38,20 @@ class TranscriptionProgressSink(Protocol):
 
 
 class TranscriptionResultPolicy:
+    def __init__(self, min_avg_logprob: float = -0.75) -> None:
+        self._min_avg_logprob = float(min_avg_logprob)
+
     @staticmethod
     def _normalized_text(value: str) -> str:
         return re.sub("[^a-z0-9 ]+", "", value.lower()).strip()
 
-    @staticmethod
-    def _credible_segments(result: dict, *, short_utterance: bool) -> list[dict]:
+    def _credible_segments(self, result: dict, *, short_utterance: bool) -> list[dict]:
         segments = list(result.get("segments") or [])
         credible = [
             segment
             for segment in segments
             if "avg_logprob" not in segment
-            or float(segment.get("avg_logprob", -99.0)) >= settings.WHISPER_MIN_AVG_LOGPROB
+            or float(segment.get("avg_logprob", -99.0)) >= self._min_avg_logprob
         ]
         if not credible or short_utterance:
             return credible
@@ -77,6 +78,7 @@ class TranscriptionService:
         batch_size: int = 36,
         long_audio_batch_size: int = 4,
         native: NativeExecutor | None = None,
+        min_avg_logprob: float = -0.75,
     ):
         if not 1 <= chunk_seconds <= 600 or batch_size < 1 or long_audio_batch_size < 1:
             raise ValueError("invalid_transcription_window_policy")
@@ -85,6 +87,7 @@ class TranscriptionService:
         self._batch_size = batch_size
         self._long_audio_batch_size = long_audio_batch_size
         self._native = native
+        self._policy = TranscriptionResultPolicy(min_avg_logprob)
 
     @staticmethod
     def _read_window(source, frames: int):
@@ -187,9 +190,7 @@ class TranscriptionService:
         }
         if not result:
             return _silent
-        segments_list = TranscriptionResultPolicy._credible_segments(
-            result, short_utterance=short_utterance
-        )
+        segments_list = self._policy._credible_segments(result, short_utterance=short_utterance)
         detected_language = result.get("language", language or "en")
         segments: list[dict] = []
         full_text_parts = []

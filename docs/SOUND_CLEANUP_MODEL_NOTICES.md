@@ -21,4 +21,4 @@ No model weights or source audio are committed to this repository.
   remains the user's local material and was never uploaded to a model API.
 
 Model provenance is separate from acceptance of speech quality. No performance
-score or licensing review can replace the release checks in SOUND_CLEANUP_V1.md.
+score or licensing review can replace the [audio acceptance checks](AUDIO_JOBS.md#acceptance).

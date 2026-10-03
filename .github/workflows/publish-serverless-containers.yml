@@ -1,0 +1,50 @@
+name: Build HEAR AI Serverless images
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: hear-ai-serverless-image-build
+  cancel-in-progress: false
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: pipeline-serverless
+            tag: pipeline-serverless
+          - target: magic-clean-natural-serverless
+            tag: cleaner-serverless
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GHCR_TOKEN: ${{ github.token }}
+      GHCR_USERNAME: ${{ github.actor }}
+      HEAR_IMAGE_TAR: /tmp/hear-serverless.tar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Prepare the ephemeral Docker builder
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          curl -fLsS https://github.com/bazelbuild/bazel/releases/download/8.4.2/bazel-8.4.2-linux-x86_64 -o /tmp/hear-bazel
+          printf '%s  %s\n' 4dc8e99dfa802e252dac176d08201fd15c542ae78c448c8a89974b6f387c282c /tmp/hear-bazel | sha256sum -c -
+          chmod 0755 /tmp/hear-bazel
+          df -h /
+      - name: Build and publish the Serverless target through Bazel
+        run: |
+          export DOCKER_CONFIG="$(mktemp -d)"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+          image="ghcr.io/techta-labs-ltd/hear-ai:${{ matrix.tag }}-${{ github.sha }}"
+          /tmp/hear-bazel run //:runpod_image -- --target "${{ matrix.target }}" --tag "$image" --push
+          /tmp/hear-bazel run //:check_serverless_image -- "$image"
+          docker buildx imagetools inspect "$image" > "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
+          sha256sum bazel-bin/hear-runtime-context.tar >> "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-publication
+          path: ${{ matrix.target }}-publication.txt
+          retention-days: 7

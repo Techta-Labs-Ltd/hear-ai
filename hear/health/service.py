@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ class RuntimeReadiness:
         patch_manager: Any,
         *,
         enabled_features: frozenset[str] = frozenset(),
+        model_paths: Mapping[str, Path] | None = None,
         require_manifest_models: bool = True,
         simulation: bool = False,
     ) -> None:
@@ -23,6 +25,7 @@ class RuntimeReadiness:
         self._role = role
         self._manifest = manifest
         self._model_root = model_root
+        self._model_paths = dict(model_paths or {})
         self._patch_manager = patch_manager
         self._enabled_features = enabled_features
         self._require_manifest_models = require_manifest_models
@@ -56,6 +59,7 @@ class RuntimeReadiness:
                 self._model_root,
                 self._role,
                 enabled_features=self._enabled_features,
+                overrides=self._model_paths,
             )
             if self._require_manifest_models
             else ()

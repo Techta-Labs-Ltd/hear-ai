@@ -1,4 +1,3 @@
-import json
 import threading
 import time
 
@@ -7,11 +6,9 @@ import pytest
 import soundfile as sf
 
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
-from hear.services.magic_clean.contracts import AttemptTicket, CleanExecutionError, ErrorCode
+from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepFilterEngine
-from tests.test_cleaner_v2_contracts import ticket as ticket_fixture
-
-ticket = ticket_fixture
+from tests.cleaner_plans import natural_plan
 
 
 class Backend:
@@ -20,8 +17,8 @@ class Backend:
         self.closed = False
         self.corrupt = False
 
-    def enhance(self, samples, attenuation_limit_db):
-        assert attenuation_limit_db == 18
+    def enhance(self, samples, attenuation_limit_db, post_filter):
+        assert attenuation_limit_db == 18 and post_filter is False
         self.lengths.append(samples.shape[1])
         result = samples.copy()
         # Simulate boundary transients to verify contextual margins are cropped.
@@ -47,10 +44,9 @@ class Factory:
 
 
 @pytest.fixture
-def runtime(tmp_path, ticket):
+def runtime(tmp_path):
     policy = ContextualPolicy(48000, 4800)
-    ticket["plan"]["runtime"]["longform_policy_sha256"] = policy.digest
-    plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
+    plan = natural_plan(policy.digest)
     backend = Backend()
     engine = DeepFilterEngine(plan.runtime, Factory(backend), policy)
     guard = ResourceGuard(
@@ -160,11 +156,11 @@ def test_racing_output_preserved_through_session_cleanup(
     sf.write(source, np.zeros(4801), rate, subtype="FLOAT")
     original = backend.enhance
 
-    def enhance(samples, attenuation):
+    def enhance(samples, attenuation, post_filter):
         destination.write_bytes(b"concurrent owner")
         if fail:
             raise RuntimeError("fixture model failure")
-        return original(samples, attenuation)
+        return original(samples, attenuation, post_filter)
 
     monkeypatch.setattr(backend, "enhance", enhance)
     session = engine.open_session(plan, guard)

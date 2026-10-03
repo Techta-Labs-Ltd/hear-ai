@@ -1,7 +1,7 @@
 """Bounded contextual DeepFilterNet3 file adapter.
 
-The backend must use the pinned DF3 model, no postfilter, and delay-compensated
-inference. Context length is part of the certified longform policy, not an
+The backend must use the pinned DF3 model with delay-compensated inference; the
+attenuation limit and post-filter are per-plan inference options, not model variants. Context length is part of the certified longform policy, not an
 assertion of equivalence to unbounded continuous inference.
 """
 
@@ -37,7 +37,9 @@ class DeepFilterBackend(Protocol):
     No implicit device switch, extra model or attenuation default is permitted.
     """
 
-    def enhance(self, samples: np.ndarray, attenuation_limit_db: int) -> np.ndarray: ...
+    def enhance(
+        self, samples: np.ndarray, attenuation_limit_db: int, post_filter: bool
+    ) -> np.ndarray: ...
 
     def close(self) -> None: ...
 
@@ -266,7 +268,9 @@ class DeepFilterSession:
                         raise CleanExecutionError(
                             ErrorCode.INVALID_AUDIO, "invalid DeepFilter input block"
                         )
-                    enhanced = self.backend.enhance(samples, self.attenuation(self.plan))
+                    enhanced = self.backend.enhance(
+                        samples, self.attenuation(self.plan), self.plan.post_filter
+                    )
                     guard.check()
                     if (
                         enhanced.shape != samples.shape

@@ -5,13 +5,13 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
 
 from hear.api.body_limit import RequestBodyLimitMiddleware
 from hear.api.gateway import PodGateway
+from hear.config import RuntimeSettings
 from hear.runtime.cleaner.asset_probe import PinnedAssetProbe
 from hear.runtime.gateway import RabbitMQGateway
 from hear.runtime.ownership import DeploymentOwnership
@@ -35,26 +35,25 @@ class GatewayEntrypoint:
         return roles
 
     @staticmethod
-    def sound_cleanup_ready() -> bool:
-        bundle = os.environ.get("HEAR_SOUND_CLEANUP_BUNDLE", "").strip()
-        digest = os.environ.get("HEAR_SOUND_CLEANUP_BUNDLE_SHA256", "").strip()
-        if not bundle or not digest:
+    def sound_cleanup_ready(settings: RuntimeSettings) -> bool:
+        bundle = settings.sound_cleanup_bundle
+        digest = settings.sound_cleanup_bundle_sha256
+        if bundle is None or not digest:
             return False
         try:
-            SoundCleanupAssets.load(Path(bundle), digest)
+            SoundCleanupAssets.load(bundle, digest)
             return True
         except Exception:
             logging.getLogger(__name__).warning("Sound Cleanup bundle is not ready")
             return False
 
     @staticmethod
-    def overlap_preview_ready() -> bool:
-        path = os.environ.get("HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE", "")
-        digest = os.environ.get("HEAR_SOUND_CLEANUP_SEPARATOR_SHA256", "")
-        if not path or not digest:
+    def overlap_preview_ready(settings: RuntimeSettings) -> bool:
+        root = settings.sound_cleanup_separator_bundle
+        digest = settings.sound_cleanup_separator_sha256
+        if root is None or not digest:
             return False
         try:
-            root = Path(path)
             payload = PinnedAssetProbe.read_regular(root / "manifest.json", maximum_bytes=65536)
             if hashlib.sha256(payload).hexdigest() != digest:
                 return False
@@ -69,17 +68,17 @@ class GatewayEntrypoint:
 
     @classmethod
     def create_app(cls) -> FastAPI:
+        settings = RuntimeSettings.from_environment(dict(os.environ))
         runtime = RabbitMQGateway(
-            os.environ.get("HEAR_RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672/%2F"),
+            settings.rabbitmq_url or "amqp://guest:guest@127.0.0.1:5672/%2F",
             cls.roles(),
         )
         gateway = PodGateway(
             runtime,
-            os.environ.get("HEAR_POD_API_KEY", ""),
-            sound_cleanup_available=cls.sound_cleanup_ready(),
-            overlap_preview_available=cls.overlap_preview_ready(),
+            settings.pod_api_key.get_secret_value() if settings.pod_api_key else "",
+            sound_cleanup_available=cls.sound_cleanup_ready(settings),
+            overlap_preview_available=cls.overlap_preview_ready(settings),
             ownership_policy=DeploymentOwnership.load(),
-            cleaning_mode=os.environ.get("HEAR_OPTIONAL_ENGINE_MODE", "available"),
             enable_docs=os.environ.get("HEAR_ENABLE_DOCS", "false").lower() == "true",
         )
 

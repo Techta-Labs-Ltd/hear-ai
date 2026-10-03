@@ -90,12 +90,11 @@ def test_rebuild_requires_matching_voice_reference():
     assert result.same_speaker
 
 
-def test_cleaner_mode_never_changes_reconstruction_engine():
-    for mode in ("available", "certified"):
-        bootstrap = RuntimeBootstrap({"HEAR_OPTIONAL_ENGINE_MODE": mode})
-        assert not bootstrap._uses_available_engine(WorkerRole.RECONSTRUCTION)
-        snapshot = bootstrap.readiness(WorkerRole.RECONSTRUCTION).snapshot()
-        assert "fish-speech-s2-pro:permission_required" in snapshot["license_blockers"]
+def test_reconstruction_readiness_always_requires_manifest_models(tmp_path):
+    bootstrap = RuntimeBootstrap({"HEAR_MODEL_ROOT": str(tmp_path)})
+    snapshot = bootstrap.readiness(WorkerRole.RECONSTRUCTION).snapshot()
+    assert "fish-speech-s2-pro:permission_required" in snapshot["license_blockers"]
+    assert snapshot["missing_models"]
 
 
 def test_fish_uses_different_queue_from_legacy_splicing():

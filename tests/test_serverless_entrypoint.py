@@ -1,6 +1,9 @@
+import asyncio
+
 import pytest
 
 import hear.entrypoints.serverless as entrypoint
+from hear.runtime.gpu_idle import AsyncIdleResource
 from hear.runtime.roles import WorkerRole
 
 
@@ -65,3 +68,81 @@ def test_serverless_entrypoint_checks_final_readiness_and_closes_resources(
         assert started == []
 
     assert resource.closed is True
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_serverless_preloads_before_serving_and_closes_on_failure(monkeypatch, fails):
+    calls = []
+
+    class Resource(FakeResource):
+        async def warmup(self):
+            calls.append("warmup")
+            if fails:
+                raise RuntimeError("model_load_failed")
+
+    resource = Resource()
+    bootstrap = FakeBootstrap(True, resource)
+
+    class Runtime:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            calls.append("serve")
+
+    monkeypatch.setenv("HEAR_WORKER_ROLE", "transcription")
+    monkeypatch.setenv("HEAR_SERVERLESS_PRELOAD_MODELS", "true")
+    monkeypatch.setenv("HEAR_GPU_IDLE_EVICTION_ENABLED", "false")
+    monkeypatch.setattr(entrypoint, "ServerlessRuntime", Runtime)
+    runtime = entrypoint.ServerlessEntrypoint(bootstrap)
+    if fails:
+        with pytest.raises(RuntimeError, match="model_load_failed"):
+            runtime.run()
+        assert calls == ["warmup"]
+    else:
+        runtime.run()
+        assert calls == ["warmup", "serve"]
+    assert resource.closed
+
+
+def test_serverless_preload_rejects_idle_eviction_before_allocating(monkeypatch):
+    class Bootstrap:
+        def executor_for(self, role):
+            pytest.fail("must reject configuration before model allocation")
+
+    monkeypatch.setenv("HEAR_SERVERLESS_PRELOAD_MODELS", "true")
+    monkeypatch.setenv("HEAR_GPU_IDLE_EVICTION_ENABLED", "true")
+    with pytest.raises(RuntimeError, match="serverless_preload_requires_idle_eviction_disabled"):
+        entrypoint.ServerlessEntrypoint(Bootstrap()).run()
+
+
+def test_preloaded_model_survives_startup_loop_and_is_reused_by_jobs():
+    loads = []
+
+    async def load():
+        model = object()
+        loads.append(model)
+        return model
+
+    async def close(model):
+        pass
+
+    resource = AsyncIdleResource(
+        "serverless-model", load, close, idle_seconds=1, eviction_enabled=False
+    )
+
+    async def borrow():
+        model = await resource.acquire()
+        await resource.release()
+        return model
+
+    preloaded = asyncio.run(borrow())
+
+    async def jobs():
+        assert await borrow() is preloaded
+        assert await borrow() is preloaded
+        assert resource.snapshot["cold_starts"] == 1
+        await resource.close()
+
+    asyncio.run(jobs())
+    assert loads == [preloaded]

@@ -1,10 +1,11 @@
 """Create isolated local test settings without reading production credentials."""
 
+import argparse
 import hashlib
 import ipaddress
 import json
 import secrets
-import shutil
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,7 +18,14 @@ from cryptography.x509.oid import NameOID
 class SetupSimulation:
     @staticmethod
     def main():
-        root = Path("/root/hear-ai-v11/simulation-20260928")
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--root", type=Path, default=Path("/root/hear-ai-runtime/canary"))
+        parser.add_argument("--audio-file", type=Path, required=True)
+        parser.add_argument("--fish-reference", type=Path)
+        args = parser.parse_args()
+        root = args.root.resolve()
+        if not args.audio_file.is_file():
+            parser.error("audio-file must be an existing real audio recording")
         root.mkdir(parents=True, exist_ok=True)
         if (root / "config.json").exists():
             raise RuntimeError("simulation already configured; existing data retained")
@@ -55,13 +63,35 @@ class SetupSimulation:
         config = {"ingress_token": token, "service_key": service, "bucket": "hear-simulation-local"}
         (root / "config.json").write_text(json.dumps(config))
         (root / "config.json").chmod(0o600)
-        shutil.copyfile(
-            "/workspace/hear-ai-v11/Bad Quality Tracks 0406 - Track 15.mp3",
-            root / "sources/input.mp3",
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(args.audio_file),
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "128k",
+                str(root / "sources/input.mp3"),
+            ],
+            check=True,
         )
-        shutil.copyfile(
-            "/workspace/hear-ai-v11/clean/fish-nf4-20260928/01_real_fish_nf4.wav",
-            root / "sources/fish-reference.wav",
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(args.fish_reference or args.audio_file),
+                "-ar",
+                "44100",
+                "-ac",
+                "1",
+                str(root / "sources/fish-reference.wav"),
+            ],
+            check=True,
         )
         base = "https://127.0.0.1:18081"
         policy = {
@@ -91,23 +121,25 @@ class SetupSimulation:
             "HEAR_POD_API_KEY": token,
             "HEAR_MODEL_ROOT": "/models",
             "HEAR_TEMP_DIR": str(root / "scratch"),
-            "FISH_SPEECH_HOME": "/root/hear-ai-v11/models/fish-speech/source-nf4",
-            "FISH_SPEECH_MODEL_ROOT": "/root/hear-ai-v11/models",
+            "FISH_SPEECH_HOME": "/opt/fish-speech",
+            "FISH_SPEECH_MODEL_ROOT": "/models",
             "FISH_SPEECH_BNB_MODE": "nf4",
-            "HEAR_OPTIONAL_ENGINE_MODE": "available",
             "HEAR_MAGIC_CLEAN_MODEL_DEVICE": "cuda:0",
             "HEAR_RABBITMQ_URL": "amqp://guest:guest@127.0.0.1:5672/%2F",
             "HEAR_QUEUE_EXCHANGE": "hear.simulation.jobs",
             "HEAR_QUEUE_PREFIX": "hear.simulation",
             "HEAR_POD_MAX_CONCURRENT_JOBS": "1",
-            "HEAR_HOST_MAX_CONCURRENT_JOBS": "2",
+            "HEAR_HOST_MAX_CONCURRENT_JOBS": "10",
             "HEAR_HOST_JOB_LOCK_PATH": str(root / "admission.lock"),
-            "HEAR_POD_STACK_ROLES": "reconstruction,pipeline,transcription,magic_clean_natural",
+            "HEAR_POD_STACK_ROLES": "pipeline,magic_clean_natural,reconstruction",
+            "HEAR_POD_ROLE_LIMITS": '{"pipeline":7,"magic_clean_natural":4,"reconstruction":2}',
+            "HEAR_POD_PROCESS_LIMITS": '{"pipeline":7,"magic_clean_natural":1,"reconstruction":1}',
+            "HEAR_WORKER_REPLICAS": '{"pipeline":1,"magic_clean_natural":4,"reconstruction":2}',
             "HEAR_IMAGE_REVISION": "evaluation-current",
             "HEAR_ENGINE_REVISION": "deepfilter-fish-nf4-qwen",
             "HEAR_ENABLE_DOCS": "true",
             "HEAR_GATEWAY_PORT": "8000",
-            "HEAR_GATEWAY_HOST": "0.0.0.0",
+            "HEAR_GATEWAY_HOST": "127.0.0.1",
             "SSL_CERT_FILE": str(root / "tls/cert.pem"),
             "REQUESTS_CA_BUNDLE": str(root / "tls/cert.pem"),
             "AWS_CA_BUNDLE": str(root / "tls/cert.pem"),
@@ -122,13 +154,28 @@ class SetupSimulation:
             "HF_HOME": "/root/.cache/huggingface",
             "TORCH_HOME": "/root/.cache/torch",
             "UV_CACHE_DIR": "/root/.cache/uv",
+            "HEAR_GPU_IDLE_EVICTION_ENABLED": "true",
+            "HEAR_PIPELINE_IDLE_TTL_SECONDS": "60",
+            "HEAR_MAGIC_CLEAN_IDLE_TTL_SECONDS": "60",
+            "HEAR_RECONSTRUCTION_IDLE_TTL_SECONDS": "60",
+            "HEAR_AUDIOSEP_IDLE_TTL_SECONDS": "30",
             "OMP_NUM_THREADS": "2",
             "OPENBLAS_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "2",
-            "WHISPER_BATCH_SIZE": "2",
-            "WHISPER_LONG_AUDIO_BATCH_SIZE": "1",
-            "HEAR_GATEWAY_PYTHON_BIN": "/opt/hear-ai-v11/venvs/test/bin/python",
+            "WHISPER_BATCH_SIZE": "8",
+            "WHISPER_LONG_AUDIO_BATCH_SIZE": "8",
+            "WHISPER_CHUNK_SECONDS": "240",
+            "HEAR_GATEWAY_PYTHON_BIN": "/opt/hear-ai-v11/venvs/pipeline/bin/python",
         }
+        release = Path("/models/sound-cleanup-release.env")
+        if release.is_file():
+            env.update(
+                HEAR_SOUND_CLEANUP_BUNDLE="/models/sound-cleanup-v1-runtime",
+                HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE="/models/sound-cleanup-specialist/runtime",
+            )
+            for line in release.read_text().splitlines():
+                key, value = line.split("=", 1)
+                env[key] = value
         env_file = root / "runtime.env"
         env_file.write_text("".join(k + "=" + "'" + v + "'" + "\n" for k, v in env.items()))
         env_file.chmod(0o600)

@@ -8,22 +8,20 @@ import soundfile as sf
 
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
 from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
-from hear.services.magic_clean.contracts import AttemptTicket, CleanExecutionError
+from hear.services.magic_clean.contracts import CleanExecutionError
 from hear.services.magic_clean.mastering import AudioMasteringService, LoudnessMeasurement
-from tests.test_cleaner_v2_contracts import ticket as ticket_fixture
-
-ticket = ticket_fixture
+from tests.cleaner_plans import natural_plan
 
 
 @pytest.fixture
-def mastering(tmp_path, ticket):
+def mastering(tmp_path):
     guard = ResourceGuard(
         ResourceBudget(20_000_000, 5_000_000, 300000),
         tmp_path,
         time.monotonic() + 30,
         threading.Event(),
     )
-    plan = AttemptTicket.model_validate_json(json.dumps(ticket)).plan
+    plan = natural_plan()
     return AudioMasteringService(CancellableProcessRunner()), plan, guard
 
 

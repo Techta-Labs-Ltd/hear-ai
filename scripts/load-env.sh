@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly dotenv_path="${1:?usage: load-env.sh ENV_FILE}"
+dotenv_path="${1:?usage: load-env.sh ENV_FILE}"
 
 if [[ ! -f "$dotenv_path" ]]; then
   exit 0

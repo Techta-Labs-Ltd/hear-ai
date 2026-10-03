@@ -5,6 +5,7 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from hear.contracts.cleaning import MagicCleanProfile
@@ -155,3 +156,33 @@ def test_unvalidated_or_mismatched_output_is_never_published(tmp_path, invalid):
     assert result.outcome["status"] == "failed"
     assert result.outcome["error_code"] == "invalid_audio"
     assert not result.storage.uploads
+
+
+class VadDouble:
+    STEP = 1536
+
+    def __init__(self, before, after):
+        self._values = iter((np.asarray(before, dtype=np.float32), np.asarray(after, dtype=np.float32)))
+
+    def speech_probability(self, path, guard):
+        return next(self._values)
+
+
+def test_speech_preservation_passes_when_voiced_frames_survive():
+    from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
+
+    before = [0.95] * 300 + [0.1] * 300
+    after = [0.9] * 299 + [0.05] + [0.0] * 300
+    report = DeepFilterNetCleaner.speech_preservation(VadDouble(before, after), None, None, None)
+    assert report["status"] == "review_required"
+    assert (report["voiced_frames"], report["lost_voiced_frames"]) == (300, 1)
+
+
+def test_speech_preservation_fails_when_speech_is_removed():
+    from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
+    from hear.services.magic_clean.contracts import CleanExecutionError
+
+    before = [0.95] * 300
+    after = [0.9] * 250 + [0.0] * 50
+    with pytest.raises(CleanExecutionError, match="speech_activity_lost:50_of_300"):
+        DeepFilterNetCleaner.speech_preservation(VadDouble(before, after), None, None, None)

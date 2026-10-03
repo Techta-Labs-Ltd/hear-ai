@@ -7,6 +7,7 @@ GPU engines to be loaded only on demand and evicted after an idle TTL.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from collections.abc import Awaitable, Callable
 
@@ -71,6 +72,9 @@ class AsyncIdleResource[T]:
                 self._resource = resource
                 self._loading = None
                 self._cold_starts += 1
+                logging.getLogger(__name__).info(
+                    "gpu_model_loaded name=%s cold_starts=%s", self.name, self._cold_starts
+                )
                 self._state = "busy" if self._active else "warm"
                 close_now = False
         if close_now:
@@ -127,6 +131,9 @@ class AsyncIdleResource[T]:
                 # another heavyweight load before the previous engine releases VRAM.
                 await self._closer(resource)
                 self._evictions += 1
+                logging.getLogger(__name__).info(
+                    "gpu_model_evicted name=%s evictions=%s", self.name, self._evictions
+                )
                 self._state = "cold"
         except asyncio.CancelledError:
             return
@@ -147,6 +154,9 @@ class AsyncIdleResource[T]:
             self._resource = None
             await self._closer(resource)
             self._evictions += 1
+            logging.getLogger(__name__).info(
+                "gpu_model_evicted name=%s evictions=%s", self.name, self._evictions
+            )
             self._state = "cold"
             return True
 
@@ -234,6 +244,9 @@ class SyncIdleResource[T]:
                     self._state = "failed"
                     raise
                 self._cold_starts += 1
+                logging.getLogger(__name__).info(
+                    "gpu_model_loaded name=%s cold_starts=%s", self.name, self._cold_starts
+                )
             self._state = "busy"
             return self._resource
 
@@ -260,6 +273,9 @@ class SyncIdleResource[T]:
             self._resource = None
             self._closer(resource)
             self._evictions += 1
+            logging.getLogger(__name__).info(
+                "gpu_model_evicted name=%s evictions=%s", self.name, self._evictions
+            )
             self._state = "cold"
 
     def evict_now(self) -> bool:
@@ -274,6 +290,9 @@ class SyncIdleResource[T]:
             self._resource = None
             self._closer(resource)
             self._evictions += 1
+            logging.getLogger(__name__).info(
+                "gpu_model_evicted name=%s evictions=%s", self.name, self._evictions
+            )
             self._state = "cold"
             return True
 

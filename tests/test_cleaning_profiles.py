@@ -78,7 +78,7 @@ def test_unsupported_or_ambiguous_options_rejected(options):
 
 def test_legacy_natural_defaults_remain_denoise_only():
     options = CleaningProfiles.validate({"profile": "natural"})
-    assert options["attenuation_limit_db"] == 24
+    assert options["attenuation_limit_db"] == 36 and options["post_filter"] is False
     assert not any(options[key] for key in ("auto_level", "trim_silence", "remove_clicks"))
     assert ProfileDspService.preparation_filters(options) == []
     assert ProfileDspService.finishing_filters(options) == []
@@ -91,17 +91,16 @@ def test_profiles_do_not_claim_echo_or_prompt_separation():
     assert all(spec["engine"] == "deepfilternet3" for spec in catalogue["profiles"].values())
 
 
-@pytest.mark.parametrize(
-    "ready,mode", [(False, "available"), (True, "available"), (True, "certified")]
-)
-def test_catalogue_reports_lane_availability(ready, mode):
+@pytest.mark.parametrize("ready", [False, True])
+def test_catalogue_reports_lane_availability(ready):
     class Gateway:
         async def lane_status(self):
             return {"magic_clean_natural": {"status": "ready" if ready else "loading"}}
 
-    response = asyncio.run(PodGateway(Gateway(), "key", cleaning_mode=mode).capabilities())
-    for name, spec in response["magic_clean"]["profiles"].items():
-        assert spec["available"] is (ready and (mode == "available" or name == "natural"))
+    response = asyncio.run(PodGateway(Gateway(), "key").capabilities())
+    assert response["magic_clean"]["engine_mode"] == "available"
+    for spec in response["magic_clean"]["profiles"].values():
+        assert spec["available"] is ready
 
 
 def tone(rate=48000, seconds=2, channels=1):
@@ -215,6 +214,7 @@ def stubbed_cleaner():
         longform_policy_sha256=digest,
     )
     cleaner._engine = PassthroughModelForPipelineTest()
+    cleaner._sound_cleanup = None
     cleaner._runner = CancellableProcessRunner()
     cleaner._dsp = ProfileDspService(cleaner._runner)
     cleaner._mastering = AudioMasteringService(cleaner._runner)

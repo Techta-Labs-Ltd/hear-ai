@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import re
 
-from hear.config import settings
 from hear.models.discovery import ContentDiscoveryProfile, DiscoveryEntities, DiscoverySerialization
 from hear.services.llm import LLMService
 from hear.services.pipeline.configuration import PipelineConfiguration, PipelineTaxonomy
@@ -108,11 +107,20 @@ class DiscoverySupport:
 
 
 class DiscoveryService:
-    def __init__(self, llm: LLMService | None = None, taxonomy=None) -> None:
+    def __init__(
+        self,
+        llm: LLMService | None = None,
+        taxonomy=None,
+        *,
+        metadata_enabled: bool = True,
+        max_search_phrases: int = 12,
+    ) -> None:
         self._llm = llm or LLMService(enabled=False)
         if taxonomy is None:
             taxonomy = PipelineTaxonomy(PipelineConfiguration.empty())
         self._taxonomy = taxonomy
+        self._metadata_enabled = bool(metadata_enabled)
+        self._max_search_phrases = max(1, int(max_search_phrases))
 
     def _llm_service(self) -> LLMService:
         return self._llm
@@ -266,7 +274,7 @@ class DiscoveryService:
                         seen.add(t.lower())
                         phrases.append(t)
             profile.search_phrases = (profile.search_phrases or []) + phrases
-            profile.search_phrases = profile.search_phrases[: settings.DISCOVERY_MAX_SEARCH_PHRASES]
+            profile.search_phrases = profile.search_phrases[: self._max_search_phrases]
         if not profile.key_themes and profile.secondary_topics:
             profile.key_themes = profile.secondary_topics[:6]
         if not profile.audience_relevance and profile.main_topic:
@@ -296,26 +304,17 @@ class DiscoveryService:
         return s[:80] == t[:80]
 
     def _compose_summary_blurb(self, profile: ContentDiscoveryProfile, transcript: str) -> str:
-        speaker = (profile.speaker or "").strip()
-        topic = (profile.main_topic or "").strip()
-        genre = (profile.primary_genre or "").strip()
-        themes = profile.key_themes or []
-        if speaker and topic:
-            base = f"{speaker} discusses {topic}."
-        elif topic:
-            base = f"A conversation about {topic}."
-        elif genre and genre.lower() not in ("spoken audio", "podcast"):
-            base = f"A {genre.lower()} piece."
-        else:
-            base = "A spoken-word audio piece."
-        if themes:
-            base += f" Themes include {themes[0].lower()}"
-            if len(themes) > 1:
-                base += f" and {themes[1].lower()}"
-            base += "."
-        if not base.endswith(".") and profile.secondary_topics:
-            base += f" Topics include {profile.secondary_topics[0]}."
-        return base[:500]
+        # Without a generative model, expose actual content rather than a
+        # fabricated conversation assembled from classifier labels.
+        return self._transcript_excerpt(transcript, limit=500, sentences=2)
+
+    @staticmethod
+    def _transcript_excerpt(transcript: str, *, limit: int, sentences: int = 1) -> str:
+        text = re.sub(r"\s+", " ", transcript).strip()
+        excerpt = " ".join(re.split(r"(?<=[.!?])\s+", text)[:sentences])
+        if len(excerpt) <= limit:
+            return excerpt
+        return excerpt[:limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:") + "…"
 
     def merge_controlled_tags(
         self,
@@ -421,11 +420,13 @@ class DiscoveryService:
         speaker = self._infer_speaker(transcript)
         profile = ContentDiscoveryProfile(
             content_id=content_id,
-            title_suggestion=None,
+            title_suggestion=self._transcript_excerpt(transcript, limit=120),
             primary_genre=main,
             main_topic=main,
             secondary_topics=cats[1:6] + [t.lstrip("#") for t in tags[:5]],
             speaker=speaker,
+            summary_short=self._transcript_excerpt(transcript, limit=500, sentences=2),
+            one_line_description=self._transcript_excerpt(transcript, limit=500),
         )
         profile = self._enrich_profile(profile, transcript, categorization, track_name)
         profile.controlled_tags = self.merge_controlled_tags(
@@ -469,7 +470,7 @@ class DiscoveryService:
                 return []
             return [str(x).strip() for x in val if x and str(x).strip()][:cap]
 
-        max_phrases = max(1, settings.DISCOVERY_MAX_SEARCH_PHRASES)
+        max_phrases = self._max_search_phrases
         summary_short = str(raw.get("summary_short") or raw.get("short_summary") or "").strip()
         themes = _lst("themes", 12) or _lst("key_themes", 12)
         audience = _lst("audience_groups", 12) or _lst("audience_relevance", 12)
@@ -517,7 +518,7 @@ class DiscoveryService:
         prior_description: str | None = None,
         partial_transcript: bool = False,
     ) -> ContentDiscoveryProfile | None:
-        if not settings.DISCOVERY_METADATA_ENABLED:
+        if not self._metadata_enabled:
             profile = self._fallback_from_categorization(
                 transcript, categorization, content_id=content_id, track_name=track_name
             )
@@ -542,7 +543,7 @@ class DiscoveryService:
                         categorization_hint=hint,
                         prior_description=prior_description,
                         partial_transcript=partial_transcript,
-                        max_search_phrases=settings.DISCOVERY_MAX_SEARCH_PHRASES,
+                        max_search_phrases=self._max_search_phrases,
                         taxonomy_paths=taxonomy_paths,
                         strict=strict,
                     )
@@ -571,7 +572,8 @@ class DiscoveryService:
                         break
         elif not self._llm_service().is_available:
             print(
-                "[DISCOVERY] Qwen not loaded — enable QWEN_LLM_ENABLED=true and GPU; using categorization fallback (limited metadata)"
+                "[DISCOVERY] Using transcript excerpts; generative discovery requires "
+                "HEAR_MODEL_FEATURES=qwen_llm and the pipeline LLM image"
             )
         profile = self._fallback_from_categorization(
             transcript, categorization, content_id=content_id, track_name=track_name

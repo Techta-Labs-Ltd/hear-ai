@@ -47,10 +47,6 @@ env/
 .DS_Store
 Thumbs.db
 
-local_translate.txt
-Hear_AI_Engineering_Specification.docx
-implementation_plan.md
-
 *.log
 logs/
 
@@ -65,3 +61,6 @@ htmlcov/
 
 # Job-local float audio is scratch data, never source or model assets.
 .runtime-audio/
+
+# Local job outputs and build receipts are generated artifacts.
+/outputs/

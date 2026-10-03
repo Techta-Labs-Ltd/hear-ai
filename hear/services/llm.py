@@ -3,7 +3,6 @@ import logging
 import re
 import threading
 
-from hear.config import settings as app_settings
 from hear.inference.client import LocalInferenceClient
 
 logger = logging.getLogger(__name__)
@@ -15,16 +14,12 @@ class LLMService:
         model_client: LocalInferenceClient | None = None,
         *,
         enabled: bool | None = None,
-        discovery_max_new_tokens: int | None = None,
+        discovery_max_new_tokens: int = 1100,
     ) -> None:
         self._lock = threading.Lock()
         self._model_client = model_client
         self._enabled = False if enabled is None else bool(enabled)
-        self._discovery_max_new_tokens = (
-            int(app_settings.DISCOVERY_MAX_NEW_TOKENS)
-            if discovery_max_new_tokens is None
-            else int(discovery_max_new_tokens)
-        )
+        self._discovery_max_new_tokens = int(discovery_max_new_tokens)
 
     @property
     def is_available(self) -> bool:

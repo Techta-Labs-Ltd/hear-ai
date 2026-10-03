@@ -10,6 +10,8 @@ class SmallModelsProtocol(Protocol):
         text: str,
         candidates: list[str] | None = None,
         hypothesis_template: str | None = None,
+        *,
+        multi_label: bool = False,
     ) -> dict: ...
 
 
@@ -53,12 +55,15 @@ class LocalInferenceClient:
         text: str,
         candidates: list[str],
         hypothesis_template: str | None = None,
+        *,
+        multi_label: bool = False,
     ) -> dict:
         return self._require_small_models().infer_sync(
             "nli",
             text,
             candidates,
             hypothesis_template,
+            multi_label=multi_label,
         )
 
     def sentiment_sync(self, text: str) -> dict:

@@ -1,5 +1,8 @@
 ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 FROM ${CUDA_IMAGE} AS runtime-base
+LABEL org.opencontainers.image.source="https://github.com/Techta-Labs-Ltd/hear-ai"
+ARG HEAR_BUILD_REVISION=unknown
+ENV HEAR_IMAGE_REVISION=$HEAR_BUILD_REVISION
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -8,6 +11,7 @@ ENV PATH=/opt/venv/bin:/root/.local/bin:${PATH}
 ENV HF_HUB_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 ENV HF_DATASETS_OFFLINE=1
+RUN if [ -f /var/lib/dpkg/statoverride ]; then while read -r user group mode path; do getent group "$group" >/dev/null || groupadd --system "$group"; getent passwd "$user" >/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin "$user"; done < /var/lib/dpkg/statoverride; fi
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg git libsndfile1 libsox-dev portaudio19-dev python3.12 python3.12-dev python3-pip && rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/0.10.9/install.sh | sh
 WORKDIR /app
@@ -17,6 +21,22 @@ COPY hear/__init__.py /app/hear/__init__.py
 COPY hear/tools /app/hear/tools
 COPY patches /app/patches
 ENV HEAR_PROJECT_ROOT=/app
+ENV PYTHONPATH=/app
+
+FROM runtime-base AS runtime-serverless-base
+ENV HEAR_RUNTIME_MODE=production
+ENV HEAR_MODEL_ROOT=/models
+ENV FISH_SPEECH_MODEL_ROOT=/models
+ENV HEAR_TEMP_DIR=/audio
+ENV HEAR_SERVERLESS_PRELOAD_MODELS=true
+ENV HEAR_GPU_IDLE_EVICTION_ENABLED=false
+ENV HEAR_SERVERLESS_MAX_CONCURRENT_JOBS=1
+ENV WHISPER_BATCH_SIZE=8
+ENV WHISPER_LONG_AUDIO_BATCH_SIZE=8
+ENV WHISPER_CHUNK_SECONDS=240
+ENV OMP_NUM_THREADS=2
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=2
 
 FROM runtime-base AS runtime-pod-base
 RUN apt-get update && apt-get install -y --no-install-recommends rabbitmq-server && rm -rf /var/lib/apt/lists/*
@@ -34,13 +54,21 @@ COPY hear /app/hear
 COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
-FROM runtime-base AS transcription-serverless
+FROM runtime-base AS transcription-serverless-builder
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group transcription --group serverless
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=transcription
 COPY hear /app/hear
 COPY scripts /app/scripts
-CMD ["python", "-m", "hear.entrypoints.serverless"]
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 python -m hear.tools.model_provisioning --role transcription --model-root /models --cache-dir /tmp/hear-hf && rm -rf /tmp/hear-hf /models/.hub-cache /models/*/.cache
+
+FROM runtime-serverless-base AS transcription-serverless
+COPY --from=transcription-serverless-builder /opt/venv /opt/venv
+COPY --from=transcription-serverless-builder /models /models
+ENV HEAR_WORKER_ROLE=transcription
+COPY hear /app/hear
+COPY scripts /app/scripts
+CMD ["bash", "/app/scripts/run_serverless.sh"]
 
 FROM runtime-pod-base AS pipeline-pod
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pod
@@ -50,13 +78,21 @@ COPY hear /app/hear
 COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
-FROM runtime-base AS pipeline-serverless
+FROM runtime-base AS pipeline-serverless-builder
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group serverless
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
 COPY hear /app/hear
 COPY scripts /app/scripts
-CMD ["python", "-m", "hear.entrypoints.serverless"]
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 python -m hear.tools.model_provisioning --role pipeline --model-root /models --cache-dir /tmp/hear-hf && rm -rf /tmp/hear-hf /models/.hub-cache /models/*/.cache
+
+FROM runtime-serverless-base AS pipeline-serverless
+COPY --from=pipeline-serverless-builder /opt/venv /opt/venv
+COPY --from=pipeline-serverless-builder /models /models
+ENV HEAR_WORKER_ROLE=pipeline
+COPY hear /app/hear
+COPY scripts /app/scripts
+CMD ["bash", "/app/scripts/run_serverless.sh"]
 
 FROM runtime-pod-base AS pipeline-llm-pod
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pipeline-llm --group pod
@@ -67,14 +103,23 @@ COPY hear /app/hear
 COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
-FROM runtime-base AS pipeline-llm-serverless
+FROM runtime-base AS pipeline-llm-serverless-builder
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pipeline-llm --group serverless
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
 ENV HEAR_MODEL_FEATURES=qwen_llm
 COPY hear /app/hear
 COPY scripts /app/scripts
-CMD ["python", "-m", "hear.entrypoints.serverless"]
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 python -m hear.tools.model_provisioning --role pipeline --feature qwen_llm --model-root /models --cache-dir /tmp/hear-hf && rm -rf /tmp/hear-hf /models/.hub-cache /models/*/.cache
+
+FROM runtime-serverless-base AS pipeline-llm-serverless
+COPY --from=pipeline-llm-serverless-builder /opt/venv /opt/venv
+COPY --from=pipeline-llm-serverless-builder /models /models
+ENV HEAR_WORKER_ROLE=pipeline
+ENV HEAR_MODEL_FEATURES=qwen_llm
+COPY hear /app/hear
+COPY scripts /app/scripts
+CMD ["bash", "/app/scripts/run_serverless.sh"]
 
 FROM runtime-base AS reconstruction-base
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
@@ -95,7 +140,7 @@ COPY hear /app/hear
 COPY scripts /app/scripts
 CMD ["/usr/local/bin/run_pod.sh"]
 
-FROM reconstruction-base AS reconstruction-serverless
+FROM reconstruction-base AS reconstruction-serverless-builder
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction --group serverless
 RUN uv pip install --python /opt/venv/bin/python --no-deps -e /opt/fish-speech
 RUN python -c "from fish_speech.inference_engine import TTSInferenceEngine"
@@ -103,7 +148,18 @@ ENV HEAR_WORKER_ROLE=reconstruction
 ENV FISH_SPEECH_HOME=/opt/fish-speech
 COPY hear /app/hear
 COPY scripts /app/scripts
-CMD ["python", "-m", "hear.entrypoints.serverless"]
+ARG HEAR_FISH_LICENSE_APPROVED=false
+RUN mkdir -p /models && if [ "$HEAR_FISH_LICENSE_APPROVED" = "true" ]; then HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 HF_HOME=/tmp/hear-hf python /app/scripts/provision_fish_nf4.py --model-root /models; else echo "Fish model omitted because approval flag is not enabled"; fi && rm -rf /tmp/hear-hf /models/*/*/.cache
+
+FROM runtime-serverless-base AS reconstruction-serverless
+COPY --from=reconstruction-serverless-builder /opt/venv /opt/venv
+COPY --from=reconstruction-serverless-builder /opt/fish-speech /opt/fish-speech
+COPY --from=reconstruction-serverless-builder /models /models
+ENV HEAR_WORKER_ROLE=reconstruction
+ENV FISH_SPEECH_HOME=/opt/fish-speech
+COPY hear /app/hear
+COPY scripts /app/scripts
+CMD ["bash", "/app/scripts/run_serverless.sh"]
 
 FROM runtime-base AS magic-clean-natural-pod-builder
 RUN apt-get update && apt-get install -y --no-install-recommends cargo rustc && rm -rf /var/lib/apt/lists/*
@@ -119,57 +175,92 @@ CMD ["/usr/local/bin/run_pod.sh"]
 FROM runtime-base AS magic-clean-natural-serverless-builder
 RUN apt-get update && apt-get install -y --no-install-recommends cargo rustc && rm -rf /var/lib/apt/lists/*
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-natural --group serverless
+COPY scripts/provision_magic_clean_models.py /app/scripts/provision_magic_clean_models.py
+RUN python /app/scripts/provision_magic_clean_models.py --model-root /models --engine deepfilter
 
-FROM runtime-base AS magic-clean-natural-serverless
+FROM runtime-base AS sound-cleanup-assets-builder
+ENV HF_HUB_OFFLINE=0
+ENV TRANSFORMERS_OFFLINE=0
+ENV HF_DATASETS_OFFLINE=0
+RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group sound-cleanup-provisioning
+RUN uv pip install --python /opt/venv/bin/python "huggingface-hub>=0.24,<1" "silero-vad==6.2.1"
+COPY scripts /app/scripts
+RUN python /app/scripts/provision_release_sound_assets.py --model-root /models
+
+FROM runtime-serverless-base AS magic-clean-natural-serverless
 COPY --from=magic-clean-natural-serverless-builder /opt/venv /opt/venv
+COPY --from=magic-clean-natural-serverless-builder /models /models
+COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-v1-runtime /models/sound-cleanup-v1-runtime
+COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-specialist /models/sound-cleanup-specialist
+COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-release.env /models/sound-cleanup-release.env
 ENV HEAR_WORKER_ROLE=magic_clean_natural
+ENV HEAR_SOUND_CLEANUP_BUNDLE=/models/sound-cleanup-v1-runtime
+ENV HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime
 COPY hear /app/hear
 COPY scripts /app/scripts
-CMD ["python", "-m", "hear.entrypoints.serverless"]
+CMD ["bash", "/app/scripts/run_serverless.sh"]
 
-# Assemble once, remove byte-identical duplicated native libraries before the
-# final COPY, and retain separate Python dependency environments for each engine.
-FROM runtime-pod-base AS runpod-stack-assembly
-COPY --from=pipeline-pod /opt/venv /opt/hear-image-assembly/venvs/pipeline
-COPY --from=reconstruction-pod /opt/venv /opt/hear-image-assembly/venvs/reconstruction
-COPY --from=magic-clean-natural-pod /opt/venv /opt/hear-image-assembly/venvs/magic_clean_natural
-COPY scripts/deduplicate_image_dependencies.py /tmp/deduplicate_image_dependencies.py
-RUN HEAR_IMAGE_ASSEMBLY=1 python3.12 /tmp/deduplicate_image_dependencies.py
+# Build the complete RunPod runtime and model payload from pinned sources.
+# Models are fetched in this disposable build stage, never from /workspace.
+FROM runtime-pod-base AS runpod-stack-builder
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential cargo rustc
+ENV HF_HUB_OFFLINE=0
+ENV TRANSFORMERS_OFFLINE=0
+ENV HF_DATASETS_OFFLINE=0
+COPY hear /app/hear
+COPY scripts /app/scripts
+COPY patches /app/patches
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/pipeline uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pod
+RUN /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.dependency_patches && /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.dependency_patches --check
+RUN git clone https://github.com/groxaxo/fish-speech-int4-patch.git /opt/fish-speech && git -C /opt/fish-speech checkout fc4e1e24ff3b8d7d28fdd66e6789f23acb63c5bb
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/reconstruction uv sync --project /app/deploy/runtime --frozen --no-dev --group reconstruction --group pod
+RUN uv pip install --python /opt/hear-image-assembly/venvs/reconstruction/bin/python --no-deps -e /opt/fish-speech
+RUN UV_PROJECT_ENVIRONMENT=/opt/hear-image-assembly/venvs/magic_clean_natural uv sync --project /app/deploy/runtime --frozen --no-dev --group magic-clean-natural --group pod
+RUN /opt/hear-image-assembly/venvs/pipeline/bin/python -m hear.tools.model_provisioning --role pipeline --model-root /models --cache-dir /tmp/hear-hf-pipeline
+ARG HEAR_FISH_LICENSE_APPROVED=false
+RUN if [ "$HEAR_FISH_LICENSE_APPROVED" = "true" ]; then /opt/hear-image-assembly/venvs/reconstruction/bin/python /app/scripts/provision_fish_nf4.py --model-root /models; else echo "Fish model omitted because approval flag is not enabled"; fi
+RUN /opt/hear-image-assembly/venvs/magic_clean_natural/bin/python /app/scripts/provision_magic_clean_models.py --model-root /models --engine deepfilter
+COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-v1-runtime /models/sound-cleanup-v1-runtime
+COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-specialist /models/sound-cleanup-specialist
+COPY --from=sound-cleanup-assets-builder /models/sound-cleanup-release.env /models/sound-cleanup-release.env
+RUN HEAR_IMAGE_ASSEMBLY=1 python3.12 /app/scripts/deduplicate_image_dependencies.py
 
 FROM runtime-pod-base AS runpod-stack
-COPY --from=runpod-stack-assembly /opt/hear-image-assembly/venvs /opt/hear-ai-v11/venvs
-COPY --from=runpod-stack-assembly /opt/hear-image-assembly/shared /opt/hear-ai-v11/shared
-COPY --from=reconstruction-pod /opt/fish-speech /opt/fish-speech
+ARG HEAR_BUILD_REVISION=unknown
+ENV HEAR_IMAGE_REVISION=$HEAR_BUILD_REVISION
+ENV HEAR_RUNTIME_MODE=production
+COPY --from=runpod-stack-builder /opt/hear-image-assembly/venvs /opt/hear-ai-v11/venvs
+COPY --from=runpod-stack-builder /opt/hear-image-assembly/shared /opt/hear-ai-v11/shared
+COPY --from=runpod-stack-builder /opt/fish-speech /opt/fish-speech
+COPY --from=runpod-stack-builder /models /models
 RUN ln -s /opt/hear-ai-v11/venvs/pipeline /opt/hear-ai-v11/venvs/transcription
 COPY hear /app/hear
 COPY scripts /app/scripts
-ENV HEAR_POD_STACK_ROLES=reconstruction,pipeline,magic_clean_natural
+ENV HEAR_POD_STACK_ROLES=pipeline,magic_clean_natural
 ENV HEAR_GATEWAY_PYTHON_BIN=/opt/hear-ai-v11/venvs/pipeline/bin/python
 ENV HEAR_MODEL_ROOT=/models
-ENV FISH_SPEECH_MODEL_ROOT=/root/hear-ai-v11/models
+ENV FISH_SPEECH_MODEL_ROOT=/models
 ENV FISH_SPEECH_HOME=/opt/fish-speech
 ENV FISH_SPEECH_BNB_MODE=nf4
 ENV HEAR_POD_MAX_CONCURRENT_JOBS=1
 ENV HEAR_HOST_MAX_CONCURRENT_JOBS=10
-ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4,"reconstruction":2}
-ENV HEAR_POD_PROCESS_LIMITS={"pipeline":7,"magic_clean_natural":1,"reconstruction":1}
-ENV HEAR_WORKER_REPLICAS={"pipeline":1,"magic_clean_natural":4,"reconstruction":2}
+ENV HEAR_POD_ROLE_LIMITS={"pipeline":7,"magic_clean_natural":4}
+ENV HEAR_POD_PROCESS_LIMITS={"pipeline":7,"magic_clean_natural":1}
+ENV HEAR_WORKER_REPLICAS={"pipeline":1,"magic_clean_natural":4}
 ENV WHISPER_BATCH_SIZE=8
 ENV WHISPER_LONG_AUDIO_BATCH_SIZE=8
 ENV WHISPER_CHUNK_SECONDS=240
 ENV OMP_NUM_THREADS=2
 ENV OPENBLAS_NUM_THREADS=1
 ENV MKL_NUM_THREADS=2
-ENV HEAR_SOUND_CLEANUP_BUNDLE=/models/sound-cleanup-v1-runtime
-ENV HEAR_SOUND_CLEANUP_BUNDLE_SHA256=f878d14f1d892e142db2c3f582a5092aabc9ac260c9b771b02a09b0ea71389a9
-ENV HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime
-ENV HEAR_SOUND_CLEANUP_SEPARATOR_SHA256=e1227365d076eafde534152c75be2c106302705c578eb8f71969c014f2958546
 ENV HEAR_GPU_IDLE_EVICTION_ENABLED=true
 ENV HEAR_PIPELINE_IDLE_TTL_SECONDS=600
 ENV HEAR_MAGIC_CLEAN_IDLE_TTL_SECONDS=300
 ENV HEAR_RECONSTRUCTION_IDLE_TTL_SECONDS=1200
 ENV HEAR_AUDIOSEP_IDLE_TTL_SECONDS=90
-ENV HEAR_TEMP_DIR=/workspace/hear-ai-v11/.runtime-audio
+ENV HEAR_SOUND_CLEANUP_BUNDLE=/models/sound-cleanup-v1-runtime
+ENV HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE=/models/sound-cleanup-specialist/runtime
+ENV HEAR_TEMP_DIR=/root/hear-ai-runtime/scratch
 ENV PATH=/opt/hear-ai-v11/venvs/pipeline/bin:/root/.local/bin:${PATH}
 RUN /opt/hear-ai-v11/venvs/pipeline/bin/python -c "import torch, aio_pika, uvicorn" && \
     /opt/hear-ai-v11/venvs/reconstruction/bin/python -c "import torch, bitsandbytes; from fish_speech.inference_engine import TTSInferenceEngine" && \

@@ -4,6 +4,8 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import subprocess
+import threading
 import time
 import uuid
 from collections import Counter
@@ -17,11 +19,21 @@ from hear.contracts.jobs import AttemptEnvelope
 
 
 class SimulatedJobs:
-    ROOT = Path("/root/hear-ai-v11/simulation-20260928")
+    ROOT = Path("/root/hear-ai-runtime/canary")
 
     @classmethod
     def main(cls):
-        root = cls.ROOT
+        root = Path(os.environ.get("HEAR_SIMULATION_ROOT", str(cls.ROOT)))
+        def lifecycle_counts():
+            return {
+                path.name: {
+                    marker: path.read_text().count(marker)
+                    for marker in ("gpu_model_loaded", "gpu_model_evicted")
+                }
+                for path in (root / "logs").glob("*.log")
+            }
+
+        lifecycle_before = lifecycle_counts()
         config = json.loads((root / "config.json").read_text())
         base = "https://127.0.0.1:18081"
         headers = {"X-Service-Key": config["service_key"]}
@@ -31,6 +43,31 @@ class SimulatedJobs:
             timeout=30,
             headers={"Authorization": "Bearer " + config["ingress_token"]},
         )
+        observations = []
+        stop_monitor = threading.Event()
+
+        def observe():
+            while not stop_monitor.is_set():
+                try:
+                    used = subprocess.check_output(
+                        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                        text=True,
+                        timeout=10,
+                    ).strip()
+                    readiness = api.get("/readyz").json()
+                    observations.append(
+                        {
+                            "time": time.time(),
+                            "gpu_used_mib": int(used),
+                            "lanes": readiness.get("lanes", {}),
+                        }
+                    )
+                except (httpx.HTTPError, OSError, ValueError, subprocess.SubprocessError):
+                    pass
+                stop_monitor.wait(0.5)
+
+        monitor = threading.Thread(target=observe, daemon=True)
+        monitor.start()
         requests = []
         copies = int(os.environ.get("HEAR_CANARY_COPIES", "1"))
         if not 1 <= copies <= 10:
@@ -61,7 +98,13 @@ class SimulatedJobs:
             file = root / "sources" / source
             prefix = f"creators/evaluation/audio/jobs/{job}"
             expiry = datetime.now(UTC) + timedelta(seconds=max(1800, timeout + 300))
-            options = {"profile": "studio_voice"} if kind == "magic_clean" else {}
+            options = (
+                {"profile": os.environ.get("HEAR_CANARY_CLEANING_PROFILE", "studio_voice")}
+                if kind == "magic_clean"
+                else {}
+            )
+            if kind == "magic_clean" and os.environ.get("HEAR_CANARY_CLEANING_OPTIONS"):
+                options.update(json.loads(os.environ["HEAR_CANARY_CLEANING_OPTIONS"]))
             if kind == "reconstruction":
                 options = {
                     "same_speaker": True,
@@ -69,7 +112,10 @@ class SimulatedJobs:
                     "reference": {
                         "start_seconds": 0,
                         "end_seconds": sf.info(file).duration,
-                        "text": "This is a test of the Hear reconstruction service. Fish Speech is generating this sentence using four bit quantized weights.",
+                        "text": os.environ.get(
+                            "HEAR_CANARY_REFERENCE_TEXT",
+                            "And so, my fellow Americans, ask not what your country can do for you. Ask what you can do for your country.",
+                        ),
                     },
                 }
             raw = {
@@ -116,6 +162,32 @@ class SimulatedJobs:
             assert response.json()["attempt_id"] == value["attempt_id"]
             return response.json()
 
+        def read_sse(value, last_event_id=0):
+            stream_headers = {**headers, "Last-Event-ID": str(last_event_id)}
+            messages = []
+            current = {}
+            with backend.stream(
+                "GET",
+                base + "/api/v1/sse/tracks/" + value["track_id"] + "/events",
+                headers=stream_headers,
+                timeout=timeout,
+            ) as response:
+                response.raise_for_status()
+                assert response.headers["content-type"].startswith("text/event-stream")
+                for line in response.iter_lines():
+                    if line.startswith("id: "):
+                        current["id"] = int(line[4:])
+                    elif line.startswith("event: "):
+                        current["event"] = line[7:]
+                    elif line.startswith("data: "):
+                        current["data"] = json.loads(line[6:])
+                    elif not line and current:
+                        messages.append(current)
+                        current = {}
+            return messages
+
+        sse_pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(requests))
+        sse_futures = {value["attempt_id"]: sse_pool.submit(read_sse, value) for value in requests}
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(requests))) as pool:
             accepted = list(pool.map(submit, requests))
         identities = {value["attempt_id"] for value in requests}
@@ -136,10 +208,32 @@ class SimulatedJobs:
         assert len(rows) == len(requests) and all(r["status"] == "completed" for r in rows), states
         assert summary["max_simultaneously_claimed"] <= max_active
         assert all(r["claims"] == 1 and r["readback"] for r in rows)
+        sse_checks = []
+        for value in requests:
+            events = sse_futures[value["attempt_id"]].result(timeout=timeout)
+            ids = [event["id"] for event in events]
+            assert ids == list(range(1, len(events) + 1)), "sse_event_sequence_gap"
+            assert events[0]["event"] == "submitted"
+            assert "processing" in {event["event"] for event in events}
+            assert events[-1]["event"] == "completed"
+            assert any(event["data"].get("stage") for event in events)
+            cursor = max(0, ids[-1] - 2)
+            replay = read_sse(value, cursor)
+            assert replay == [event for event in events if event["id"] > cursor]
+            sse_checks.append(
+                {
+                    "attempt_id": value["attempt_id"],
+                    "event_count": len(events),
+                    "last_event_id_replay_verified": True,
+                    "events": events,
+                }
+            )
+        sse_pool.shutdown(wait=True)
         for value in requests:
             assert api.post("/v1/attempts", json=value).status_code == 202
         time.sleep(3)
         report = backend.get(base + "/simulation/summary", headers=headers).json()
+        assert all(r["claims"] == 1 for r in report["attempts"] if r["attempt_id"] in identities)
         report["acceptance_responses"] = accepted
         report["negative_auth_status"] = httpx.post(
             "http://127.0.0.1:8000/v1/attempts", json=requests[0], timeout=10
@@ -165,11 +259,20 @@ class SimulatedJobs:
         report["attempts"] = [row for row in report["attempts"] if row["attempt_id"] in identities]
         report["source_fixture"] = os.environ.get("HEAR_CANARY_SOURCE", "input.mp3")
         report["real_cloud_backblaze_tested"] = False
+        stop_monitor.set()
+        monitor.join(timeout=12)
+        report["gpu_and_queue_samples"] = observations
+        report["peak_gpu_used_mib"] = max((row["gpu_used_mib"] for row in observations), default=0)
+        report["local_backend_sse_checks"] = sse_checks
+        report["production_backend_sse_tested"] = False
+        report["model_lifecycle_before"] = lifecycle_before
+        report["model_lifecycle_after"] = lifecycle_counts()
         report["updated_api_running"] = True
-        Path(os.environ.get("HEAR_CANARY_REPORT", str(root / "verification.json"))).write_text(
+        report_path = Path(os.environ.get("HEAR_CANARY_REPORT", str(root / "verification.json")))
+        report_path.write_text(
             json.dumps(report, indent=2) + "\n"
         )
-        print("ALL_SELECTED_REAL_JOB_TYPES_COMPLETED", root / "verification.json", flush=True)
+        print("ALL_SELECTED_REAL_JOB_TYPES_COMPLETED", report_path, flush=True)
 
 
 if __name__ == "__main__":

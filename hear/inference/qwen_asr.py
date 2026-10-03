@@ -325,6 +325,10 @@ class LazyQwenAsrEngine:
     async def _close_loaded(engine: QwenAsrEngine) -> None:
         await engine.close()
 
+    async def warmup(self) -> None:
+        await self._resource.acquire()
+        await self._resource.release()
+
     async def transcribe_window(self, samples: np.ndarray, batch_size: int, language: str) -> dict:
         engine = await self._resource.acquire()
         try:
