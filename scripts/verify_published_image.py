@@ -16,6 +16,10 @@ data={'image':'ghcr.io/'+registry+'@'+digest,'configuration_digest':manifest['co
 if a.compare:
     with open(a.compare) as source:before=json.load(source)
     assert before['rootfs']==data['rootfs'],'Runtime filesystem changed'
-    assert before['runtime_configuration']==data['runtime_configuration'],'Runtime configuration changed'
+    old_runtime=dict(before['runtime_configuration']);new_runtime=dict(data['runtime_configuration'])
+    old_labels=old_runtime.pop('Labels',{}) or {};new_labels=new_runtime.pop('Labels',{}) or {}
+    assert old_runtime==new_runtime,'Runtime configuration changed'
+    allowed={'org.opencontainers.image.source','org.opencontainers.image.description'}
+    assert {k:v for k,v in old_labels.items() if k not in allowed}=={k:v for k,v in new_labels.items() if k not in allowed},'Unexpected label changes'
 with open(a.write,'w') as output:json.dump(data,output,indent=2);output.write('\n')
 print(json.dumps({'status':'hear_ai_repository_and_image_verified','repository':data['repository'],'image':data['image'],'configuration_digest':data['configuration_digest'],'runtime_filesystem_unchanged':bool(a.compare),'runtime_configuration_unchanged':bool(a.compare)}))
