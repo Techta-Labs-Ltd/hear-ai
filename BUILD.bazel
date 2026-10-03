@@ -1,0 +1,13 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+package(default_visibility = ["//visibility:public"])
+genrule(
+    name = "image_relink_context",
+    srcs = ["tools/image_relink/Dockerfile"],
+    outs = ["image-relink-context.tar"],
+    cmd = "tar --dereference --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --transform='s|.*/Dockerfile|Dockerfile|' -cf $@ $(location tools/image_relink/Dockerfile)",
+)
+sh_binary(
+    name = "publish_existing_runpod_image",
+    srcs = ["scripts/publish_existing_runpod_image.sh"],
+    data = [":image_relink_context"],
+)
