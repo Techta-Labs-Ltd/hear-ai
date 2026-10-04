@@ -44,11 +44,11 @@
     "computeType": "GPU",
     "gpuCount": 1,
     "workersMin": 0,
-    "workersMax": 1,
+    "workersMax": 3,
     "idleTimeout": 180,
     "flashboot": true,
     "scalerType": "QUEUE_DELAY",
-    "scalerValue": 1,
+    "scalerValue": 4,
     "executionTimeoutMs": 7200000,
     "name": "hear-ai-cleaner",
     "gpuTypeIds": [
