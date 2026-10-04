@@ -7,6 +7,9 @@ profile labels/defaults, and optional engine availability.
 
 ## Cleaning
 
+The profile table, request rules, the result payload and its warning codes are
+documented for backend and frontend work in [CLEANING_PROFILES.md](CLEANING_PROFILES.md).
+
 All four presets use `magic_clean_natural`, its `magic_clean.natural` queue, and
 the pinned DeepFilterNet3 assets under `HEAR_MAGIC_CLEAN_MODEL_DIR`.
 The presets preserve mono/stereo layout and are intended for spoken recordings.

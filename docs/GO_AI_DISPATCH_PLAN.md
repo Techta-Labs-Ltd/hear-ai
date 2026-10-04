@@ -284,7 +284,7 @@ Per-type `operation`/`options` (validated by the worker; validate the same in Go
 | --- | --- | --- |
 | `pipeline` | — | `{"max_tags": 8, "track_name": "...", "source": "...", "speaker": "...", "content_description": "..."}` (all optional) |
 | `transcription` | — | `{}` |
-| `magic_clean` | — | `{"profile": "natural|studio_voice|outdoor_mobile|clean_raw", "auto_level"?, "remove_clicks"?, "trim_silence"?, "attenuation_limit_db"?: 12|18|24|36|60, "sound_cleanup"?: {...}}` |
+| `magic_clean` | — | `{"profile": "natural|studio_voice|outdoor_mobile|clean_raw", "auto_level"?, "remove_clicks"?, "trim_silence"?, "attenuation_limit_db"?: 12|18|24|36|60, "sound_cleanup"?: {...}, "reduce_stationary_noise"?}` — profiles, rules and the full result are in `docs/CLEANING_PROFILES.md` |
 | `reconstruction` | `replace_segments` | `{"same_speaker": true, "changes": [{"segment_start": 84.866, "segment_end": 93.662, "original_text": "…", "new_text": "…"}]}` |
 | `reconstruction` | `edit_transcript` | same as `replace_segments` |
 | `reconstruction` | `rebuild` | `{"same_speaker": true, "edited_transcript": "…", "reference": {"start_seconds": 0, "end_seconds": 15, "text": "…"}}` |
