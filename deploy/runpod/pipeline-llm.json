@@ -2,7 +2,7 @@
   "template": {
     "name": "hear-ai-pipeline-llm-serverless",
     "isServerless": true,
-    "containerDiskInGb": 80,
+    "containerDiskInGb": 50,
     "containerRegistryAuthId": "cmusm0r4r008o7xydkedy1g67",
     "dockerEntrypoint": [],
     "dockerStartCmd": [],
@@ -35,7 +35,7 @@
       "HEAR_SERVERLESS_MAX_CONCURRENT_JOBS": "1",
       "HEAR_WORKER_ROLE": "pipeline",
       "HEAR_MODEL_FEATURES": "qwen_llm",
-      "QWEN_LLM_GPU_MEMORY_UTILIZATION": "0.6",
+      "QWEN_LLM_GPU_MEMORY_GIB": "8.5",
       "WHISPER_BATCH_SIZE": "8",
       "WHISPER_LONG_AUDIO_BATCH_SIZE": "8",
       "WHISPER_CHUNK_SECONDS": "240",
@@ -55,8 +55,8 @@
     "executionTimeoutMs": 7200000,
     "name": "hear-ai-pipeline-llm",
     "gpuTypeIds": [
-      "NVIDIA A40",
-      "NVIDIA RTX A6000"
+      "NVIDIA RTX A5000",
+      "NVIDIA GeForce RTX 3090"
     ]
   }
 }

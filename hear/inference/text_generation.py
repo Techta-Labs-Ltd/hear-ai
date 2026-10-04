@@ -18,7 +18,7 @@ class VllmTextGenerationEngine:
         self,
         model_path: Path,
         *,
-        gpu_memory_utilization: float = 0.82,
+        gpu_memory_gib: float,
         max_model_len: int = 8192,
     ) -> None:
         from vllm import LLM
@@ -27,9 +27,22 @@ class VllmTextGenerationEngine:
         self._model = LLM(
             model=str(model_path),
             trust_remote_code=True,
-            gpu_memory_utilization=gpu_memory_utilization,
+            gpu_memory_utilization=self.utilization_for(gpu_memory_gib),
             max_model_len=max_model_len,
         )
+
+    @staticmethod
+    def utilization_for(gpu_memory_gib: float, total_bytes: int | None = None) -> float:
+        # vLLM only takes a fraction of the card; convert so the budget is card-independent
+        # and the rest of the pipeline (ASR, small models) keeps its share.
+        if total_bytes is None:
+            import torch
+
+            total_bytes = torch.cuda.get_device_properties(0).total_memory
+        utilization = gpu_memory_gib * 1024**3 / total_bytes
+        if not 0 < utilization <= 0.9:
+            raise ValueError("qwen_llm_memory_budget_does_not_fit_gpu")
+        return round(utilization, 4)
 
     @property
     def is_available(self) -> bool:

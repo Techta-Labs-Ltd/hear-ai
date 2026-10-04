@@ -98,8 +98,8 @@ def test_optional_pipeline_llm_is_not_default():
         )
     }
 
-    assert "qwen2.5-7b-instruct" not in default
-    assert "qwen2.5-7b-instruct" in enabled
+    assert "qwen2.5-7b-instruct-awq" not in default
+    assert "qwen2.5-7b-instruct-awq" in enabled
 
 
 def test_unapproved_model_license_blocks_provisioning_before_network_access(tmp_path):

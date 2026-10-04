@@ -43,8 +43,8 @@ class TestModelManifest:
                 enabled_features=frozenset({"qwen_llm"}),
             )
         }
-        assert "qwen2.5-7b-instruct" not in without_llm
-        assert "qwen2.5-7b-instruct" in with_llm
+        assert "qwen2.5-7b-instruct-awq" not in without_llm
+        assert "qwen2.5-7b-instruct-awq" in with_llm
 
     def test_unreviewed_model_licenses_block_runtime_roles(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))

@@ -115,28 +115,34 @@
       "license_url": "https://huggingface.co/cross-encoder/nli-distilroberta-base/tree/b14d131f9d32668a5e6a982729b57ff6ed5dfcbd"
     },
     {
-      "logical_name": "qwen2.5-7b-instruct",
-      "repo_id": "Qwen/Qwen2.5-7B-Instruct",
-      "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
-      "relative_path": "qwen2.5-7b-instruct",
+      "logical_name": "qwen2.5-7b-instruct-awq",
+      "repo_id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+      "revision": "b25037543e9394b818fdfca67ab2a00ecc7dd641",
+      "relative_path": "qwen2.5-7b-instruct-awq",
       "roles": [
         "pipeline"
       ],
       "required_files": [
         "config.json",
         "model.safetensors.index.json",
-        "model-00001-of-00004.safetensors",
-        "model-00002-of-00004.safetensors",
-        "model-00003-of-00004.safetensors",
-        "model-00004-of-00004.safetensors",
+        "model-00001-of-00002.safetensors",
+        "model-00002-of-00002.safetensors",
         "tokenizer.json",
         "tokenizer_config.json"
       ],
+      "file_hashes": {
+        "config.json": "ec0c1f5f875ad8bc1f78c5140c22dbdde1b55478442ad358e7a4d9ecf947a327",
+        "model.safetensors.index.json": "559b6859f37625080bf49eea80806ecc2f859a13b316b7fae2ff4432b6308e36",
+        "model-00001-of-00002.safetensors": "4ad6e70f93823a9228931615e04b5e9293854c236fb4bd5f85e27f3b600605ad",
+        "model-00002-of-00002.safetensors": "920a8cc9d3c81668f18014a69bb041ab8bab22a31640a713f90f5e7580e2f126",
+        "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+        "tokenizer_config.json": "5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583"
+      },
       "engine_adapter": "vllm_text_generation",
-      "provenance_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/tree/a09a35458c702b33eeacc393d103063234e8bc28",
+      "provenance_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ/tree/b25037543e9394b818fdfca67ab2a00ecc7dd641",
       "license_name": "Apache-2.0",
       "license_status": "verified",
-      "license_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/tree/a09a35458c702b33eeacc393d103063234e8bc28",
+      "license_url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ/blob/b25037543e9394b818fdfca67ab2a00ecc7dd641/LICENSE",
       "feature": "qwen_llm"
     },
     {

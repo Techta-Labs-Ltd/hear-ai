@@ -244,8 +244,8 @@ class RuntimeBootstrap:
         features = self._settings.model_features
         if "qwen_llm" in features:
             text_generation = text_module.VllmTextGenerationEngine(
-                self._model_path("qwen2.5-7b-instruct"),
-                gpu_memory_utilization=self._settings.qwen_llm_gpu_memory_utilization,
+                self._model_path("qwen2.5-7b-instruct-awq"),
+                gpu_memory_gib=self._settings.qwen_llm_gpu_memory_gib,
             )
         else:
             text_generation = text_module.DisabledTextGenerationEngine()

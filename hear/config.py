@@ -90,9 +90,9 @@ class RuntimeSettings(BaseModel):
     whisper_min_avg_logprob: float = Field(default=-0.75, alias="WHISPER_MIN_AVG_LOGPROB")
     qwen_asr_dtype: str = Field(default="bfloat16", min_length=1, alias="QWEN_ASR_DTYPE")
     qwen_asr_device_map: str = Field(default="cuda:0", min_length=1, alias="QWEN_ASR_DEVICE_MAP")
-    qwen_llm_gpu_memory_utilization: float = Field(
-        default=0.75, gt=0, le=1, alias="QWEN_LLM_GPU_MEMORY_UTILIZATION"
-    )
+    # Absolute vLLM budget (weights + KV cache + activations), so the same value works on
+    # any card. The 4-bit Qwen needs about 5.2 GiB of weights; 8.5 GiB leaves ~2 GiB of KV.
+    qwen_llm_gpu_memory_gib: float = Field(default=8.5, gt=0, alias="QWEN_LLM_GPU_MEMORY_GIB")
     gpu_idle_eviction_enabled: bool = Field(default=True, alias="HEAR_GPU_IDLE_EVICTION_ENABLED")
     pipeline_idle_ttl_seconds: float = Field(
         default=600, ge=1, le=86400, alias="HEAR_PIPELINE_IDLE_TTL_SECONDS"
