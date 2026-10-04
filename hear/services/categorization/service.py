@@ -202,7 +202,9 @@ class CategorizationService:
         merged["tags"], merged["categories"] = self._apply_editorial_rules(
             transcript, merged["tags"], merged["categories"], max_tags
         )
-        merged["tags"] = self._normalize_tags(merged["tags"])[:max_tags]
+        merged["tags"] = self._prune_related_tags(
+            self._normalize_tags(merged["tags"]), merged["confidence_scores"]
+        )[:max_tags]
         return {
             "tags": merged["tags"],
             "categories": merged["categories"],
@@ -577,6 +579,29 @@ class CategorizationService:
         if len(clean) > 18 and "-" not in clean and ("_" not in clean):
             return ""
         return f"#{clean}"
+
+    @staticmethod
+    def _tag_stems(tag: str) -> set[str]:
+        stems = set()
+        for token in tag.lstrip("#").lower().replace("_", "-").split("-"):
+            token = token.strip()
+            if len(token) >= 4:
+                stems.add(token[:5])
+        return stems
+
+    @classmethod
+    def _prune_related_tags(cls, tags: list[str], scores: dict[str, float]) -> list[str]:
+        """Drop tags that only restate a stronger tag (politics / political-role / political-leaders)."""
+        ordered = sorted(tags, key=lambda tag: -float(scores.get(tag, 0.0)))
+        kept: list[str] = []
+        kept_stems: list[set[str]] = []
+        for tag in ordered:
+            stems = cls._tag_stems(tag)
+            if stems and any(stems <= other or other <= stems for other in kept_stems):
+                continue
+            kept.append(tag)
+            kept_stems.append(stems)
+        return [tag for tag in tags if tag in kept]
 
     def _normalize_tags(self, tags: list[str]) -> list[str]:
         out: list[str] = []

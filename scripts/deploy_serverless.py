@@ -80,7 +80,24 @@ class RunPodServerlessDeployer:
     def health(self, endpoint_id: str) -> dict:
         return self._call("GET", f"{self._run}/{endpoint_id}/health")
 
+    def find_template(self, name: str) -> str | None:
+        for item in self._call("GET", f"{self._rest}/templates") or []:
+            if item.get("name") == name:
+                return str(item["id"])
+        return None
+
+    @staticmethod
+    def with_environment(plan: dict[str, Any], names: list[str], source: dict[str, str]) -> dict:
+        env = dict(plan["template"].get("env", {}))
+        for name in names:
+            value = source.get(name, "")
+            if not value.strip():
+                raise ValueError(f"missing_deploy_environment:{name}")
+            env[name] = value
+        return {**plan, "template": {**plan["template"], "env": env}}
+
     def deploy(self, plan: dict[str, Any], template_id: str | None, image: str) -> dict:
+        template_id = template_id or self.find_template(plan["template"]["name"])
         if template_id:
             template = self.update_template(template_id, plan["template"], image)
         else:
@@ -101,7 +118,12 @@ class RunPodServerlessDeployer:
     def main(cls) -> int:
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument("--plan", type=Path, required=True, help="recorded deployment JSON")
-        parser.add_argument("--template-id", help="omit to create a new template from the plan")
+        parser.add_argument("--template-id", help="omit to find the template by name or create it")
+        parser.add_argument(
+            "--env-from",
+            default="",
+            help="comma-separated environment variables copied into the template env (secrets)",
+        )
         parser.add_argument("--image", required=True, help="registry/image@sha256:<digest>")
         parser.add_argument(
             "--api-key-file", type=Path, default=Path("/root/hear-ai-config/runpod-api.key")
@@ -110,6 +132,9 @@ class RunPodServerlessDeployer:
         parser.add_argument("--dry-run", action="store_true")
         args = parser.parse_args()
         plan = json.loads(args.plan.read_text())
+        names = [name.strip() for name in args.env_from.split(",") if name.strip()]
+        if names:
+            plan = cls.with_environment(plan, names, dict(os.environ))
         cls.require_digest(args.image)
         if args.dry_run:
             print(

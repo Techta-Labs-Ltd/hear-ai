@@ -1,11 +1,19 @@
-name: Build HEAR AI images
+name: Build, verify, and deploy HEAR AI images
 on:
+  push:
+    branches: [main, perf/one-hour-ten-job-validation]
+    paths-ignore: ['docs/**', '**/*.md']
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: Roll RunPod Serverless endpoints to the built images
+        type: boolean
+        default: true
 permissions:
   contents: read
   packages: write
 concurrency:
-  group: hear-ai-serverless-image-build
+  group: hear-ai-image-build-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   build:
@@ -16,18 +24,23 @@ jobs:
           - target: pipeline-serverless
             tag: pipeline-serverless
             serverless: true
+          - target: pipeline-llm-serverless
+            tag: pipeline-llm-serverless
+            serverless: true
           - target: magic-clean-natural-serverless
             tag: cleaner-serverless
             serverless: true
-          - target: runpod-stack
-            tag: runpod-stack
-            serverless: false
           - target: reconstruction-serverless
             tag: reconstruction-serverless
             serverless: true
             fish_license_approved: "true"
+          - target: runpod-stack
+            tag: runpod-stack
+            serverless: false
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
+    outputs:
+      digests: ${{ steps.collect.outputs.digests }}
     env:
       GHCR_TOKEN: ${{ github.token }}
       GHCR_USERNAME: ${{ github.actor }}
@@ -43,7 +56,7 @@ jobs:
           printf '%s  %s\n' 4dc8e99dfa802e252dac176d08201fd15c542ae78c448c8a89974b6f387c282c /tmp/hear-bazel | sha256sum -c -
           chmod 0755 /tmp/hear-bazel
           df -h /
-      - name: Build and publish the Serverless target through Bazel
+      - name: Build and publish through Bazel
         run: |
           export DOCKER_CONFIG="$(mktemp -d)"
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
@@ -51,10 +64,99 @@ jobs:
           image="ghcr.io/techta-labs-ltd/hear-ai:${{ matrix.tag }}-${{ github.sha }}"
           /tmp/hear-bazel run //:runpod_image -- --target "${{ matrix.target }}" --tag "$image" --push
           if [ "${{ matrix.serverless }}" = "true" ]; then /tmp/hear-bazel run //:check_serverless_image -- "$image"; fi
-          docker buildx imagetools inspect "$image" > "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
-          sha256sum bazel-bin/hear-runtime-context.tar >> "${{ github.workspace }}/${{ matrix.target }}-publication.txt"
+          digest="$(docker buildx imagetools inspect "$image" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          printf '%s\n' "$digest" > "${{ matrix.tag }}.digest"
+          docker buildx imagetools inspect "$image" > "${{ matrix.target }}-publication.txt"
+          sha256sum bazel-bin/hear-runtime-context.tar >> "${{ matrix.target }}-publication.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}-publication
-          path: ${{ matrix.target }}-publication.txt
-          retention-days: 7
+          name: digest-${{ matrix.tag }}
+          path: |
+            ${{ matrix.tag }}.digest
+            ${{ matrix.target }}-publication.txt
+          retention-days: 14
+
+  verify-pull:
+    # Proves the pushed digests are pullable by a fresh consumer before anything deploys.
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [pipeline-serverless, pipeline-llm-serverless, cleaner-serverless, reconstruction-serverless]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: digest-${{ matrix.tag }}
+      - name: Pull the digest as an independent consumer and check its entrypoint
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          digest="$(cat ${{ matrix.tag }}.digest)"
+          printf '%s' "${{ github.token }}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          docker pull "ghcr.io/techta-labs-ltd/hear-ai@${digest}"
+          docker image inspect "ghcr.io/techta-labs-ltd/hear-ai@${digest}" --format '{{json .Config.Cmd}}' | grep -q run_serverless.sh
+          docker run --rm --entrypoint /opt/venv/bin/python "ghcr.io/techta-labs-ltd/hear-ai@${digest}" -c "import runpod, hear.entrypoints.serverless; print('image imports ok')"
+
+  deploy:
+    # Rolls each role's template and endpoint to the digest just built, then proves a cold
+    # worker boots, preloads its models and reaches the backend. Requires the repository
+    # secrets RUNPOD_API_KEY and HEAR_BACKEND_SERVICE_KEY and the variable HEAR_BACKEND_POLICY_JSON.
+    needs: [build, verify-pull]
+    if: ${{ github.event_name == 'push' || inputs.deploy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    strategy:
+      max-parallel: 2
+      matrix:
+        include:
+          - role: pipeline
+            tag: pipeline-serverless
+            canary_role: pipeline
+          - role: pipeline-llm
+            tag: pipeline-llm-serverless
+            canary_role: pipeline
+          - role: cleaner
+            tag: cleaner-serverless
+            canary_role: magic_clean_natural
+          - role: reconstruction
+            tag: reconstruction-serverless
+            canary_role: reconstruction
+    env:
+      RUNPOD_DEPLOY_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      HEAR_BACKEND_SERVICE_KEY: ${{ secrets.HEAR_BACKEND_SERVICE_KEY }}
+      HEAR_BACKEND_POLICY_JSON: ${{ vars.HEAR_BACKEND_POLICY_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: digest-${{ matrix.tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'httpx>=0.27,<0.28' 'pydantic>=2.9,<3' 'python-dotenv>=1.0,<2'
+      - name: Refuse to deploy without credentials
+        run: |
+          test -n "$RUNPOD_DEPLOY_API_KEY" || { echo 'RUNPOD_API_KEY secret missing'; exit 1; }
+          test -n "$HEAR_BACKEND_SERVICE_KEY" || { echo 'HEAR_BACKEND_SERVICE_KEY secret missing'; exit 1; }
+          test -n "$HEAR_BACKEND_POLICY_JSON" || { echo 'HEAR_BACKEND_POLICY_JSON variable missing'; exit 1; }
+      - name: Roll the template and endpoint
+        run: |
+          digest="$(cat ${{ matrix.tag }}.digest)"
+          PYTHONPATH=. python scripts/deploy_serverless.py --plan deploy/runpod/${{ matrix.role }}.json \
+            --image "ghcr.io/techta-labs-ltd/hear-ai@${digest}" \
+            --env-from HEAR_BACKEND_SERVICE_KEY,HEAR_BACKEND_POLICY_JSON \
+            --output rollout-${{ matrix.role }}.json
+      - name: Cold-start canary against the backend
+        run: |
+          endpoint="$(python -c "import json; print(json.load(open('rollout-${{ matrix.role }}.json'))['endpoint_id'])")"
+          PYTHONPATH=. python -m scripts.serverless_canary --endpoint-id "$endpoint" --role ${{ matrix.canary_role }} \
+            --synthetic --timeout 1500 --output canary-${{ matrix.role }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rollout-${{ matrix.role }}
+          path: |
+            rollout-${{ matrix.role }}.json
+            canary-${{ matrix.role }}.json
+          retention-days: 30

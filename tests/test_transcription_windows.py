@@ -65,3 +65,37 @@ async def test_reference_input_is_bounded_before_model_call():
     with pytest.raises(ValueError, match="reference_audio_too_large"):
         await TranscriptionService(client).transcribe(bytes(16 * 1024 * 1024 + 1))
     client.transcribe.assert_not_called()
+
+
+def test_aligner_placeholder_scores_do_not_fake_confidence_and_zero_words_get_span():
+    from hear.services.transcription.service import TranscriptionService
+
+    class Model:
+        async def transcribe(self, audio_bytes, batch_size):
+            return {
+                "segments": [
+                    {
+                        "id": 0,
+                        "start": 0.0,
+                        "end": 1.0,
+                        "text": "to the",
+                        "words": [
+                            {"word": "to", "start": 0.40, "end": 0.40, "score": 1.0},
+                            {"word": "the", "start": 0.41, "end": 0.80, "score": 1.0},
+                        ],
+                    }
+                ],
+                "language": "en",
+            }
+
+        async def transcribe_window(self, samples, batch_size, language):
+            raise AssertionError("unused")
+
+    import asyncio
+
+    result = asyncio.run(TranscriptionService(Model()).transcribe(b"x"))
+    words = result["segments"][0]["words"]
+    assert result["confidence"] is None and result["word_confidence_available"] is False
+    assert words[0]["prob"] is None
+    assert words[0]["start"] == 0.40 and words[0]["end"] == 0.41
+    assert words[1]["end"] == 0.80

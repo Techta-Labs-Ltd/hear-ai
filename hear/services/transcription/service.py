@@ -196,24 +196,36 @@ class TranscriptionService:
         full_text_parts = []
         total_conf = 0.0
         word_count = 0
+        scored_words = 0
         for seg in segments_list:
             text = seg.get("text", "").strip()
             if not text:
                 continue
             words = []
-            for w in seg.get("words") or []:
-                word_text = w.get("word", "").strip()
-                if not word_text:
-                    continue
+            raw_words = [w for w in (seg.get("words") or []) if str(w.get("word", "")).strip()]
+            for index, w in enumerate(raw_words):
+                start = float(w["start"])
+                end = float(w["end"])
+                if end <= start:
+                    # The aligner emits a zero-length stamp for some function words; give
+                    # them a 20 ms span bounded by the next word so timelines stay monotonic.
+                    limit = float(raw_words[index + 1]["start"]) if index + 1 < len(raw_words) else start + 0.02
+                    end = max(start, min(start + 0.02, limit))
+                score = w.get("score")
+                # The forced aligner places words but has no per-word confidence; the
+                # patch emits a placeholder 1.0 which must not masquerade as a measurement.
+                real_score = score is not None and float(score) < 1.0
                 words.append(
                     {
                         "word": w["word"],
-                        "start": w["start"],
-                        "end": w["end"],
-                        "prob": w.get("score", 1.0),
+                        "start": start,
+                        "end": end,
+                        "prob": float(score) if real_score else None,
                     }
                 )
-                total_conf += w.get("score", 1.0)
+                if real_score:
+                    total_conf += float(score)
+                    scored_words += 1
                 word_count += 1
             if not words:
                 avg_logprob = seg.get("avg_logprob", -1.0)
@@ -227,6 +239,7 @@ class TranscriptionService:
                     }
                 )
                 total_conf += prob
+                scored_words += 1
                 word_count += 1
             segments.append(
                 {
@@ -241,7 +254,7 @@ class TranscriptionService:
         if not full_text_parts:
             return _silent
         transcript = " ".join(full_text_parts)
-        confidence = round(total_conf / max(word_count, 1), 4)
+        confidence = round(total_conf / scored_words, 4) if scored_words else None
         duration = segments[-1]["end"] if segments else 0.0
         return {
             "transcript": transcript,
@@ -251,5 +264,6 @@ class TranscriptionService:
             "language_probability": 1.0,
             "duration": duration,
             "confidence": confidence,
+            "word_confidence_available": scored_words > 0,
             "silent": False,
         }

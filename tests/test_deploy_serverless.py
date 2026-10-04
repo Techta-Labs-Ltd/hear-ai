@@ -88,6 +88,8 @@ def test_missing_template_is_created_before_the_endpoint():
     calls = []
 
     def respond(request):
+        if request.url.path == "/v1/templates" and request.method == "GET":
+            return httpx.Response(200, json=[])
         if request.url.path == "/v1/templates" and request.method == "POST":
             return httpx.Response(200, json={"id": "tplnew", "name": "hear-ai-pipeline"})
         if request.url.path == "/v1/endpoints" and request.method == "GET":
@@ -105,3 +107,46 @@ def test_missing_template_is_created_before_the_endpoint():
     assert calls[0][:2] == ("POST", "/v1/templates")
     assert created["isServerless"] is True and created["containerRegistryAuthId"] == "auth1"
     assert result["template_id"] == "tplnew" and result["endpoint_id"] == "ep2"
+
+
+def test_secrets_are_injected_from_environment_not_plans():
+    plan = RunPodServerlessDeployer.with_environment(
+        PLAN, ["HEAR_BACKEND_SERVICE_KEY"], {"HEAR_BACKEND_SERVICE_KEY": "s3cret"}
+    )
+    assert plan["template"]["env"]["HEAR_BACKEND_SERVICE_KEY"] == "s3cret"
+    assert "HEAR_BACKEND_SERVICE_KEY" not in PLAN["template"]["env"]
+    with pytest.raises(ValueError, match="missing_deploy_environment:RUNPOD_X"):
+        RunPodServerlessDeployer.with_environment(PLAN, ["RUNPOD_X"], {})
+
+
+def test_committed_plans_hold_no_secrets_and_name_every_role():
+    import json
+    from pathlib import Path
+
+    plans = {p.stem: json.loads(p.read_text()) for p in Path("deploy/runpod").glob("*.json")}
+    assert set(plans) == {"pipeline", "pipeline-llm", "cleaner", "reconstruction"}
+    for plan in plans.values():
+        env = plan["template"]["env"]
+        assert "HEAR_BACKEND_SERVICE_KEY" not in env and "HEAR_BACKEND_POLICY_JSON" not in env
+        assert plan["endpoint"]["gpuTypeIds"] and plan["endpoint"]["workersMax"] >= 1
+
+
+def test_template_is_found_by_name_before_creating():
+    calls = []
+
+    def respond(request):
+        if request.url.path == "/v1/templates" and request.method == "GET":
+            return httpx.Response(200, json=[{"id": "tplx", "name": "hear-ai-pipeline"}])
+        if request.url.path == "/v1/templates/tplx":
+            return httpx.Response(200, json={"id": "tplx"})
+        if request.url.path == "/v1/endpoints" and request.method == "GET":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/v1/endpoints":
+            return httpx.Response(200, json={"id": "ep3", "name": "hear-ai-pipeline"})
+        if request.url.path == "/v2/ep3/health":
+            return httpx.Response(200, json={})
+        raise AssertionError(request.url.path)
+
+    result = deployer(respond, calls).deploy(PLAN, None, DIGEST)
+    assert result["template_id"] == "tplx"
+    assert not any(m == "POST" and p == "/v1/templates" for m, p, _ in calls)

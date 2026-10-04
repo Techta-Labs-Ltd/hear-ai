@@ -126,12 +126,20 @@ class ServerlessCanary:
         )
         parser.add_argument("--timeout", type=float, default=900)
         parser.add_argument("--output", type=Path)
+        parser.add_argument(
+            "--synthetic",
+            action="store_true",
+            help="pass when the worker ran and the backend refused the unknown attempt",
+        )
         args = parser.parse_args()
         role = WorkerRole(args.role)
         if args.envelope:
             envelope = AttemptEnvelope.model_validate_json(args.envelope.read_text())
         else:
-            policy = json.loads(dotenv_values(args.policy_env)["HEAR_BACKEND_POLICY_JSON"] or "{}")
+            raw_policy = os.environ.get("HEAR_BACKEND_POLICY_JSON") or (
+                dotenv_values(args.policy_env).get("HEAR_BACKEND_POLICY_JSON") if args.policy_env.is_file() else None
+            )
+            policy = json.loads(raw_policy or "{}")
             job_type = {
                 "magic_clean_natural": "magic_clean",
                 "reconstruction": "reconstruction",
@@ -143,6 +151,11 @@ class ServerlessCanary:
         if args.output:
             args.output.write_text(text + "\n")
         print(text)
+        if args.synthetic:
+            reached_backend = "backend_attempt_rejected" in result["worker_events"] or (
+                result["error"] is not None and "/claim'" in result["error"]
+            )
+            return 0 if reached_backend else 1
         return 0 if result["final_state"] == "COMPLETED" else 1
 
 
