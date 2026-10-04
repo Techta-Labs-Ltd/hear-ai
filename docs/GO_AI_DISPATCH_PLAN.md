@@ -66,6 +66,8 @@ ai.jobs
   candidate jsonb null,           -- approval candidate (delivery artifact, report) for clean/reconstruction
   result jsonb null,              -- applied result summary (what the UI shows)
   retry_of_job_id uuid null,      -- manual retry lineage
+  intent text null,               -- 'publish' | 'background_enrichment' | null (pipeline only)
+  batch_id uuid null, group_id uuid null,
   created_at, queued_at, dispatched_at, started_at, finished_at, applied_at, expires_at
   index (track_id, status), index (status, queued_at), index (user_id, created_at desc)
 
@@ -438,6 +440,113 @@ job so word timings are regenerated. `rollback` = reject.
 Deletion is durable and ordered: nothing is deleted until the replacing row is
 committed; deletions are rows in `media_file_deletions`, never inline calls.
 
+### 10.1 Job status and track status are different things
+
+Today AI code writes `audio_tracks.status` in fifteen places (`TrackStateManager`
+`mark_processing/mark_pending/mark_publish_pending/mark_retry_pending/mark_ready/
+mark_ready_after_job/mark_draft`, the bulk `UPDATE audio_tracks SET status='ready'` in
+`sync_stuck_ai_jobs`, the bulk `status='processing'` in `enqueue_group_tagging`). The
+result is that a queued or failed AI job flips a track between `processing`, `pending`,
+`draft` and `ready`, published tracks are touched by group tagging, and the UI
+reads the job state off the track. All of that goes.
+
+Rules in the Go service:
+
+1. `ai.jobs.status` is the only job state. The Go service never writes
+   `audio_tracks.status`. The track payload the frontend gets carries `jobs` and
+   `latest_job` read from `ai.jobs` (a read-only SQL view `ai.v_track_jobs` the Python
+   track serializer selects from), not derived from the track's status.
+2. Pipeline and transcription results change **metadata only**: transcript, tags,
+   category, discovery, descriptions, insights, moderation flags. They bump
+   `audio_tracks.state_version` (today they do not, which is why catalog sync skips
+   them) and never change `status`. A published track stays published and is
+   re-indexed (§10.3).
+3. Track status changes only when the **audio is replaced** by an approved Magic Clean
+   or reconstruction (§10.2), by the user's own publish/unpublish/archive actions, or by
+   an admin moderation decision. Nothing else.
+4. The `processing`/`pending` "waiting for AI" track states are retired. Whether a job
+   is running is a property of the job, shown from `ai.jobs`.
+5. A failed, cancelled, expired or stale job leaves the track exactly as it was.
+
+### 10.2 Replacing audio requires publishing again
+
+Today `replace_source` runs with `preserve_publication=True`: a published track keeps
+`published` while its audio, speed layers and catalog document are silently rebuilt.
+That changes. When an approved Magic Clean or reconstruction replaces the audio of a
+track whose status is `published` or `scheduled`:
+
+1. In the same transaction as the media swap: `status = ready`, `published_at`
+   kept as `last_published_at` (new column) and cleared, `publish_requested_at`
+   cleared, `speed_layers = NULL`, `pipeline_completed_at = NULL`,
+   `audio_revision + 1`, `state_version + 1`.
+2. A `catalog_index_outbox` row with `action = 'delete'` for the track (and `upsert`
+   rows for its publications/groups so their listings drop it); `content.track.
+   unpublished` and `content.track.audio_changed` stream events; a
+   `job_applied` notification whose text says the track must be published again.
+3. A new `transcription` job is queued (word timings for the new audio).
+4. The user publishes again through the normal publish flow; speed layers render,
+   the track returns to `published`, the catalog row is upserted. No AI code is
+   involved in publishing.
+
+For a track that was `draft` or `ready`, the swap keeps its status. Pipeline
+enhancement (`PIPELINE_ENHANCEMENT`, the pipeline replacing audio on its own) is
+removed: the pipeline no longer uploads audio, so there is nothing to apply.
+
+### 10.3 Meilisearch and catalog sync
+
+The Go catalog service already owns indexing (`catalog_index_outbox` → relay →
+worker → Meilisearch → confirmer). The AI applier only has to stage rows correctly,
+in the same transaction as the write that changed the data, and it must do so for
+every AI write (today failed jobs, tag-only writes and metadata writes without a
+`state_version` bump can skip the queue):
+
+| AI write | Rows staged in the same transaction |
+| --- | --- |
+| pipeline applied (tags, category, discovery, descriptions, transcript, flag) | `catalog_index_outbox(entity_kind='track', action='upsert', desired_state_version = new state_version, desired_audio_revision = audio_revision, priority 60)`; `audio_tracks.catalog_sync_status='pending'`, `catalog_sync_requested_at=now()`; one `upsert` row per publication and group that contains the track; `stream_events(stream_type='track', event_type='content.track.updated', payload.changes=[...])` |
+| transcription applied | same as above (transcript is part of the document) |
+| audio replaced on a published track | `delete` for the track, `upsert` for its publications/groups, `content.track.unpublished` + `content.track.audio_changed` |
+| audio replaced on an unpublished track | `content.track.audio_changed` only (unpublished tracks are not in the index) |
+| job failed / rejected / expired | nothing (the data did not change) |
+| group tagging of N tracks | N track `upsert` rows (coalesced by the partial unique index `(entity_kind, entity_id) WHERE status='pending'`) plus one row for the group and each publication |
+
+Rows use the existing `ON CONFLICT ... WHERE status='pending' DO UPDATE` with
+`GREATEST(desired_state_version)`, `GREATEST(priority)`, `attempts = 0`, exactly as
+the catalog worker's own inserts do, so a burst of 500 group tags produces 500
+coalesced rows, not 500 × stages. The existing relay (`FOR UPDATE SKIP LOCKED`,
+batch publish with confirms), worker replicas and reconciler (10-minute drift
+repair) give the throughput and the self-healing; the AI service adds no sync path
+of its own and never calls Meilisearch. `meili_synced` on the SSE `complete` event
+is removed; the frontend already reacts to `content.track.synced` from the
+confirmer, which is the only truthful signal.
+
+### 10.4 Publishing and the pipeline
+
+The Python publish flow today creates pseudo `job_type='publish'` processing jobs,
+parks pipeline jobs at `speed_layers_queued 70%`, and gates publishing on
+`has_completed_pipeline`. Publishing stays in Python (publish jobs, speed layers,
+catalog confirmation) but loses every AI dependency:
+
+- There is no `publish` AI job. `publish_jobs.pipeline_job_id` becomes
+  `ai_job_id uuid null` referencing `ai.jobs`.
+- `start_publish` modes collapse to two: if `track.pipeline_completed_at` is set,
+  stage the publish job; otherwise create a pipeline job through the Go API with
+  `intent='publish'` and stage the publish job as `pipeline_gated`. When Go applies a
+  pipeline result it sets `pipeline_completed_at` and, for `intent='publish'`, flips
+  the waiting `publish_jobs` row from `pipeline_gated` to `pending` in the same
+  transaction. Python's publish worker picks it up from the queue it already
+  consumes; the 5-minute `reconcile_publish_jobs` cron becomes a safety net only.
+- `pipeline.generate_on_publish_only` keeps its meaning (auto-run the pipeline on
+  upload or only on publish) and is read by the Python upload/publish code when it
+  decides whether to create a pipeline job; the Go service does not know about it.
+
+### 10.5 Group and batch jobs
+
+Group tagging creates one `pipeline` job per track with `batch_id` set (new column on
+`ai.jobs`). The reconciler emits `group_complete` on the group SSE stream when every
+job of the batch is terminal (advisory lock on the batch id), with per-track
+status. No track status is touched. Upload batches with `intent=publish` work the
+same way with `intent` stored on the job.
+
 ## 11. Admin and observability
 
 - `GET/PATCH /api/v1/admin/settings/ai` → the keys in §3, with validation
@@ -501,24 +610,70 @@ dead-lettered row is visible in the admin job view and in `hear_ai_outbox_backlo
 - A restart of any role loses nothing; a restart of RabbitMQ loses nothing (quorum
   queues); a restart of Postgres pauses everything and resumes.
 
-## 15. What to remove once the Go roles are live
+## 15. Migration inventory: everything AI leaves the Python backend
 
-Principle: the Python backend keeps no AI logic at all. It keeps the frontend-facing
-business endpoints; the ones that start or resolve AI jobs are moved to the Go `api`
-role with unchanged paths, and the Python router for them is deleted, not proxied.
+Principle: the Python backend keeps no AI logic. It keeps the frontend-facing
+business API; endpoints that start or resolve AI jobs move to the Go `api` role with
+unchanged paths and bodies and the Python routers are deleted, not proxied. Paths are
+under `hear-backend/src/app`.
 
-In `hear-backend` (Python), the current AI workers and all of their logic: the arq
-AI worker process and its handlers (`core/worker/handlers/ai.py`, the `backend` and
-`ai-result` queues, worker settings), `services/ai/{runtime_dispatch, runtime_attempts,
-runtime_grant, runtime_scope, serverless_submission, storage, scheduler, handlers,
-media (apply paths), job_result_processor, cleanup, sse_publisher}.py`,
-`api/v1/ai_runtime_callbacks.py`, `api/v1/internal/ai_runtime.py`,
-`core/worker/handlers/ai.py`, the arq AI queues (`backend`, `ai-result`) and crons
-(`dispatch_ai_jobs`, `sync_stuck_ai_jobs`, `replay_stored_ai_outcomes`,
-`purge_stale_magic_clean_previews`), `grpc_client/` and `services/ai/client.py`
-(legacy `/process` + gRPC path), the `HEAR_AI_*`, `AI_MAX_*`, `AI_DISPATCH_*` settings.
-The creator endpoints (`/tracks/{id}/magic-clean`, `/transcribe`, `/edit-recording`,
-`/tag`, `/jobs/pending`) move to the Go `api` role with unchanged paths and bodies.
+### 15.1 Delete (logic moves to Go)
+
+| Area | Files / symbols |
+| --- | --- |
+| AI service package | `services/ai/` entirely: `__init__`, `service`, `handlers`, `media`, `tagging`, `callbacks`, `job_result_processor`, `cleanup`, `notifications`, `submission_policy`, `client` (HTTP `/process`), `runtime_dispatch`, `runtime_attempts`, `runtime_grant`, `runtime_scope`, `serverless_submission`, `storage`, `scheduler`, `sse_publisher`, `b2_validator`, `audio_joiner` (the worker renders full files; the backend never joins segments), `track_state`, `errors`, `constants` |
+| Worker handlers | `core/worker/handlers/ai.py` (all of it: submit, result apply, stuck-job sync, replay, apply/confirm, platform-settings push), `handlers/ai_dispatch.py`, `handlers/cleanup.py` branches `ai_old_media`, `ai_audio_tag`, `ai_job_folder` (deletions become plain `media_file_deletions` rows written by Go), `handlers/taxonomy.py::sync_ai_training_data` (calls gRPC methods that do not exist) |
+| arq queues and crons | queues `backend`, `ai-result`; functions `process_transcription`, `process_magic_clean`, `process_rebuild`, `process_magic_clean_apply`, `process_reconstruct_confirm`, `process_ai_result`, `push_ai_platform_settings`, `dispatch_ai_jobs`; crons `dispatch_ai_jobs`, `sync_stuck_ai_jobs`, `replay_stored_ai_outcomes`, `purge_stale_magic_clean_previews`, `reconcile_ai_job_folder_cleanups`, `compact_processing_job_payloads`; `enqueue.py` helpers `enqueue_ai_*`, `enqueue_transcription/magic_clean/rebuild`, `enqueue_ai_tag_category_sync`; `core/utils/queue.py` re-exports; `lifespan.py` gRPC channel; worker services `worker-ai-result`, `worker-backend` in every compose/stack file |
+| gRPC | `grpc_client/` (client, proto, generated stubs); `GRPC_*` settings |
+| Internal HTTP | `api/v1/ai_runtime_callbacks.py`, `api/v1/internal/ai_runtime.py`, `api/v1/internal/ai_jobs.py`, `api/v1/internal/pipeline.py` (`/internal/process|enhance|transcribe|rebuild`), `api/v1/internal/tracks.py` (`/for-ai`), `api/v1/internal/platform_settings.py`; their mounts in `api/v1/__init__.py`, `internal_app.py`, `internal_api.py`; `dependencies.verify_service_key` if nothing else uses it |
+| Settings | `core/config.py::AIServiceSettings` (`HEAR_HTTP_URL`, `HEAR_GRPC_TARGET`, `HEAR_AI_*`, `HEAR_RUNPOD_*`, `HEAR_STORAGE_*`, `AI_MAX_*`, `AI_DISPATCH_*`, `AI_RESULT_*`, `AI_HTTP_*`, `AI_SERVICE_SECRET` except the Alexa HMAC use), `PROCESSING_JOB_PAYLOAD_*`; `settings_service.py` `AI_PLATFORM_SETTING_GROUPS` push (`update_settings` no longer enqueues `push_ai_platform_settings`; the Go `api` role serves `GET /internal/ai/runtime/catalog` from the same tables); `.env.production.example` AI block; README AI sections (stale) |
+| SSE | `sse_publisher.py`; the AI fallback snapshot built from `processing_jobs` in `api/v1/sse.py` (phase 1: the SSE app relays Redis only; phase 2: endpoint moves to Go) |
+| Track state coupling | every `TrackStateManager` call listed in §10.1 and the two bulk `UPDATE audio_tracks` statements; `audio_source/service.py` policy `preserve_publication` for AI reasons (§10.2); `PIPELINE_ENHANCEMENT` reason and `_apply_tracks/_apply_master/is_enhanced/quality_score/snr_db` writes (the pipeline no longer returns audio) |
+| Publish coupling | pseudo `publish` processing jobs (`service.py::_start_publish_with_existing_pipeline`), `speed_layers_pending_publish`, the 70 % `speed_layers_queued` stage, `_emit_publish_success` writes to `processing_jobs`, `publish_jobs.pipeline_job_id` → `ai_job_id` (§10.4) |
+| Notifications and email | `services/ai/notifications.py`; `handlers/notify.py::send_ai_terminal_email`, `send_pipeline_started_email`, `send_pipeline_completion_email`; `email_backlog_service.py` scanning `processing_jobs`; markers `failure_email_sent_at`, `flagged_email_sent_at`, `_pipeline_*_email_sent`. Go stages rows in the existing notification outbox (same deterministic `ai:{job_id}:{phase}` keys the Go FCM worker already honours) and in a new `email_outbox` table that the Python email worker sends from (templates `recording-processing`, `recording-ready`, `recording-processing-failed`, `recording-flagged`) |
+| Websocket `ai_progress` | all `ws_manager.send_to_user(... "ai_progress" ...)` calls; the SSE track stream is the single progress channel |
+| Models and schemas | `models/processing.py::ProcessingJob` (kept read-only until §17 step 6), `schemas/ai_job.py`, `schemas/ai_runtime.py`, `schemas/recording.py::MagicCleanRequest/TrackTagJobRequest/TrackAudioTagRequest/DiscoveryRequest`, `AIJobSummaryRead`, `schedule.py::ProcessingJobRead` |
+| Tests and docs | the `tests/test_ai_*`, `test_grpc_*`, `test_processing_job_*`, `test_audio_joiner`, `test_audio_tag_submission` files; `docs/AI_RUNTIME_V1.md`; k6 helpers referencing AI endpoints |
+
+### 15.2 Move to the Go `api` role (same paths, same bodies)
+
+`POST /api/v1/creator/tracks/{id}/magic-clean` (body becomes `{"profile", "auto_level"?, "remove_clicks"?, "trim_silence"?, "sound_cleanup"?}`; the legacy speech/music/background sliders are gone),
+`.../magic-clean/{job_id}/apply|reject`, `.../transcribe`, `.../pipeline`, `.../tag`
+(a pipeline job), `.../discovery` (a pipeline job), `.../regenerate` (manual retry →
+new job), `.../edit-recording` and `.../edit-recording/{job_id}/status|confirm|rollback`,
+`PATCH .../transcription` with `changes` (creates a reconstruction `edit_transcript`
+job; the transcript-only save stays in Python), `GET .../jobs`, `GET .../jobs/{job_id}`,
+`GET .../jobs/pending`, `POST /groups/{id}/tag`, the batch creation's job submission
+(`POST /batches` keeps the upload logic in Python and calls Go once per track),
+admin `GET/PATCH /admin/settings/ai`, `GET /admin/ai/*` (§11),
+`POST /internal/ai/attempts/{id}/*`, `GET /internal/ai/runtime/catalog` and
+`/protocol`, `POST /internal/ai/providers/runpod/{attempt_id}` (webhook).
+Retired: `POST .../moderate` (pipeline), `POST .../audio-tag` and the `audio_tag`,
+`categorization`, `tagging`, `discovery` job types (all are the worker's `pipeline`
+type; `max_tags` is an option), `POST /internal/ai-jobs/{id}/replay-apply` (admin
+re-apply in §11), `POST /internal/enhance|transcribe|rebuild|process`.
+
+### 15.3 Stays in Python, reading `ai.jobs` only through views
+
+Track, group and publication serializers (`recording_service.py` `_build_active_jobs_map`,
+`latest_jobs_for_tracks`, `_job_to_sse_event`, `list_jobs_for_track`; `publication_service.py`
+`_batch_enrich_tracks`, `get_group`; `track_state/service.py::snapshot`;
+`schedule_service.py` `ai_jobs`; `content_insight_service._list_from_completed_jobs`)
+select from `ai.v_track_jobs` (`job_id, track_id, job_type, status, stage, progress_pct,
+transport, error_code, requires_approval, preview_audio_url, created_at, finished_at`).
+`start_publish`, `PublishJob`, speed layers, `generate_on_publish_only`, catalog sync
+services, content events, moderation reports, track deletion (which now also deletes
+`ai.jobs` rows for the track via `ON DELETE CASCADE`), `content_insights`,
+`content_flags` and `ai_insights` (creator insights, not job-driven) stay as they are.
+
+### 15.4 Database
+
+New schema `ai` (§3) plus `audio_tracks.last_published_at`, `publish_jobs.ai_job_id`,
+`email_outbox`. `processing_jobs` and its indexes, `deferred_cleanups` of types
+`ai_job_folder/ai_old_media/ai_audio_tag`, the `media_files.metadata_json.
+ai_runtime_verified_sha256` key, `speed_render_jobs.publish_job_id` (→ `publish_jobs.id`)
+and `audio_tracks.is_enhanced/quality_score/snr_db` are dropped in the final step of
+§17 after the history has been copied.
 
 In `hear-ai` (this repo): `hear/dispatch/` and `tests/test_dispatch_clients.py`
 (the Python backend-side clients), the README section "From the backend, use
@@ -544,3 +699,39 @@ service implements.
 6. Load test: 50 queued jobs, Pod unplugged mid-run, RunPod key revoked mid-run,
    RabbitMQ restarted mid-run, Go roles restarted mid-run; assert no lost, duplicated
    or silently retried job.
+
+## 17. Migrating correctly: data, cutover and proof
+
+1. **Freeze.** Set `pipeline.generate_on_publish_only` on and disable the creator AI
+   endpoints in Python (503 with a maintenance message) so no new `processing_jobs`
+   are created. Let active ones finish; after 30 minutes fail the rest with
+   `migration_abandoned` and notify their users (they can retry on the new system).
+2. **Copy history.** One migration copies terminal `processing_jobs` rows into
+   `ai.jobs` (status, type, timestamps, `error_message`, `result_metadata` summary,
+   `retry_of_job_id`) so job lists and insights keep their history; `publish_jobs.
+   pipeline_job_id` is rewritten to `ai_job_id`. Rows are kept read-only in
+   `processing_jobs` until step 6.
+3. **Verify in parallel.** With the Go roles running against the same database and
+   `routing.policy = pod_only`, dispatch one real job of each type from Go for a test
+   creator and check: callbacks accepted (`ai.attempt_events` complete), outcome
+   applied, `audio_tracks.state_version` bumped, `catalog_index_outbox` row staged and
+   confirmed by the Go catalog confirmer, `content.track.updated` seen on the content
+   SSE, notification and email rows staged, the track status unchanged for pipeline
+   and transcription, `ready` after an approved clean on a published track, Retry
+   creating a new job, a failed outcome producing `failed` with no retry, a killed
+   worker producing `worker_lost` within 15 s of lease expiry.
+4. **Switch.** Point the frontend proxy routes for the AI endpoints at the Go `api`
+   role, enable `serverless.enabled` with the agreed budget, remove the Python
+   routers and workers (§15.1), redeploy Python without the AI worker services.
+5. **Watch for a week:** `hear_ai_*` metrics, the admin job view, catalog
+   reconciler drift report (should stay at zero), `media_file_deletions` backlog.
+6. **Drop** the legacy tables and columns (§15.4) and the `hear-ai` dispatch package.
+
+Verification queries kept in the Go repo as integration tests (gated by a test
+database URL, like the catalog tests): no job in a non-terminal state older than its
+deadline; every `ai.jobs.status='completed'` row with an audio artifact has a
+`media_file_deletions` row for the previous media; every applied pipeline/transcript
+has a `catalog_index_outbox` row at the track's current `state_version` or a confirmed
+`catalog_synced_state_version` equal to it; every published track has
+`pipeline_completed_at` set; no `audio_tracks.status` value of `processing` or
+`pending` remains.
