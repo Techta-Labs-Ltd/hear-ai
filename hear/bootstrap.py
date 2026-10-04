@@ -72,14 +72,9 @@ class RuntimeBootstrap:
             license_acknowledged=self._settings.fish_license_approved,
         )
         scratch_root = self._settings.temp_dir
+        # Per-job scratch caps are ceilings, not a standing requirement: the host scratch
+        # ledger admits or refuses each job against the disk that is actually free.
         required_scratch_bytes = self._settings.min_free_scratch_bytes
-        if role in {
-            WorkerRole.MAGIC_CLEAN_NATURAL,
-        }:
-            required_scratch_bytes = max(
-                required_scratch_bytes,
-                self._settings.magic_clean_scratch_bytes,
-            )
         current.add_check(
             "scratch",
             lambda: self._scratch_has_capacity(scratch_root, required_scratch_bytes),
@@ -362,6 +357,7 @@ class RuntimeBootstrap:
             B2StorageFactory(),
             audio_native,
             workspace_root=scratch_root,
+            budget=self._reconstruction_budget(),
         )
         return (
             JobExecutor({JobType.RECONSTRUCTION: workflow}),
@@ -448,6 +444,13 @@ class RuntimeBootstrap:
             [model_cleaner, native, client],
         )
 
+    def _scratch_ledger(self):
+        from hear.runtime.cleaner.scratch_ledger import HostScratchLedger
+
+        return HostScratchLedger(
+            self._settings.temp_dir, min_free_bytes=self._settings.min_free_scratch_bytes
+        )
+
     def _magic_clean_budget(self):
         from hear.runtime.cleaner.resource_guard import ResourceBudget
 
@@ -455,6 +458,18 @@ class RuntimeBootstrap:
             self._settings.magic_clean_scratch_bytes,
             self._settings.magic_clean_max_input_bytes,
             self._settings.magic_clean_max_frames,
+            ledger=self._scratch_ledger(),
+        )
+
+    def _reconstruction_budget(self):
+        from hear.runtime.cleaner.resource_guard import ResourceBudget
+        from hear.services.reconstruction.fish_renderer import FishReconstructionRenderer
+
+        return ResourceBudget(
+            self._settings.reconstruction_scratch_bytes,
+            self._settings.audio_download_max_bytes,
+            FishReconstructionRenderer.RATE * self._settings.reconstruction_max_seconds,
+            ledger=self._scratch_ledger(),
         )
 
     def _model_path(self, logical_name: str) -> Path:

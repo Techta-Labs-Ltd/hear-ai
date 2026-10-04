@@ -116,8 +116,16 @@ class RuntimeSettings(BaseModel):
     # settled. Readiness keeps reporting the blockers; this flag lets the worker serve.
     fish_license_approved: bool = Field(default=False, alias="HEAR_FISH_LICENSE_APPROVED")
     fish_speech_model_root: Path | None = Field(default=None, alias="FISH_SPEECH_MODEL_ROOT")
+    # Per-job caps. Sized for a 3-4 h stereo track (float WAV intermediates); the host-wide
+    # scratch ledger, not these caps, keeps concurrent jobs within the real free disk.
     magic_clean_scratch_bytes: int = Field(
-        default=8 * 1024**3, gt=0, alias="MAGIC_CLEAN_SCRATCH_BYTES"
+        default=32 * 1024**3, gt=0, alias="MAGIC_CLEAN_SCRATCH_BYTES"
+    )
+    reconstruction_scratch_bytes: int = Field(
+        default=32 * 1024**3, gt=0, alias="RECONSTRUCTION_SCRATCH_BYTES"
+    )
+    reconstruction_max_seconds: int = Field(
+        default=4 * 3600, gt=0, alias="RECONSTRUCTION_MAX_SOURCE_SECONDS"
     )
     magic_clean_max_input_bytes: int = Field(
         default=4 * 1024**3, gt=0, alias="MAGIC_CLEAN_MAX_INPUT_BYTES"

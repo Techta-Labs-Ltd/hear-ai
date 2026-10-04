@@ -27,10 +27,19 @@ class ErrorCode(StrEnum):
 
 
 class CleanExecutionError(RuntimeError):
-    def __init__(self, code: ErrorCode, message: str, *, worker_restart_required: bool = False):
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        worker_restart_required: bool = False,
+        retryable: bool = False,
+    ):
         super().__init__(message)
         self.code = code
         self.worker_restart_required = worker_restart_required
+        # True when the same input may succeed later (e.g. disk held by other jobs).
+        self.retryable = retryable
 
     def __reduce__(self):
         return type(self), (self.code, str(self)), self.__dict__

@@ -89,7 +89,7 @@ class SimulatedJobs:
         for kind in kinds * copies:
             job, attempt, track = (str(uuid.uuid4()) for _ in range(3))
             source = (
-                "fish-reference.wav"
+                os.environ.get("HEAR_CANARY_RECONSTRUCTION_SOURCE", "fish-reference.wav")
                 if kind == "reconstruction"
                 else os.environ.get("HEAR_CANARY_SOURCE", "input.mp3")
             )
@@ -149,6 +149,11 @@ class SimulatedJobs:
             }
             if kind == "reconstruction":
                 raw["operation"] = "rebuild"
+                # e.g. {"operation": "replace_segments", "options": {...}} for long-source edits
+                override = os.environ.get("HEAR_CANARY_RECONSTRUCTION_REQUEST")
+                if override:
+                    request = json.loads(override)
+                    raw["operation"], raw["options"] = request["operation"], request["options"]
             value = AttemptEnvelope.model_validate(raw).model_dump(mode="json")
             response = backend.post(base + "/simulation/register", json=value, headers=headers)
             response.raise_for_status()

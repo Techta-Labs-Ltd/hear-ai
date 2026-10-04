@@ -225,7 +225,10 @@ class FishReconstructionRenderer:
         prepared = guard.workspace / "reconstruction_source.wav"
         await self.native.run(self.dsp.render, source, prepared, [], guard, decode=True)
         frames, channels = await self.native.run(self.dsp.validate, prepared, guard)
-        guard.preflight_pcm(frames, channels, copies=3, output_bytes=frames * channels * 4)
+        # May queue for host scratch disk, so keep it off the event loop (heartbeats).
+        await self.native.run(
+            guard.preflight_pcm, frames, channels, copies=3, output_bytes=frames * channels * 4
+        )
         if options.reference and round(options.reference.end_seconds * self.RATE) > frames:
             raise ValueError("voice_reference_exceeds_source")
         if operation == "rebuild":

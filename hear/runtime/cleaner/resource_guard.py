@@ -1,10 +1,11 @@
 import math
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from hear.runtime.cleaner.scratch_ledger import HostScratchLedger
 from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 
 
@@ -13,6 +14,8 @@ class ResourceBudget:
     scratch_bytes: int
     max_input_bytes: int
     max_frames: int
+    # Shared across worker processes so concurrent jobs cannot overcommit the disk.
+    ledger: HostScratchLedger | None = field(default=None, compare=False)
 
     def __post_init__(self):
         if min(self.scratch_bytes, self.max_input_bytes, self.max_frames) <= 0:
@@ -89,6 +92,9 @@ class ResourceGuard:
             raise CleanExecutionError(
                 ErrorCode.RESOURCE_EXHAUSTED, "insufficient scratch reservation"
             )
+        if self.budget.ledger is not None:
+            # Queue behind other jobs' disk use; give up only on cancel or deadline.
+            self.budget.ledger.reserve(self.workspace, required, wait=self.check)
         self._scratch_peak_bytes = max(self._scratch_peak_bytes, required)
         return required
 
