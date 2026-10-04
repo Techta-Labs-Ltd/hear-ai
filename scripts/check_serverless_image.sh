@@ -14,9 +14,13 @@ assert os.environ["HEAR_GPU_IDLE_EVICTION_ENABLED"] == "false"
 assert os.environ["HEAR_SERVERLESS_MAX_CONCURRENT_JOBS"] == "1"
 assert Path("/app/scripts/run_serverless.sh").is_file()
 role = WorkerRole(os.environ["HEAR_WORKER_ROLE"])
-if role == WorkerRole.PIPELINE:
+if role in (WorkerRole.PIPELINE, WorkerRole.RECONSTRUCTION):
     missing = ModelManifest(Path("/app/hear/model_manifest.json")).validate_local(Path("/models"), role)
     assert not missing, missing
+    if role == WorkerRole.RECONSTRUCTION:
+        import sys
+        sys.path.insert(0, os.environ["FISH_SPEECH_HOME"])
+        from fish_speech.inference_engine import TTSInferenceEngine  # noqa: F401
 else:
     assert role == WorkerRole.MAGIC_CLEAN_NATURAL
     import df.enhance

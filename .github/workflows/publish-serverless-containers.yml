@@ -22,12 +22,17 @@ jobs:
           - target: runpod-stack
             tag: runpod-stack
             serverless: false
+          - target: reconstruction-serverless
+            tag: reconstruction-serverless
+            serverless: true
+            fish_license_approved: "true"
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       GHCR_TOKEN: ${{ github.token }}
       GHCR_USERNAME: ${{ github.actor }}
       HEAR_IMAGE_TAR: /tmp/hear-serverless.tar
+      HEAR_FISH_LICENSE_APPROVED: ${{ matrix.fish_license_approved || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v4

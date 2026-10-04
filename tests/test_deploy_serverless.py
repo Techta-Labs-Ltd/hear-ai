@@ -82,3 +82,26 @@ def test_existing_endpoint_is_patched_not_duplicated():
 def test_unpinned_images_are_refused():
     with pytest.raises(ValueError, match="sha256"):
         RunPodServerlessDeployer.require_digest("ghcr.io/techta-labs-ltd/hear-ai:latest")
+
+
+def test_missing_template_is_created_before_the_endpoint():
+    calls = []
+
+    def respond(request):
+        if request.url.path == "/v1/templates" and request.method == "POST":
+            return httpx.Response(200, json={"id": "tplnew", "name": "hear-ai-pipeline"})
+        if request.url.path == "/v1/endpoints" and request.method == "GET":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/v1/endpoints":
+            return httpx.Response(200, json={"id": "ep2", "name": "hear-ai-pipeline"})
+        if request.url.path == "/v2/ep2/health":
+            return httpx.Response(200, json={})
+        raise AssertionError(request.url.path)
+
+    result = deployer(respond, calls).deploy(
+        {**PLAN, "template": {**PLAN["template"], "containerRegistryAuthId": "auth1"}}, None, DIGEST
+    )
+    created = calls[0][2]
+    assert calls[0][:2] == ("POST", "/v1/templates")
+    assert created["isServerless"] is True and created["containerRegistryAuthId"] == "auth1"
+    assert result["template_id"] == "tplnew" and result["endpoint_id"] == "ep2"

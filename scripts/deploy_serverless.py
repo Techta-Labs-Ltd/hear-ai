@@ -47,14 +47,24 @@ class RunPodServerlessDeployer:
             raise ValueError("image_must_be_pinned_by_sha256_digest")
         return image
 
+    TEMPLATE_KEYS = (
+        "name",
+        "env",
+        "containerDiskInGb",
+        "dockerEntrypoint",
+        "dockerStartCmd",
+        "containerRegistryAuthId",
+    )
+
     def update_template(self, template_id: str, template: dict[str, Any], image: str) -> dict:
-        payload = {
-            key: template[key]
-            for key in ("name", "env", "containerDiskInGb", "dockerEntrypoint", "dockerStartCmd")
-            if key in template
-        }
+        payload = {key: template[key] for key in self.TEMPLATE_KEYS if key in template}
         payload["imageName"] = self.require_digest(image)
         return self._call("PATCH", f"{self._rest}/templates/{template_id}", payload)
+
+    def create_template(self, template: dict[str, Any], image: str) -> dict:
+        payload = {key: template[key] for key in self.TEMPLATE_KEYS if key in template}
+        payload.update({"imageName": self.require_digest(image), "isServerless": True})
+        return self._call("POST", f"{self._rest}/templates", payload)
 
     def ensure_endpoint(self, endpoint: dict[str, Any], template_id: str) -> dict:
         existing = {
@@ -70,8 +80,12 @@ class RunPodServerlessDeployer:
     def health(self, endpoint_id: str) -> dict:
         return self._call("GET", f"{self._run}/{endpoint_id}/health")
 
-    def deploy(self, plan: dict[str, Any], template_id: str, image: str) -> dict:
-        template = self.update_template(template_id, plan["template"], image)
+    def deploy(self, plan: dict[str, Any], template_id: str | None, image: str) -> dict:
+        if template_id:
+            template = self.update_template(template_id, plan["template"], image)
+        else:
+            template = self.create_template(plan["template"], image)
+            template_id = str(template["id"])
         endpoint = self.ensure_endpoint(plan["endpoint"], template_id)
         return {
             "template_id": template_id,
@@ -87,7 +101,7 @@ class RunPodServerlessDeployer:
     def main(cls) -> int:
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument("--plan", type=Path, required=True, help="recorded deployment JSON")
-        parser.add_argument("--template-id", required=True)
+        parser.add_argument("--template-id", help="omit to create a new template from the plan")
         parser.add_argument("--image", required=True, help="registry/image@sha256:<digest>")
         parser.add_argument(
             "--api-key-file", type=Path, default=Path("/root/hear-ai-config/runpod-api.key")
@@ -101,7 +115,7 @@ class RunPodServerlessDeployer:
             print(
                 json.dumps(
                     {
-                        "template_id": args.template_id,
+                        "template_id": args.template_id or "<create>",
                         "image": args.image,
                         "endpoint": plan["endpoint"]["name"],
                     }
