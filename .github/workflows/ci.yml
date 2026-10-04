@@ -38,6 +38,10 @@ jobs:
           - magic-clean-natural-serverless
     steps:
       - uses: actions/checkout@v4
+      - name: Free runner disk for the model-bearing images
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
