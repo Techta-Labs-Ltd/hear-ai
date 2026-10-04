@@ -266,7 +266,7 @@ exceed it.
   "source": {"url": "https://cdn.hear.media/creators/x/audio/tracks/…/audio.mp3",
              "revision": 3, "file_sha256": "<sha256 of the exact object>"},
   "storage": {"endpoint_url": "https://s3.eu-central-003.backblazeb2.com/",
-              "bucket_name": "hear-media", "key_id": "<scoped key id>",
+              "bucket_name": "OldAlexa", "key_id": "<scoped key id>",
               "application_key": "<scoped key>", "folder_prefix": "creators/x/audio/jobs/<job_id>/",
               "public_base_url": "https://cdn.hear.media/", "expires_at": "2026-10-05T10:00:00Z"},
   "options": {"profile": "studio_voice"},
@@ -274,9 +274,12 @@ exceed it.
   "deadline": "2026-10-04T18:30:00Z",
   "reporting_grant": "<token>",
   "backend_base_url": "https://api.hear.media/api/v1",
-  "backend_id": "hear-backend"
+  "backend_id": "backend-a"
 }
 ```
+
+The values the workers accept today (backend id, bucket, storage endpoint, CDN base,
+source hosts) and the live endpoint IDs are in `docs/BACKEND_CONNECTION.md`.
 
 Per-type `operation`/`options` (validated by the worker; validate the same in Go):
 
@@ -320,7 +323,7 @@ committed.
 
 ```json
 {"schema_version": 1, "event_id": "uuid", "job_id": "…", "attempt_id": "…", "track_id": "…",
- "job_type": "pipeline", "backend_id": "hear-backend", "source_revision": 3, "sequence": 4,
+ "job_type": "pipeline", "backend_id": "backend-a", "source_revision": 3, "sequence": 4,
  "event": "stage", "stage": "transcribing", "progress_pct": 27.5, "message": null, "data": {}}
 ```
 
@@ -342,8 +345,8 @@ do not act on them before the outcome.
 
 ```json
 {"schema_version": 1, "job_id": "…", "attempt_id": "…", "track_id": "…", "job_type": "magic_clean",
- "backend_id": "hear-backend", "source_revision": 3, "status": "completed",
- "artifacts": [{"bucket_name": "hear-media", "object_key": "creators/x/audio/jobs/<job>/<attempt>/delivery_audio.mp3",
+ "backend_id": "backend-a", "source_revision": 3, "status": "completed",
+ "artifacts": [{"bucket_name": "OldAlexa", "object_key": "creators/x/audio/jobs/<job>/<attempt>/delivery_audio.mp3",
                 "size_bytes": 1518336, "sha256": "…", "content_type": "audio/mpeg",
                 "audio_url": "https://cdn.hear.media/creators/x/audio/jobs/<job>/<attempt>/delivery_audio.mp3"}],
  "result": {...}, "error_code": null}
