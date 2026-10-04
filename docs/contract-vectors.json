@@ -1,0 +1,51 @@
+{
+  "note": "Inputs and expected outputs for the backend's scope digest and reporting grant; secret is a test value.",
+  "secret": "contract-vector-secret-do-not-use-in-production",
+  "envelope": {
+    "schema_version": 1,
+    "job_id": "0192f0a1-7c3e-7d4b-8a11-0000000000aa",
+    "run_id": "0192f0a1-7c3e-7d4b-8a11-0000000000bb",
+    "attempt_id": "0192f0a1-7c3e-7d4b-8a11-0000000000cc",
+    "job_type": "magic_clean",
+    "operation": null,
+    "track_id": "0192f0a1-7c3e-7d4b-8a11-0000000000dd",
+    "user_id": "0192f0a1-7c3e-7d4b-8a11-0000000000ee",
+    "source": {
+      "url": "https://cdn.hear.media/creators/demo/audio/tracks/t1/audio.mp3",
+      "revision": 3,
+      "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "storage": {
+      "endpoint_url": "https://s3.eu-central-003.backblazeb2.com/",
+      "bucket_name": "hear-media",
+      "key_id": "0030000000000000000000001",
+      "application_key": "K003contractvectorkeyvalue",
+      "folder_prefix": "creators/demo/audio/jobs/0192f0a1-7c3e-7d4b-8a11-0000000000aa/",
+      "public_base_url": "https://cdn.hear.media/",
+      "expires_at": "2026-10-05T10:00:00Z"
+    },
+    "options": {
+      "profile": "studio_voice"
+    },
+    "artifact_prefix": "creators/demo/audio/jobs/0192f0a1-7c3e-7d4b-8a11-0000000000aa/0192f0a1-7c3e-7d4b-8a11-0000000000cc",
+    "deadline": "2026-10-04T18:30:00Z",
+    "reporting_grant": "placeholder",
+    "backend_base_url": "https://api.hear.media/api/v1",
+    "backend_id": "hear-backend"
+  },
+  "scope_sha256": "370b871b25cf1a86aa477990706658c10d371c92e27e09e896f4690b09a41493",
+  "grant": {
+    "payload": {
+      "v": 1,
+      "backend": "hear-backend",
+      "job": "0192f0a1-7c3e-7d4b-8a11-0000000000aa",
+      "attempt": "0192f0a1-7c3e-7d4b-8a11-0000000000cc",
+      "scope": "370b871b25cf1a86aa477990706658c10d371c92e27e09e896f4690b09a41493",
+      "exp": 1791221400
+    },
+    "payload_json": "{\"v\":1,\"backend\":\"hear-backend\",\"job\":\"0192f0a1-7c3e-7d4b-8a11-0000000000aa\",\"attempt\":\"0192f0a1-7c3e-7d4b-8a11-0000000000cc\",\"scope\":\"370b871b25cf1a86aa477990706658c10d371c92e27e09e896f4690b09a41493\",\"exp\":1791221400}",
+    "signing_input": "hear-attempt-v1:{\"v\":1,\"backend\":\"hear-backend\",\"job\":\"0192f0a1-7c3e-7d4b-8a11-0000000000aa\",\"attempt\":\"0192f0a1-7c3e-7d4b-8a11-0000000000cc\",\"scope\":\"370b871b25cf1a86aa477990706658c10d371c92e27e09e896f4690b09a41493\",\"exp\":1791221400}",
+    "token": "eyJ2IjoxLCJiYWNrZW5kIjoiaGVhci1iYWNrZW5kIiwiam9iIjoiMDE5MmYwYTEtN2MzZS03ZDRiLThhMTEtMDAwMDAwMDAwMGFhIiwiYXR0ZW1wdCI6IjAxOTJmMGExLTdjM2UtN2Q0Yi04YTExLTAwMDAwMDAwMDBjYyIsInNjb3BlIjoiMzcwYjg3MWIyNWNmMWE4NmFhNDc3OTkwNzA2NjU4YzEwZDM3MWM5MmUyN2UwOWU4OTZmNDY5MGIwOWE0MTQ5MyIsImV4cCI6MTc5MTIyMTQwMH0.bb41w8vF3JHMH240NyPAzjCwbyriKdzc6xGTTCf0U5k"
+  },
+  "scope_rules": "ExecutionScope.digest in hear/contracts/scope.py: canonical JSON, sorted keys, no spaces, application_key hashed, timestamps as POSIX seconds."
+}

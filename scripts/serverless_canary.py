@@ -21,19 +21,31 @@ import httpx
 from dotenv import dotenv_values
 
 from hear.contracts.jobs import AttemptEnvelope
-from hear.dispatch import ServerlessDispatcher
 from hear.runtime.roles import WorkerRole
 
 
 class ServerlessCanary:
-    def __init__(
-        self, api_key: str, *, base_url: str = ServerlessDispatcher.DEFAULT_BASE_URL
-    ) -> None:
+    """Minimal RunPod client: the backend owns real dispatch (see docs/GO_AI_DISPATCH_PLAN.md)."""
+
+    DEFAULT_BASE_URL = "https://api.runpod.ai/v2"
+    TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
+
+    def __init__(self, api_key: str, *, base_url: str = DEFAULT_BASE_URL) -> None:
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0))
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {api_key.strip()}"}
-        self._dispatcher = None
-        self._api_key = api_key
+
+    async def _get(self, path: str) -> dict:
+        response = await self._client.get(f"{self._base_url}/{path}", headers=self._headers)
+        response.raise_for_status()
+        return response.json()
+
+    async def _post(self, path: str, payload: dict) -> dict:
+        response = await self._client.post(
+            f"{self._base_url}/{path}", json=payload, headers=self._headers
+        )
+        response.raise_for_status()
+        return response.json()
 
     @staticmethod
     def synthetic_envelope(policy: dict[str, Any], job_type: str) -> AttemptEnvelope:
@@ -77,27 +89,28 @@ class ServerlessCanary:
     async def run(
         self, endpoint_id: str, role: WorkerRole, envelope: AttemptEnvelope, wait_seconds: float
     ) -> dict:
-        dispatcher = ServerlessDispatcher(
-            {role: endpoint_id}, self._api_key, client=self._client, base_url=self._base_url
-        )
-        health_before = await dispatcher.health()
+        health_before = await self._get(f"{endpoint_id}/health")
         started = time.perf_counter()
-        receipt = await dispatcher.submit(envelope)
+        receipt = await self._post(f"{endpoint_id}/run", {"input": envelope.model_dump(mode="json")})
+        provider_job_id = str(receipt.get("id") or "")
+        if not provider_job_id:
+            raise RuntimeError("serverless_receipt_missing_job_id")
         states: list[str] = []
         stream: list[dict[str, Any]] = []
-        final = None
+        final: dict | None = None
         while time.perf_counter() - started < wait_seconds:
-            status = await dispatcher.status(receipt, endpoint_id)
-            if not states or states[-1] != status.state:
-                states.append(status.state)
+            status = await self._get(f"{endpoint_id}/status/{provider_job_id}")
+            state = str(status.get("status") or "UNKNOWN")
+            if not states or states[-1] != state:
+                states.append(state)
             response = await self._client.get(
-                f"{self._base_url}/{endpoint_id}/stream/{receipt.provider_job_id}",
+                f"{self._base_url}/{endpoint_id}/stream/{provider_job_id}",
                 headers=self._headers,
             )
             if response.status_code == 200:
                 for item in response.json().get("stream", []):
                     stream.append(item.get("output", item))
-            if status.state in {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}:
+            if state in self.TERMINAL:
                 final = status
                 break
             await asyncio.sleep(3)
@@ -105,15 +118,15 @@ class ServerlessCanary:
         return {
             "endpoint_id": endpoint_id,
             "role": role.value,
-            "provider_job_id": receipt.provider_job_id,
+            "provider_job_id": provider_job_id,
             "attempt_id": envelope.attempt_id,
             "states": states,
-            "final_state": final.state if final else "timeout",
-            "error": final.error if final else None,
+            "final_state": str(final.get("status")) if final else "timeout",
+            "error": str(final.get("error")) if final and final.get("error") else None,
             "worker_events": [item.get("event") for item in stream],
             "stream": stream[:20],
             "seconds": round(time.perf_counter() - started, 1),
-            "health_before": health_before.detail.get(role.value),
+            "health_before": health_before,
         }
 
     @classmethod

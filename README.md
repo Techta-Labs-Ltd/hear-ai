@@ -136,19 +136,10 @@ scoped storage. Submit to `POST /v1/attempts` with the Pod bearer token; 202 mea
 confirmed RabbitMQ publication. `POST /v1/attempts/stream` is an optional SSE preview.
 For Serverless, submit the same envelope in RunPod's `input` field.
 
-From the backend, use `hear.dispatch` instead of hand-written HTTP calls. It is
-importable with only `httpx` and `pydantic` installed:
-
-```python
-from hear.dispatch import DispatcherFactory
-
-dispatcher = DispatcherFactory(os.environ).build()  # HEAR_AI_TRANSPORT=pod|serverless
-receipt = await dispatcher.submit(envelope)         # same DispatchReceipt for both
-```
-
-Pod needs `HEAR_POD_BASE_URL` and `HEAR_POD_API_KEY`; Serverless needs
-`HEAR_RUNPOD_API_KEY` and `HEAR_RUNPOD_ENDPOINTS_JSON` mapping worker roles to
-endpoint IDs, for example `{"pipeline": "...", "magic_clean_natural": "..."}`.
+The backend owns dispatch; its design, payloads and callback rules are in
+[docs/GO_AI_DISPATCH_PLAN.md](docs/GO_AI_DISPATCH_PLAN.md) and the executable
+contracts in `hear/contracts/`. Pod needs the gateway base URL and `HEAR_POD_API_KEY`;
+Serverless needs the RunPod API key and one endpoint ID per worker role.
 Both transports run the identical workflow and report the identical
 `ExecutionEvent`/`ExecutionOutcome` payloads to the backend callbacks; the
 transport response is only an acceptance receipt or an optional preview.
