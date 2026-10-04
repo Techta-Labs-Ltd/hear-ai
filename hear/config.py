@@ -112,6 +112,9 @@ class RuntimeSettings(BaseModel):
     )
     discovery_max_new_tokens: int = Field(default=1100, gt=0, alias="DISCOVERY_MAX_NEW_TOKENS")
     fish_speech_home: Path = Field(default=Path("/opt/fish-speech"), alias="FISH_SPEECH_HOME")
+    # Explicit operator acknowledgement that permission-required model licences are
+    # settled. Readiness keeps reporting the blockers; this flag lets the worker serve.
+    fish_license_approved: bool = Field(default=False, alias="HEAR_FISH_LICENSE_APPROVED")
     fish_speech_model_root: Path | None = Field(default=None, alias="FISH_SPEECH_MODEL_ROOT")
     magic_clean_scratch_bytes: int = Field(
         default=8 * 1024**3, gt=0, alias="MAGIC_CLEAN_SCRATCH_BYTES"

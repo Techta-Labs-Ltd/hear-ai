@@ -20,8 +20,10 @@ class RuntimeReadiness:
         model_paths: Mapping[str, Path] | None = None,
         require_manifest_models: bool = True,
         simulation: bool = False,
+        license_acknowledged: bool = False,
     ) -> None:
         self._simulation = simulation
+        self._license_acknowledged = license_acknowledged
         self._role = role
         self._manifest = manifest
         self._model_root = model_root
@@ -86,7 +88,7 @@ class RuntimeReadiness:
             and not self._draining
             and self._patch_verified
             and not missing_models
-            and (not license_blockers or self._simulation)
+            and (not license_blockers or self._simulation or self._license_acknowledged)
             and all(check_results.values())
         )
         status = "draining" if self._draining else ("ready" if ready else "loading")
@@ -94,6 +96,7 @@ class RuntimeReadiness:
             "status": status,
             "runtime_mode": "simulation" if self._simulation else "production",
             "deployment_approved": not bool(license_blockers),
+            "license_acknowledged": self._license_acknowledged,
             "role": self._role.value,
             "job_types": [item.value for item in capability.job_types],
             "magic_clean_profile": (

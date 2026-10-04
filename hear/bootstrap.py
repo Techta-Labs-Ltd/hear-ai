@@ -69,6 +69,7 @@ class RuntimeBootstrap:
             model_paths=self._settings.model_paths,
             require_manifest_models=role != WorkerRole.MAGIC_CLEAN_NATURAL,
             simulation=SimulationBoundary.enabled(),
+            license_acknowledged=self._settings.fish_license_approved,
         )
         scratch_root = self._settings.temp_dir
         required_scratch_bytes = self._settings.min_free_scratch_bytes

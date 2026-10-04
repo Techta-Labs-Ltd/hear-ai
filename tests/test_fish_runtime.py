@@ -96,3 +96,14 @@ def test_model_symlink_cannot_hide_storage_inside_checkout(tmp_path):
     link.symlink_to(PROJECT_ROOT / "models")
     with pytest.raises(ValueError, match="model_storage_must_not_use_source_checkout"):
         RuntimeSettings.from_environment({"HEAR_MODEL_ROOT": str(link)})
+
+
+def test_license_acknowledgement_lets_reconstruction_serve_but_keeps_reporting(tmp_path):
+    gated = RuntimeBootstrap({"HEAR_MODEL_ROOT": str(tmp_path)}).readiness(WorkerRole.RECONSTRUCTION)
+    acknowledged = RuntimeBootstrap(
+        {"HEAR_MODEL_ROOT": str(tmp_path), "HEAR_FISH_LICENSE_APPROVED": "true"}
+    ).readiness(WorkerRole.RECONSTRUCTION)
+    assert gated.snapshot()["license_acknowledged"] is False
+    assert acknowledged.snapshot()["license_acknowledged"] is True
+    assert acknowledged.snapshot()["deployment_approved"] is False
+    assert "fish-speech-s2-pro:permission_required" in acknowledged.snapshot()["license_blockers"]

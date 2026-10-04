@@ -13,6 +13,8 @@ from typing import Any
 from hear.execution.native import NativeExecutor
 from hear.runtime.gpu_idle import AsyncIdleResource
 
+MAX_SEQUENCE_TOKENS = 4096
+
 
 class FishProcess:
     @staticmethod
@@ -41,9 +43,22 @@ class FishProcess:
                 "precision": precision,
                 "compile": False,
             }
+            # Upstream sizes the KV cache from config.json (32k tokens, about 10 GB).
+            # Jobs are bounded to 2,000 characters plus a 20 s reference, so a
+            # 4,096-token cache is ample and keeps the engine near 10 GB.
+            from fish_speech.models.text2semantic.llama import DualARTransformer
+
+            original_from_pretrained = DualARTransformer.from_pretrained
+
+            def capped_from_pretrained(*args, **kwargs):
+                model = original_from_pretrained(*args, **kwargs)
+                model.config.max_seq_len = min(model.config.max_seq_len, MAX_SEQUENCE_TOKENS)
+                return model
+
+            DualARTransformer.from_pretrained = staticmethod(capped_from_pretrained)
             supported = inspect.signature(launch_thread_safe_queue).parameters
             if "max_seq_len" in supported:
-                kwargs["max_seq_len"] = 4096
+                kwargs["max_seq_len"] = MAX_SEQUENCE_TOKENS
             torch.set_num_threads(2)
             torch.cuda.reset_peak_memory_stats()
             phase = "semantic_model_loading"
