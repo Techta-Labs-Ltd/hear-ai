@@ -103,8 +103,9 @@ def test_missing_template_is_created_before_the_endpoint():
     result = deployer(respond, calls).deploy(
         {**PLAN, "template": {**PLAN["template"], "containerRegistryAuthId": "auth1"}}, None, DIGEST
     )
-    created = calls[0][2]
-    assert calls[0][:2] == ("POST", "/v1/templates")
+    create_call = next(c for c in calls if c[:2] == ("POST", "/v1/templates"))
+    created = create_call[2]
+    assert calls[0][:2] == ("GET", "/v1/templates")
     assert created["isServerless"] is True and created["containerRegistryAuthId"] == "auth1"
     assert result["template_id"] == "tplnew" and result["endpoint_id"] == "ep2"
 
