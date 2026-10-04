@@ -129,10 +129,15 @@ class FishReconstructionWorkflow:
                 zip(result["segments"], result["timeline"], strict=True)
             ):
                 row = dict(row)
-                if segment.delivery is not None:
+                # A rebuild's single segment is the whole output; reuse the delivery
+                # instead of uploading an identical second MP3.
+                if segment.delivery is not None and operation != "rebuild":
                     segment_artifact = await upload(
                         segment.delivery, f"segments/segment-{index:03d}.mp3", "audio/mpeg"
                     )
+                elif segment.delivery is not None:
+                    segment_artifact = delivery
+                if segment.delivery is not None:
                     row.update(
                         b2_key=segment_artifact.object_key,
                         audio_url=segment_artifact.audio_url,

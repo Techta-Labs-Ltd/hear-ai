@@ -207,7 +207,11 @@ class SimulatedJobs:
             time.sleep(2)
         assert len(rows) == len(requests) and all(r["status"] == "completed" for r in rows), states
         assert summary["max_simultaneously_claimed"] <= max_active
-        assert all(r["claims"] == 1 and r["readback"] for r in rows)
+        # Only audio-producing jobs upload; pipeline and transcription return data inline.
+        assert all(
+            r["claims"] == 1 and (r["readback"] or not r.get("outcome", {}).get("artifacts"))
+            for r in rows
+        )
         sse_checks = []
         for value in requests:
             events = sse_futures[value["attempt_id"]].result(timeout=timeout)
