@@ -90,8 +90,9 @@ class JobRuntimeCheck:
             checks[role.value] = {"missing_models": missing, "license_blockers": licences}
             if missing:
                 blockers.append("role_missing_models:" + role.value)
-            if licences and not simulation:
+            if licences and not simulation and not settings.fish_license_approved:
                 blockers.append("role_license_review_required:" + role.value)
+            checks[role.value]["license_acknowledged"] = settings.fish_license_approved
         callbacks = []
         try:
             owner = DeploymentOwnership.load()

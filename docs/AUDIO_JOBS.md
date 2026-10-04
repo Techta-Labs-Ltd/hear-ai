@@ -150,8 +150,11 @@ Fish Speech S2 Pro generates narration edits using the same supervised workflow
 for Pod and Serverless. It runs in a warm child process with bounded startup and
 inference timeouts; cancellation terminates native inference. Restart an unhealthy
 worker after a failed/hung child. The model runs in bfloat16 with a 4096-token
-cache; measured on an A40 it holds about 20 GB of VRAM and renders a four-second
-sentence in roughly eight seconds.
+cache (upstream would otherwise allocate a 32k-token cache); measured on an A40
+it holds 15.8 GB after load, peaks at 16.4 GB, and renders a four-second sentence
+in about nine seconds after a 75 s cold start. One 48 GB card therefore keeps
+Fish, the pipeline (about 10 GB) and four cleaner replicas (about 3 GB each) warm
+together.
 
 Example reconstruction-specific payload, inside a complete authenticated envelope:
 

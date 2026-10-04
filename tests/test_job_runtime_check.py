@@ -47,3 +47,24 @@ class TestJobRuntimeCheck:
         report = json.loads(output.read_text())
         assert "backend_service_key_missing" not in report["blockers"]
         assert "backend_callback_url_missing" not in report["blockers"]
+
+
+class TestLicenceAcknowledgement:
+    def test_acknowledged_reconstruction_is_not_a_blocker(self, monkeypatch, tmp_path):
+        import json
+        import sys
+
+        from scripts.check_job_runtime import JobRuntimeCheck
+
+        for key in ("HEAR_BACKEND_POLICY_JSON", "HEAR_BACKEND_REGISTRY_JSON"):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv("HEAR_POD_STACK_ROLES", "reconstruction")
+        monkeypatch.setenv("HEAR_MODEL_ROOT", str(tmp_path))
+        monkeypatch.setenv("HEAR_FISH_LICENSE_APPROVED", "true")
+        monkeypatch.setenv("HEAR_BACKEND_INTERNAL_URL", "https://api.example.com/api/v1")
+        output = tmp_path / "report.json"
+        monkeypatch.setattr(sys, "argv", ["check", "--output", str(output)])
+        JobRuntimeCheck.main()
+        report = json.loads(output.read_text())
+        assert "role_license_review_required:reconstruction" not in report["blockers"]
+        assert report["roles"]["reconstruction"]["license_acknowledged"] is True

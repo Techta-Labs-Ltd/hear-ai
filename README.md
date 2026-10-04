@@ -201,7 +201,7 @@ repository secrets `RUNPOD_API_KEY` and `HEAR_BACKEND_SERVICE_KEY` and the
 repository variable `HEAR_BACKEND_POLICY_JSON`; without them it stops before
 touching RunPod. GPU tiers are pinned per role to measured need: pipeline about
 10 GB (20 to 24 GB cards), cleaner under 3 GB (16 GB cards), Fish S2 Pro bf16
-20.6 GB peak and the vLLM pipeline (48 GB cards).
+16.4 GB peak and the vLLM pipeline (48 GB cards).
 
 Local equivalents:
 
