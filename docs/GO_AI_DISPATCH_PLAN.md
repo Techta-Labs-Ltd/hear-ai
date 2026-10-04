@@ -27,8 +27,12 @@ queues, hand-written `/healthz` and `/metrics`, `pgx`, `amqp091-go`, stdlib logg
 
 ## 2. Service shape
 
-Repository: new `hear-ai-dispatch-go` (or a package tree inside the main Go backend).
-Binary `ai-dispatch`, role chosen by `AI_ROLE`:
+No new repository. The code goes into the existing Go project
+(`hear-catalog-sync-go`, which becomes the Go backend) as package `internal/ai/`
+with new roles on the same binary, selected like the others by `CATALOG_ROLE`
+(renamed `ROLE`). The Python backend keeps only the business API the frontend
+calls (auth, tracks, publications, billing, …); every AI worker, queue, cron,
+callback and dispatch path in Python is removed (§15). Roles:
 
 | Role | Replicas | Responsibility |
 | --- | --- | --- |
@@ -497,9 +501,15 @@ dead-lettered row is visible in the admin job view and in `hear_ai_outbox_backlo
 - A restart of any role loses nothing; a restart of RabbitMQ loses nothing (quorum
   queues); a restart of Postgres pauses everything and resumes.
 
-## 15. What to remove once the Go service is live
+## 15. What to remove once the Go roles are live
 
-In `hear-backend` (Python): `services/ai/{runtime_dispatch, runtime_attempts,
+Principle: the Python backend keeps no AI logic at all. It keeps the frontend-facing
+business endpoints; the ones that start or resolve AI jobs are moved to the Go `api`
+role with unchanged paths, and the Python router for them is deleted, not proxied.
+
+In `hear-backend` (Python), the current AI workers and all of their logic: the arq
+AI worker process and its handlers (`core/worker/handlers/ai.py`, the `backend` and
+`ai-result` queues, worker settings), `services/ai/{runtime_dispatch, runtime_attempts,
 runtime_grant, runtime_scope, serverless_submission, storage, scheduler, handlers,
 media (apply paths), job_result_processor, cleanup, sse_publisher}.py`,
 `api/v1/ai_runtime_callbacks.py`, `api/v1/internal/ai_runtime.py`,
