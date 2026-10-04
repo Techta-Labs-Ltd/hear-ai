@@ -13,6 +13,59 @@ roles, Postgres as the only source of truth, RabbitMQ carrying row IDs only with
 publisher confirms, relay/worker/reconciler loops, quorum queues with dead-letter
 queues, hand-written `/healthz` and `/metrics`, `pgx`, `amqp091-go`, stdlib logging.
 
+## 0. Verdict and placement
+
+**Verdict: build it this way.** The design is the one pattern already proven in
+production here (Postgres as the only truth, RabbitMQ carrying row IDs, relay /
+worker / reconciler loops), it removes the failure classes the current Python code
+actually exhibits (jobs that hang forever, silent retries, published tracks flipped
+by AI), and it keeps the GPU worker protocol untouched so nothing on the pod or
+Serverless side changes. It is a full replacement of the AI side of the backend,
+roughly 3–4 weeks for one engineer who knows the Go codebase; the parallel run in
+§17 step 3 is what makes it safe and must not be skipped.
+
+**What lives where (final):**
+
+| Concern | Owner | Why |
+| --- | --- | --- |
+| AI jobs: queue, Pod/Serverless choice, quota, health, callbacks, apply, approvals, deletions, job SSE, admin stats | **Go** (`internal/ai/` roles in the existing Go project) | All of it is queue and state-machine work; Go's event-driven consumers do it with a fraction of the CPU of the current arq/gRPC/cron setup |
+| **Publishing**: publish jobs, speed-layer rendering, catalog confirmation, scheduling | **Python** (as today) | It is not AI work and touches scheduling, speed layers and catalog confirmation that already work. Go only flips a gated publish row to `pending` when a pipeline result lands (§10.4). Moving it would double the migration for no runtime gain |
+| Catalog / Meilisearch indexing | **Go catalog service** (as today) | The AI applier stages outbox rows (§10.3); it never calls Meilisearch |
+| Creator business API (tracks, publications, billing, auth), content SSE | **Python** | Unchanged; reads AI jobs only through the `ai.v_track_jobs` view |
+| GPU workers | `hear-ai` (this repo) | Protocol unchanged |
+
+**CPU and memory.** The Python side today runs, per environment: an arq `backend`
+worker (8 slots) and an `ai-result` worker, a gRPC subscription per active job, a
+dispatch cron every minute plus four more AI crons, Redis-based queues polled by
+arq, and request handlers that re-parse multi-megabyte JSON blobs
+(`callback_payload`, `result_metadata`) on every callback and every track read. The
+Go roles replace all of that with blocking consumers and a single relay; the design
+rules that keep the footprint minimal are:
+
+- No polling loops in the hot path: the relay wakes on Postgres `LISTEN/NOTIFY`
+  (`NOTIFY ai_outbox`) raised by the trigger that inserts outbox rows, with a 5 s
+  fallback tick; consumers block on RabbitMQ with prefetch 8/4; the prober runs every
+  30 s; the reconciler every 15 s with indexed range queries only.
+- Callbacks do no heavy work in the request: a claim or heartbeat is one indexed
+  `UPDATE`; an event is one `INSERT` plus a Redis publish; an outcome is validated
+  for shape and written to the outbox, and the artifact hashing (the only CPU-bound
+  step, ~0.5 s per 170 MB file, streamed in 1 MB buffers) runs in the `applier`.
+- Payloads are stored once, as columns, not re-parsed: `ai.jobs.result` holds the
+  compact summary the UI needs; transcripts live in `transcriptions`, not in a job
+  blob.
+- One static binary per role, distroless image, no interpreter, no per-request
+  allocation of ORMs or Pydantic models.
+
+Expected footprint, to be confirmed by measurement in §17 step 5: each Go role idles
+at a few MB of RSS and effectively 0 CPU; the `api` role serves callbacks at well
+under 1 ms of CPU each; the `applier` is the only role whose CPU is proportional to
+job volume (hashing and B2 copies), and it scales horizontally. The two Python AI
+worker services, the gRPC channel in every Python worker type and the five AI crons
+are removed outright, which is where the current CPU bloat comes from. Both numbers
+(Python before, Go after) are recorded from cgroup CPU seconds and RSS over a week
+of equal job volume and go into the admin stats page, so the saving is a measured
+fact rather than an expectation.
+
 ## 1. What is wrong today (why the logic changes)
 
 | Today (Python backend) | Consequence | Plan |
