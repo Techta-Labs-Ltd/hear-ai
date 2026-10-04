@@ -180,28 +180,46 @@ full-recording listening. For Pods, also test broker saturation/recovery. Preser
 existing messages until reconciled during migration. Readiness or local tests
 do not establish live backend/B2 integration.
 
-## Build and publish
+## Build, publish, and deploy
+
+Every push to `main` runs [the release workflow](.github/workflows/publish-serverless-containers.yml):
+
+1. **build**: Bazel packages a deterministic source context and Buildx publishes
+   digest-pinned images to `ghcr.io/techta-labs-ltd/hear-ai` for the pipeline,
+   pipeline-LLM, cleaner, Fish reconstruction, and Pod stack targets.
+2. **verify-pull**: a fresh job pulls each digest back from the registry and imports
+   the serverless entrypoint, proving the image is consumable before any rollout.
+3. **deploy**: for each role, `scripts/deploy_serverless.py` rolls the RunPod template
+   and endpoint named in [deploy/runpod](deploy/runpod) to the new digest (creating
+   them if absent), then `scripts/serverless_canary.py --synthetic` cold-starts a
+   worker and checks it preloads its models and reaches the backend.
+
+The plans under `deploy/runpod/` carry no secrets. The deploy job needs the
+repository secrets `RUNPOD_API_KEY` and `HEAR_BACKEND_SERVICE_KEY` and the
+repository variable `HEAR_BACKEND_POLICY_JSON`; without them it stops before
+touching RunPod. GPU tiers are pinned per role to measured need: pipeline about
+10 GB (20 to 24 GB cards), cleaner under 3 GB (16 GB cards), Fish S2 Pro bf16
+20.6 GB peak and the vLLM pipeline (48 GB cards).
+
+Local equivalents:
 
 ```bash
 docker build --target pipeline-serverless -t hear-ai:pipeline-serverless .
-docker build --target magic-clean-natural-serverless -t hear-ai:cleaner-serverless .
-docker build --target transcription-pod -t hear-ai:transcription-pod .
-```
-
-Bazel produces a deterministic source context with a SHA-256 manifest. Buildx
-requires a Docker-capable builder:
-
-```bash
 bazel build //:image_context
 bazel run //:runpod_image -- --target pipeline-serverless --tag YOUR_REGISTRY/hear-ai:REVISION --push
 bazel run //:check_serverless_image -- YOUR_REGISTRY/hear-ai:REVISION
+python scripts/deploy_serverless.py --plan deploy/runpod/pipeline.json --image YOUR_REGISTRY/hear-ai@sha256:DIGEST \
+  --env-from HEAR_BACKEND_SERVICE_KEY,HEAR_BACKEND_POLICY_JSON
+python -m scripts.serverless_canary --endpoint-id ENDPOINT --role pipeline --synthetic
 ```
 
-Use `--target runpod-stack` for the combined Pod image, then launch it with
+Use `--target runpod-stack` for the combined Pod image and launch it with
 `scripts/run_production_container.sh`, an immutable image, and an external env file.
-The stack isolates Fish/cleaner environments and shares byte-identical dependency
-trees. The Serverless publication workflow builds the current checkout on manual
-invocation. Building/publishing an image does not deploy an endpoint.
+Fish images are built with `HEAR_FISH_LICENSE_APPROVED=true`; the Fish Audio
+Research License permits non-commercial use only, so commercial deployment needs
+Fish Audio's written agreement. Building or publishing an image does not by itself
+change what the backend dispatches to: point `HEAR_RUNPOD_ENDPOINTS_JSON` at the
+endpoint IDs the deploy job prints.
 
 ## Test
 
