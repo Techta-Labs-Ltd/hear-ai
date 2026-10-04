@@ -14,6 +14,67 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
+
+from hear.config import RuntimeSettings
+from hear.runtime.ownership import BackendOwnershipPolicy
+from hear.runtime.roles import WorkerRole
+
+
+class PlanPreflight:
+    """Refuse plans whose environment cannot start a worker.
+
+    A worker that fails its startup checks exits, RunPod rents a fresh GPU and
+    retries, and every retry is billed. Everything checkable before rollout is
+    checked here instead.
+    """
+
+    @staticmethod
+    def stamp(plan: dict[str, Any], image: str) -> dict[str, Any]:
+        env = dict(plan["template"].get("env", {}))
+        # Weights are baked into the image, so its digest identifies the engine.
+        env.setdefault("HEAR_ENGINE_REVISION", image.rsplit("@sha256:", 1)[1][:32])
+        return {**plan, "template": {**plan["template"], "env": env}}
+
+    @staticmethod
+    def check(plan: dict[str, Any], image: str) -> list[str]:
+        env = dict(plan["template"].get("env", {}))
+        problems: list[str] = []
+        try:
+            settings = RuntimeSettings.from_environment(
+                {**env, "HEAR_IMAGE_REVISION": image.rsplit("@sha256:", 1)[1][:32]}
+            )
+        except ValidationError as exc:
+            return [
+                "invalid_setting:" + ".".join(map(str, error["loc"]))
+                for error in exc.errors(include_input=False)
+            ]
+        for name in ("worker_id", "image_revision", "engine_revision", "backend_internal_url"):
+            try:
+                settings.required(name)
+            except RuntimeError as exc:
+                problems.append(str(exc))
+        role = settings.worker_role
+        if role == WorkerRole.PIPELINE and settings.backend_service_key is None:
+            problems.append("missing_runtime_setting:HEAR_BACKEND_SERVICE_KEY")
+        if role == WorkerRole.RECONSTRUCTION and not settings.fish_license_approved:
+            problems.append("reconstruction_requires_HEAR_FISH_LICENSE_APPROVED")
+        policy_json = env.get("HEAR_BACKEND_POLICY_JSON", "")
+        if not policy_json.strip():
+            problems.append("missing_runtime_setting:HEAR_BACKEND_POLICY_JSON")
+        else:
+            try:
+                policy = BackendOwnershipPolicy.from_json(policy_json)
+                if policy is not None and settings.backend_internal_url is not None:
+                    policy.require_reporting_origin(str(settings.backend_internal_url))
+            except (ValueError, TypeError) as exc:
+                problems.append("invalid_backend_policy:" + str(exc))
+        if (
+            env.get("HEAR_SERVERLESS_PRELOAD_MODELS", "").lower() == "true"
+            and env.get("HEAR_GPU_IDLE_EVICTION_ENABLED", "").lower() != "false"
+        ):
+            problems.append("serverless_preload_requires_idle_eviction_disabled")
+        return problems
 
 
 class RunPodServerlessDeployer:
@@ -136,6 +197,10 @@ class RunPodServerlessDeployer:
         if names:
             plan = cls.with_environment(plan, names, dict(os.environ))
         cls.require_digest(args.image)
+        plan = PlanPreflight.stamp(plan, args.image)
+        problems = PlanPreflight.check(plan, args.image)
+        if problems:
+            raise SystemExit("refusing to deploy, worker would not start: " + ", ".join(problems))
         if args.dry_run:
             print(
                 json.dumps(

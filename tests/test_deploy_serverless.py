@@ -151,3 +151,45 @@ def test_template_is_found_by_name_before_creating():
     result = deployer(respond, calls).deploy(PLAN, None, DIGEST)
     assert result["template_id"] == "tplx"
     assert not any(m == "POST" and p == "/v1/templates" for m, p, _ in calls)
+
+
+SECRETS = {
+    "HEAR_BACKEND_SERVICE_KEY": "service-key",
+    "HEAR_BACKEND_POLICY_JSON": json.dumps(
+        {
+            "backend_id": "backend-a",
+            "backend_base_urls": ["https://api.hear.media/api/v1"],
+            "bucket_name": "bucket",
+            "storage_endpoint": "https://s3.example.com",
+            "public_base_url": "https://cdn.example.com",
+            "source_hosts": ["cdn.example.com"],
+        }
+    ),
+}
+
+
+@pytest.mark.parametrize("role", ["pipeline", "pipeline-llm", "cleaner", "reconstruction"])
+def test_every_committed_plan_passes_preflight_once_stamped(role):
+    from pathlib import Path
+
+    from scripts.deploy_serverless import PlanPreflight
+
+    plan = json.loads(Path(f"deploy/runpod/{role}.json").read_text())
+    plan = RunPodServerlessDeployer.with_environment(plan, list(SECRETS), SECRETS)
+    stamped = PlanPreflight.stamp(plan, DIGEST)
+    assert stamped["template"]["env"]["HEAR_ENGINE_REVISION"] == "a" * 32
+    assert PlanPreflight.check(stamped, DIGEST) == []
+
+
+def test_preflight_catches_settings_that_would_crash_workers():
+    from scripts.deploy_serverless import PlanPreflight
+
+    env = {
+        "HEAR_WORKER_ROLE": "reconstruction",
+        "HEAR_BACKEND_INTERNAL_URL": "https://other.example/api",
+    }
+    plan = {"template": {"env": {**env, **SECRETS}}, "endpoint": {}}
+    problems = PlanPreflight.check(plan, DIGEST)
+    assert "missing_runtime_setting:HEAR_ENGINE_REVISION" in problems
+    assert "reconstruction_requires_HEAR_FISH_LICENSE_APPROVED" in problems
+    assert any(p.startswith("invalid_backend_policy") for p in problems)
