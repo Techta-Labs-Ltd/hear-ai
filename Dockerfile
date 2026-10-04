@@ -95,6 +95,8 @@ COPY scripts /app/scripts
 CMD ["bash", "/app/scripts/run_serverless.sh"]
 
 FROM runtime-pod-base AS pipeline-llm-pod
+# vLLM compiles Triton kernels at engine start-up and needs a C compiler at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 RUN uv sync --project /app/deploy/runtime --frozen --no-dev --group pipeline --group pipeline-llm --group pod
 RUN python -m hear.tools.dependency_patches && python -m hear.tools.dependency_patches --check
 ENV HEAR_WORKER_ROLE=pipeline
@@ -113,6 +115,8 @@ COPY scripts /app/scripts
 RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 HF_DATASETS_OFFLINE=0 python -m hear.tools.model_provisioning --role pipeline --feature qwen_llm --model-root /models --cache-dir /tmp/hear-hf && rm -rf /tmp/hear-hf /models/.hub-cache /models/*/.cache
 
 FROM runtime-serverless-base AS pipeline-llm-serverless
+# vLLM compiles Triton kernels at engine start-up and needs a C compiler at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 COPY --from=pipeline-llm-serverless-builder /opt/venv /opt/venv
 COPY --from=pipeline-llm-serverless-builder /models /models
 ENV HEAR_WORKER_ROLE=pipeline
