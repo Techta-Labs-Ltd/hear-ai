@@ -24,6 +24,7 @@ class ExecutionOutcome(BaseModel):
     attempt_id: str = Field(min_length=1, max_length=128)
     track_id: str = Field(min_length=1, max_length=128)
     job_type: JobType
+    backend_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
     source_revision: int = Field(ge=1)
     status: Literal["completed", "failed", "cancelled"]
     artifacts: tuple[ArtifactManifest, ...] = ()

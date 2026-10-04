@@ -98,12 +98,14 @@ class BackendAttemptClient:
             outcome.track_id,
             outcome.source_revision,
             outcome.job_type,
+            outcome.backend_id,
         ) != (
             envelope.job_id,
             envelope.attempt_id,
             envelope.track_id,
             envelope.source.revision,
             envelope.job_type,
+            envelope.backend_id,
         ):
             raise ValueError("outcome_identity_mismatch")
         await self._post(envelope, "outcome", outcome.model_dump(mode="json"))

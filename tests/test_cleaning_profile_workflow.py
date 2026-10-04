@@ -131,15 +131,17 @@ def run(tmp_path, profile="natural", digest=None, invalid=None):
 
 
 @pytest.mark.parametrize("profile", [p.value for p in MagicCleanProfile])
-def test_all_profiles_publish_two_artifacts_with_approval(tmp_path, profile):
+def test_all_profiles_publish_one_audio_artifact_with_approval(tmp_path, profile):
     digest = hashlib.sha256(b"pinned-test-input").hexdigest()
     result = run(tmp_path, profile, digest)
     assert result.outcome["status"] == "completed"
     assert result.outcome["result"]["profile"] == profile
     assert result.outcome["result"]["requires_approval"] is True
-    assert len(result.storage.uploads) == 2
-    assert result.storage.report["source_sha256"] == digest
-    assert result.storage.report["source_revision"] == 1
+    assert len(result.storage.uploads) == 1
+    assert result.outcome["result"]["delivery_audio"]["object_key"].endswith("delivery_audio.mp3")
+    assert "report" in result.outcome["result"] and "validation" not in result.outcome["result"]
+    assert result.outcome["result"]["source_sha256"] == digest
+    assert result.outcome["source_revision"] == 1
 
 
 def test_changed_source_fails_before_inference_or_upload(tmp_path):

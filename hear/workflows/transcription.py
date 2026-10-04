@@ -12,7 +12,6 @@ from hear.contracts.jobs import AttemptEnvelope
 from hear.contracts.outcomes import ExecutionOutcome
 from hear.execution.native import NativeExecutor
 from hear.services.transcription.service import TranscriptionService
-from hear.storage.b2 import B2StorageFactory
 
 
 class TranscriptionProgress:
@@ -37,14 +36,12 @@ class TranscriptionWorkflow:
         self,
         transcriber: TranscriptionService,
         audio: AudioIO,
-        storage_factory: B2StorageFactory,
         native: NativeExecutor,
         *,
         workspace_root: Path,
     ) -> None:
         self._transcriber = transcriber
         self._audio = audio
-        self._storage_factory = storage_factory
         self._native = native
         self._workspace_root = workspace_root
 
@@ -102,28 +99,17 @@ class TranscriptionWorkflow:
                 )
                 sequence += 1
             transcription = await task
-            storage = self._storage_factory.create(envelope.storage)
-            key = storage.key(
-                "jobs",
-                envelope.job_id,
-                envelope.attempt_id,
-                "transcription.json",
-            )
-            artifact = await self._native.run(
-                storage.upload_json,
-                transcription,
-                key,
-            )
             outcome = ExecutionOutcome(
                 job_id=envelope.job_id,
                 attempt_id=envelope.attempt_id,
                 track_id=envelope.track_id,
                 job_type=envelope.job_type,
+                backend_id=envelope.backend_id,
                 source_revision=envelope.source.revision,
                 status="completed",
-                artifacts=(artifact,),
+                artifacts=(),
                 result={
-                    "transcription_manifest": artifact.model_dump(mode="json"),
+                    "transcription": transcription,
                     "language": transcription.get("language"),
                     "duration": transcription.get("duration"),
                     "confidence": transcription.get("confidence"),
@@ -163,6 +149,7 @@ class TranscriptionWorkflow:
             attempt_id=envelope.attempt_id,
             track_id=envelope.track_id,
             job_type=envelope.job_type,
+            backend_id=envelope.backend_id,
             source_revision=envelope.source.revision,
             sequence=sequence,
             event=event_type,

@@ -61,7 +61,11 @@ class ServerlessCanary:
                     "public_base_url": policy["public_base_url"],
                     "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
                 },
-                "options": {"profile": "natural"} if job_type == "magic_clean" else {},
+                "operation": "remove_segments" if job_type == "reconstruction" else None,
+                "options": {
+                    "magic_clean": {"profile": "natural"},
+                    "reconstruction": {"same_speaker": False, "segment_start": 0.0, "segment_end": 1.0},
+                }.get(job_type, {}),
                 "artifact_prefix": f"creators/canary/audio/jobs/{job_id}/{job_id}-attempt",
                 "deadline": (datetime.now(UTC) + timedelta(minutes=20)).isoformat(),
                 "reporting_grant": "canary-grant-not-issued-by-backend",

@@ -146,8 +146,10 @@ Both transports run the identical workflow and report the identical
 `ExecutionEvent`/`ExecutionOutcome` payloads to the backend callbacks; the
 transport response is only an acceptance receipt or an optional preview.
 
-Workers claim before execution, heartbeat, upload artifact manifests, and report
-canonical events/outcomes independently of the submitting connection. Callback
+Workers claim before execution, heartbeat, upload only audio artifacts (cleaned
+and reconstructed MP3s), and report canonical events/outcomes independently of the
+submitting connection. Pipeline and transcription outcomes carry their data inline
+and upload nothing; every event and outcome names the owning `backend_id`. Callback
 paths use the deployment-owned backend base, disable redirects, and path-escape
 attempt IDs. Registry deployments select the attempt's registered backend.
 Every callback includes `X-AI-Attempt-Grant`, `X-AI-Worker-ID`, and

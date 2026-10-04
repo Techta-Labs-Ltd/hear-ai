@@ -137,35 +137,25 @@ class AvailableMagicCleanWorkflow:
                 sha256=str(encoded["sha256"]),
                 content_type="audio/mpeg",
             )
-            validation = {
-                **clean_report,
-                "source_sha256": source_digest,
-                "source_revision": envelope.source.revision,
-                "engine": engine,
-                "profile": profile.value,
-                "duration_seconds": encoded["duration_seconds"],
-                "delivery_sha256": encoded["sha256"],
-                "status": "passed",
-            }
-            validation_artifact = await self._native.run(
-                storage.upload_json,
-                validation,
-                storage.key("jobs", envelope.job_id, envelope.attempt_id, "validation.json"),
-            )
             outcome = ExecutionOutcome(
                 job_id=envelope.job_id,
                 attempt_id=envelope.attempt_id,
                 track_id=envelope.track_id,
                 job_type=envelope.job_type,
+                backend_id=envelope.backend_id,
                 source_revision=envelope.source.revision,
                 status="completed",
-                artifacts=(delivery_artifact, validation_artifact),
+                artifacts=(delivery_artifact,),
                 result={
                     "profile": profile.value,
                     "engine": engine,
                     "requires_approval": True,
-                    "delivery_audio": delivery_artifact.model_dump(mode="json"),
-                    "validation": validation,
+                    "source_sha256": source_digest,
+                    "delivery_audio": {
+                        **delivery_artifact.model_dump(mode="json"),
+                        "duration_seconds": encoded["duration_seconds"],
+                    },
+                    "report": self._report(clean_report),
                 },
             )
             yield self._event(
@@ -182,6 +172,7 @@ class AvailableMagicCleanWorkflow:
                 attempt_id=envelope.attempt_id,
                 track_id=envelope.track_id,
                 job_type=envelope.job_type,
+                backend_id=envelope.backend_id,
                 source_revision=envelope.source.revision,
                 status="failed",
                 error_code=error.code.value,
@@ -197,6 +188,31 @@ class AvailableMagicCleanWorkflow:
             )
         finally:
             workspace.cleanup()
+
+    @staticmethod
+    def _report(clean_report: dict) -> dict:
+        """Review-relevant facts only; engine timings and internal policies stay in logs."""
+        sound = clean_report.get("sound_cleanup") or {}
+        report = {
+            "duration_seconds": clean_report.get("duration_seconds"),
+            "channels": clean_report.get("channels"),
+            "sample_rate": clean_report.get("sample_rate"),
+            "gain_db": clean_report.get("gain_db"),
+            "target_lufs": clean_report.get("target_lufs"),
+            "delivery_measurement": clean_report.get("delivery_measurement"),
+            "warnings": clean_report.get("warnings", []),
+            "speech_preservation": clean_report.get("speech_preservation"),
+            "sound_cleanup": {
+                key: sound.get(key)
+                for key in ("status", "repaired_count", "unresolved_count", "preview_count", "events")
+                if key in sound
+            },
+            "background_cleanup": (clean_report.get("background_cleanup") or {}).get("status"),
+        }
+        timeline = clean_report.get("timeline") or {}
+        if timeline and timeline.get("original_frames") != timeline.get("end_frame"):
+            report["timeline"] = timeline
+        return report
 
     @staticmethod
     def _sha256(path: Path) -> str:
@@ -221,6 +237,7 @@ class AvailableMagicCleanWorkflow:
             attempt_id=envelope.attempt_id,
             track_id=envelope.track_id,
             job_type=envelope.job_type,
+            backend_id=envelope.backend_id,
             source_revision=envelope.source.revision,
             sequence=sequence,
             event=event_type,

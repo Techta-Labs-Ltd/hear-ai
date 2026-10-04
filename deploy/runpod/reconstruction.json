@@ -42,7 +42,7 @@
     "gpuCount": 1,
     "workersMin": 0,
     "workersMax": 1,
-    "idleTimeout": 5,
+    "idleTimeout": 180,
     "flashboot": true,
     "scalerType": "QUEUE_DELAY",
     "scalerValue": 1,

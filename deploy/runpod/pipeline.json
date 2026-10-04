@@ -46,7 +46,7 @@
     "gpuCount": 1,
     "workersMin": 0,
     "workersMax": 1,
-    "idleTimeout": 5,
+    "idleTimeout": 180,
     "flashboot": true,
     "scalerType": "QUEUE_DELAY",
     "scalerValue": 1,
@@ -54,8 +54,7 @@
     "name": "hear-ai-pipeline",
     "gpuTypeIds": [
       "NVIDIA RTX A5000",
-      "NVIDIA RTX A4500",
-      "NVIDIA A40"
+      "NVIDIA RTX A4500"
     ]
   }
 }

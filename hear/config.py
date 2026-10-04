@@ -80,7 +80,6 @@ class RuntimeSettings(BaseModel):
     audio_decode_timeout_seconds: float = Field(
         default=1200.0, gt=0, alias="AUDIO_DECODE_TIMEOUT_SECONDS"
     )
-    pipeline_mp3_bitrate_kbps: int = Field(default=96, gt=0, alias="PIPELINE_MP3_BITRATE_KBPS")
     whisper_batch_size: int = Field(default=36, gt=0, alias="WHISPER_BATCH_SIZE")
     whisper_chunk_seconds: int = Field(default=600, gt=0, alias="WHISPER_CHUNK_SECONDS")
     whisper_long_audio_batch_size: int = Field(

@@ -141,49 +141,37 @@ class FishReconstructionWorkflow:
                     )
                 rows.append(row)
             payload = {
-                k: v
-                for k, v in result.items()
-                if k not in {"delivery", "segments", "timeline"}
+                key: result[key]
+                for key in (
+                    "sample_rate",
+                    "source_frames",
+                    "output_frames",
+                    "channels",
+                    "duration",
+                    "duration_delta_seconds",
+                    "timeline_policy",
+                    "delivery_measurement",
+                    "final_gain_db",
+                )
+                if key in result
             }
             payload.update(
                 {
-                    "job_id": envelope.job_id,
-                    "attempt_id": envelope.attempt_id,
-                    "track_id": envelope.track_id,
-                    "backend_id": envelope.backend_id,
-                    "source_revision": envelope.source.revision,
                     "source_sha256": digest,
-                    "source_hash_verified": envelope.source.file_sha256 is not None,
-                    "operation": operation,
-                    "engine": "fish_speech_s2_pro",
-                    "engine_policy": "fish-tts-edit-v1",
-                    "requires_approval": True,
-                    "b2_key": delivery.object_key,
-                    "audio_url": delivery.audio_url,
-                    "bucket_name": delivery.bucket_name,
+                    "delivery": {**delivery.model_dump(mode="json"), "duration_seconds": result.get("duration")},
                     "segments": rows,
-                    "delivery": delivery.model_dump(mode="json"),
                 }
             )
-            validation = await self.native.run(
-                storage.upload_json,
-                payload,
-                storage.key("jobs", envelope.job_id, envelope.attempt_id, "reconstruction.json"),
-            )
-            artifacts.append(validation)
             outcome = ExecutionOutcome(
                 job_id=envelope.job_id,
                 attempt_id=envelope.attempt_id,
                 track_id=envelope.track_id,
                 job_type=envelope.job_type,
+                backend_id=envelope.backend_id,
                 source_revision=envelope.source.revision,
                 status="completed",
                 artifacts=tuple(artifacts),
                 result={
-                    "job_id": envelope.job_id,
-                    "run_id": envelope.run_id,
-                    "track_id": envelope.track_id,
-                    "job_type": "reconstruction",
                     "operation": operation,
                     "engine": "fish_speech_s2_pro",
                     "requires_approval": True,
@@ -213,6 +201,7 @@ class FishReconstructionWorkflow:
             attempt_id=envelope.attempt_id,
             track_id=envelope.track_id,
             job_type=envelope.job_type,
+            backend_id=envelope.backend_id,
             source_revision=envelope.source.revision,
             sequence=sequence,
             event=kind,

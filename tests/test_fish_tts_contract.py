@@ -256,8 +256,8 @@ def test_full_tts_workflow_returns_audio_ownership_and_changed_timeline(tmp_path
     outcome = events[-1].data["outcome"]
     assert outcome["status"] == "completed"
     result = outcome["result"]["reconstructed_audio"]
-    assert result["engine"] == "fish_speech_s2_pro" and result["backend_id"] == "backend-a"
-    assert result["source_revision"] == 7 and result["requires_approval"] is True
+    assert outcome["result"]["engine"] == "fish_speech_s2_pro" and outcome["backend_id"] == "backend-a"
+    assert outcome["source_revision"] == 7 and outcome["result"]["requires_approval"] is True
     assert result["duration"] == 3.5 and result["output_frames"] == 168000
     assert result["segments"][0]["output_start_frame"] == 48000
     assert result["segments"][0]["output_end_frame"] == 72000
@@ -268,7 +268,8 @@ def test_full_tts_workflow_returns_audio_ownership_and_changed_timeline(tmp_path
         and fish.calls[0]["references"][0]["text"] == "Original words."
     )
     assert hashlib.sha256(path.read_bytes()).hexdigest() == old_digest
-    assert len(storage.uploads) == 2 and result["word_accuracy_verified"] is False
+    assert len(storage.uploads) == 2  # delivery MP3 plus the one segment MP3; no manifest upload
+    assert {a["content_type"] for a in outcome["artifacts"]} == {"audio/mpeg"}
 
 
 def test_source_revision_hash_failure_prevents_tts_and_upload(tmp_path):

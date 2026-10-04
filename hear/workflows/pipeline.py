@@ -15,7 +15,6 @@ from hear.services.categorization.discovery import DiscoverySerialization, Disco
 from hear.services.categorization.service import CategorizationService
 from hear.services.moderation.service import ModerationService
 from hear.services.transcription.service import TranscriptionService
-from hear.storage.b2 import B2StorageFactory
 
 
 class PipelineProgress:
@@ -43,21 +42,17 @@ class PipelineWorkflow:
         categorizer: CategorizationService,
         discovery: DiscoveryService,
         audio: AudioIO,
-        storage_factory: B2StorageFactory,
         native: NativeExecutor,
         *,
         workspace_root: Path,
-        bitrate_kbps: int = 96,
     ) -> None:
         self._transcriber = transcriber
         self._moderator = moderator
         self._categorizer = categorizer
         self._discovery = discovery
         self._audio = audio
-        self._storage_factory = storage_factory
         self._native = native
         self._workspace_root = workspace_root
-        self._bitrate_kbps = bitrate_kbps
 
     async def stream(self, envelope: AttemptEnvelope):
         workspace = AudioWorkspace(
@@ -167,67 +162,24 @@ class PipelineWorkflow:
                     content_description = (
                         DiscoverySerialization.content_description_from_discovery(profile)
                     )
-            yield self._event(envelope, sequence, ExecutionEventType.STAGE, "compressing", 82)
-            sequence += 1
-            mp3_path = workspace.file("delivery.mp3")
-            encoded = await self._audio.encode_mp3(
-                source,
-                mp3_path,
-                maximum_kbps=self._bitrate_kbps,
-            )
-            storage = self._storage_factory.create(envelope.storage)
-            key = storage.key(
-                "jobs",
-                envelope.job_id,
-                envelope.attempt_id,
-                "delivery.mp3",
-            )
-            artifact = await self._native.run(
-                storage.upload_file,
-                mp3_path,
-                key,
-                sha256=str(encoded["sha256"]),
-                content_type="audio/mpeg",
-            )
-            result = {
-                "transcription": transcription,
-                "moderation": moderation,
-                "categorization": categorization,
-                "discovery": discovery,
-                "content_description": content_description,
-                "flagged": bool(moderation.get("flagged")),
-                "compressed_audio": {
-                    "audio_url": artifact.audio_url,
-                    "b2_key": artifact.object_key,
-                    "bucket_name": artifact.bucket_name,
-                    "format": "mp3",
-                    "bitrate_kbps": int(encoded["bitrate_kbps"]),
-                    "size_bytes": artifact.size_bytes,
-                },
-            }
-            manifest_key = storage.key(
-                "jobs",
-                envelope.job_id,
-                envelope.attempt_id,
-                "pipeline.json",
-            )
-            manifest = await self._native.run(
-                storage.upload_json,
-                result,
-                manifest_key,
-            )
+            # The pipeline analyses the source; it does not re-encode or store audio.
+            # Everything the backend needs travels in the outcome itself.
             outcome = ExecutionOutcome(
                 job_id=envelope.job_id,
                 attempt_id=envelope.attempt_id,
                 track_id=envelope.track_id,
                 job_type=envelope.job_type,
+                backend_id=envelope.backend_id,
                 source_revision=envelope.source.revision,
                 status="completed",
-                artifacts=(artifact, manifest),
+                artifacts=(),
                 result={
-                    "pipeline_manifest": manifest.model_dump(mode="json"),
-                    "compressed_audio": result["compressed_audio"],
-                    "flagged": result["flagged"],
+                    "transcription": transcription,
+                    "moderation": moderation,
+                    "categorization": categorization,
+                    "discovery": discovery,
+                    "content_description": content_description,
+                    "flagged": bool(moderation.get("flagged")),
                     "silent": bool(transcription.get("silent", False)),
                 },
             )
@@ -272,6 +224,7 @@ class PipelineWorkflow:
             attempt_id=envelope.attempt_id,
             track_id=envelope.track_id,
             job_type=envelope.job_type,
+            backend_id=envelope.backend_id,
             source_revision=envelope.source.revision,
             sequence=sequence,
             event=event_type,

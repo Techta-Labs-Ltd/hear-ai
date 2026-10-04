@@ -141,14 +141,12 @@ def envelope():
 @pytest.mark.anyio
 async def test_pipeline_streams_all_core_stages(tmp_path: Path):
     native = NativeExecutor("pipeline-test")
-    storage_factory = FakeStorageFactory()
     workflow = PipelineWorkflow(
         FakeTranscriber(),
         FakeModerator(),
         FakeCategorizer(),
         FakeDiscovery(),
         FakeAudio(),
-        storage_factory,
         native,
         workspace_root=tmp_path,
     )
@@ -160,12 +158,13 @@ async def test_pipeline_streams_all_core_stages(tmp_path: Path):
     assert "moderating" in stages
     assert "categorizing" in stages
     assert "discovering" in stages
-    assert "compressing" in stages
+    assert "compressing" not in stages
     assert events[-1].event == ExecutionEventType.OUTCOME
     outcome = events[-1].data["outcome"]
     assert outcome["status"] == "completed"
-    assert outcome["result"]["pipeline_manifest"]["object_key"].endswith("pipeline.json")
-    assert storage_factory.storage.uploaded_json["discovery"]["title_suggestion"] == (
-        "Local community news"
-    )
-    assert storage_factory.storage.uploaded_json["content_description"] == "Local news."
+    # The pipeline analyses; it ships no audio and no manifest. Data rides in the outcome.
+    assert outcome["artifacts"] == []
+    assert outcome["result"]["discovery"]["title_suggestion"] == "Local community news"
+    assert outcome["result"]["content_description"] == "Local news."
+    assert outcome["result"]["transcription"]["transcript"]
+    assert all(event.backend_id == outcome["backend_id"] for event in events)

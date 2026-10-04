@@ -169,7 +169,6 @@ class RuntimeBootstrap:
         workflow = TranscriptionWorkflow(
             service,
             audio,
-            B2StorageFactory(),
             native,
             workspace_root=scratch_root,
         )
@@ -184,7 +183,7 @@ class RuntimeBootstrap:
             ],
         )
 
-    def pipeline_executor(self, *, storage_factory=None) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
+    def pipeline_executor(self) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
         from hear.inference.client import LocalInferenceClient
         from hear.services.categorization.discovery import DiscoveryService
         from hear.services.categorization.service import CategorizationService
@@ -275,11 +274,9 @@ class RuntimeBootstrap:
             max_download_bytes=self._settings.audio_download_max_bytes,
             decode_timeout_seconds=self._settings.audio_decode_timeout_seconds,
         )
-        storage_factory = storage_factory or B2StorageFactory()
         transcription = TranscriptionWorkflow(
             transcriber,
             audio,
-            storage_factory,
             audio_native,
             workspace_root=scratch_root,
         )
@@ -299,10 +296,8 @@ class RuntimeBootstrap:
                 max_search_phrases=self._settings.discovery_max_search_phrases,
             ),
             audio,
-            storage_factory,
             audio_native,
             workspace_root=scratch_root,
-            bitrate_kbps=self._settings.pipeline_mp3_bitrate_kbps,
         )
         backend = self._attempt_reporter(client)
         return (

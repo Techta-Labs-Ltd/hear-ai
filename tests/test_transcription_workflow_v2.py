@@ -59,7 +59,6 @@ class TestTranscriptionWorkflow:
         workflow = TranscriptionWorkflow(
             FakeTranscriber(),
             FakeAudio(),
-            FakeStorageFactory(),
             native,
             workspace_root=tmp_path,
         )
@@ -92,7 +91,6 @@ class TestTranscriptionWorkflow:
         assert events[-1].event == ExecutionEventType.OUTCOME
         outcome = events[-1].data["outcome"]
         assert outcome["status"] == "completed"
-        assert "transcript" not in outcome["result"]
-        assert outcome["result"]["transcription_manifest"]["object_key"].endswith(
-            "transcription.json"
-        )
+        assert outcome["artifacts"] == []
+        assert outcome["result"]["transcription"]["transcript"]
+        assert outcome["result"]["language"] == "en"

@@ -14,7 +14,7 @@ POLICY = {
 
 
 def test_synthetic_canary_envelope_satisfies_deployment_policy():
-    for job_type in ("pipeline", "magic_clean"):
+    for job_type in ("pipeline", "transcription", "magic_clean", "reconstruction"):
         envelope = ServerlessCanary.synthetic_envelope(POLICY, job_type)
         BackendOwnershipPolicy.from_json(json.dumps(POLICY)).validate(envelope)
         assert envelope.job_type.value == job_type
