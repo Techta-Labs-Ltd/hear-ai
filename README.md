@@ -96,7 +96,14 @@ deployments for different backend taxonomies. Tokens, storage keys, and reportin
 grants belong in backend/worker secrets, never frontend requests or logs.
 
 Cleaner resource limits are `MAGIC_CLEAN_SCRATCH_BYTES`, `MAGIC_CLEAN_MAX_INPUT_BYTES`,
-and `MAGIC_CLEAN_MAX_FRAMES`. Every model directory is resolved through
+and `MAGIC_CLEAN_MAX_FRAMES`. Long recordings are processed in parallel:
+`HEAR_MAGIC_CLEAN_PARALLELISM` worker processes each clean one
+`HEAR_MAGIC_CLEAN_CHUNK_SECONDS` chunk with their own DeepFilterNet copy (about 1 GB of
+GPU memory each), mastering meters and encodes MP3 pieces across
+`HEAR_MASTERING_PARALLELISM` processes, and transcription runs voice activity detection
+in `WHISPER_VAD_WORKERS` processes ahead of the GPU, cutting speech into
+`WHISPER_SEGMENT_SECONDS` segments that fill `WHISPER_BATCH_SIZE` batches. On one A40 a
+three-hour track cleans in about 2.5 minutes and transcribes in about 3.5. Every model directory is resolved through
 [model_manifest.json](hear/model_manifest.json) under `HEAR_MODEL_ROOT`; set
 `HEAR_MODEL_PATHS_JSON` to point a logical model name at a different directory, for
 example custom or fine-tuned weights with the same file layout. Overrides are

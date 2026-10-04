@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import json
+import logging
 import os
 import tempfile
 import threading
@@ -15,13 +17,21 @@ from hear.contracts.cleaning import PROFILE_VERSION, CleaningProfiles, MagicClea
 from hear.contracts.sound_cleanup import SoundCleanupOptions
 from hear.runtime.cleaner.asset_probe import PinnedAssetSet
 from hear.runtime.cleaner.deepfilter_loader import PinnedDeepFilterAssets, PinnedDeepFilterFactory
+from hear.runtime.cleaner.parallel import (
+    ChunkEngineConfig,
+    ChunkEngines,
+    ChunkWorker,
+    ParallelCleaner,
+)
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
 from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
 from hear.services.magic_clean.contracts import CleanExecutionError, CleanPlan, ErrorCode
 from hear.services.magic_clean.engines.deepfilter import ContextualPolicy, DeepFilterEngine
-from hear.services.magic_clean.mastering import AudioMasteringService
+from hear.services.magic_clean.mastering import AudioMasteringService, LoudnessMeasurement
 from hear.services.magic_clean.profile_dsp import ProfileDspService, TrimResult
-from hear.services.magic_clean.quality import AudioQualityGate
+from hear.services.magic_clean.quality import AudioQualityGate, BlockEnergies
+from hear.services.sound_cleanup.analysis import SoundAnalyser
+from hear.services.sound_cleanup.assets import SoundCleanupAssets
 from hear.services.sound_cleanup.background import BackgroundCleanup
 from hear.services.sound_cleanup.service import SoundCleanupService
 
@@ -43,7 +53,13 @@ class DeepFilterNetCleaner:
         sound_cleanup_service: SoundCleanupService | None = None,
         idle_seconds: float = 300,
         eviction_enabled: bool = True,
+        workers: int | None = None,
+        chunk_seconds: int = 300,
     ) -> None:
+        self._config_path = config_path
+        self._model_directory = model_directory
+        self._device = device
+        self._parallel = ParallelCleaner(workers or ParallelCleaner.default_workers(), chunk_seconds)
         checkpoint = model_directory / "checkpoints" / "model_120.ckpt.best"
         packages = tuple(
             (name, importlib.metadata.version(name))
@@ -76,7 +92,41 @@ class DeepFilterNetCleaner:
         self._engine = DeepFilterEngine(self._identity, self._factory, self._policy)
         self._runner = CancellableProcessRunner()
         self._dsp = ProfileDspService(self._runner)
-        self._mastering = AudioMasteringService(self._runner)
+        self._mastering = AudioMasteringService(self._runner, workers=self._parallel.workers)
+
+    @staticmethod
+    def worker_initialize(config: ChunkEngineConfig) -> None:
+        """Build this worker process's engines; runs once per spawned chunk worker."""
+        sound_cleanup = None
+        if config.sound_cleanup_bundle:
+            assets = SoundCleanupAssets.load(
+                Path(config.sound_cleanup_bundle), config.sound_cleanup_sha256
+            )
+            sound_cleanup = SoundCleanupService(SoundAnalyser(assets, device="cpu"))
+        cleaner = DeepFilterNetCleaner(
+            Path(config.config_path),
+            Path(config.model_directory),
+            ResourceBudget(*config.budget),
+            device=config.device,
+            sound_cleanup_service=sound_cleanup,
+            eviction_enabled=False,
+        )
+        ChunkWorker.use(cleaner.chunk_engines())
+
+    def chunk_engines(self) -> ChunkEngines:
+        analyser = self._sound_cleanup.analyser if self._sound_cleanup is not None else None
+        return ChunkEngines(self._dsp, self._engine, analyser)
+
+    def _chunk_config(self) -> ChunkEngineConfig:
+        assets = self._sound_cleanup.analyser.assets if self._sound_cleanup is not None else None
+        return ChunkEngineConfig(
+            str(self._config_path),
+            str(self._model_directory),
+            self._device,
+            str(assets.root) if assets is not None else None,
+            assets.manifest_sha256 if assets is not None else "",
+            (self._budget.scratch_bytes, self._budget.max_input_bytes, self._budget.max_frames),
+        )
 
     @property
     def sound_cleanup_available(self) -> bool:
@@ -114,12 +164,18 @@ class DeepFilterNetCleaner:
     ) -> dict:
         started = time.perf_counter()
         timings: dict[str, float] = {}
-        phase_started = started
+        clock = started
+
+        def lap(name: str) -> None:
+            nonlocal clock
+            now = time.perf_counter()
+            timings[name] = now - clock
+            clock = now
+
         options = CleaningProfiles.validate(options)
         sound_options = SoundCleanupOptions.model_validate(options.get("sound_cleanup", {}))
-        if (
-            sound_options.enabled or options.get("reduce_stationary_noise")
-        ) and self._sound_cleanup is None:
+        whole_file_stages = bool(sound_options.enabled or options.get("reduce_stationary_noise"))
+        if whole_file_stages and self._sound_cleanup is None:
             raise CleanExecutionError(ErrorCode.ENGINE_UNAVAILABLE, "sound_cleanup_not_provisioned")
         remaining = (deadline - datetime.now(UTC)).total_seconds()
         guard = ResourceGuard(
@@ -133,22 +189,12 @@ class DeepFilterNetCleaner:
         if source.stat().st_size > self._budget.max_input_bytes:
             raise CleanExecutionError(ErrorCode.RESOURCE_EXHAUSTED, "input exceeds byte limit")
         prepared = workspace / "deepfilter_input.wav"
-        conditioned = workspace / "deepfilter_conditioned.wav"
-        processed = workspace / "deepfilter_output.wav"
-        finished = workspace / "profile_output.wav"
+        # The decoded master is not scanned here: every chunk reads and checks its own
+        # range (handles included), which covers the file and runs in parallel.
         self._dsp.render(source, prepared, [], guard, decode=True)
-        frames, channels = self._dsp.validate(prepared, guard)
+        frames, channels = self._dsp.validate(prepared, guard, scan=False)
         guard.preflight_pcm(frames, channels, copies=5, output_bytes=frames * channels * 4)
-        timings["decode_and_validate_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
-        original_measurement = self._mastering.measure(prepared, guard, frames / 48000)
-        timings["input_loudness_measurement_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
-        preparation_filters = self._dsp.preparation_filters(options)
-        model_input = prepared
-        if preparation_filters:
-            self._dsp.render(prepared, conditioned, preparation_filters, guard)
-            model_input = conditioned
+        lap("decode_and_validate_seconds")
         # Preserve the established pinned DeepFilterNet engine contract. User
         # profiles select DSP and attenuation, never a substitute/fallback model.
         plan = CleanPlan(
@@ -166,86 +212,118 @@ class DeepFilterNetCleaner:
             shorten_pauses=False,
             seed=0,
         )
-        timings["preprocessing_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
         if progress:
             progress("denoising", 30)
-        session = self._engine.open_session(plan, guard)
-        try:
-            session.process(model_input, processed, plan, guard)
-        finally:
-            session.close()
-        timings["denoising_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
-        AudioMasteringService.scan(processed, guard, rate=48000, channels=channels, frames=frames)
-        quality = AudioQualityGate().evaluate(model_input, processed, plan, guard)
-        speech_report = {"status": "analyser_not_provisioned"}
-        if self._sound_cleanup is not None:
-            speech_report = self.speech_preservation(
-                self._sound_cleanup.analyser, model_input, processed, guard
-            )
-        timings["quality_checks_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
-        sound_report = {"enabled": False, "status": "not_requested"}
-        if sound_options.enabled:
-            if progress:
-                progress("sound_cleanup", 55)
-            repaired = workspace / "sound_repaired.wav"
-            assert self._sound_cleanup is not None
-            sound_report = self._sound_cleanup.run(
-                prepared, processed, repaired, sound_options, guard
-            )
-            processed = repaired
-        background_report = {"enabled": False, "status": "not_requested"}
-        if options.get("reduce_stationary_noise"):
-            assert self._sound_cleanup is not None
-            if progress:
-                progress("background_cleanup", 65)
-            background_evidence = self._sound_cleanup.analyser.analyse(
-                prepared, processed, guard, detect_events=False
-            )
-            background_output = workspace / "background_cleaned.wav"
-            background_report = {
-                "enabled": True,
-                **BackgroundCleanup().render(
-                    processed, background_output, background_evidence, guard
-                ),
-            }
-            background_probability = self._sound_cleanup.analyser.speech_probability(
-                background_output, guard
-            )
-            anchors = background_evidence.speech >= 0.8
-            lost = anchors & (background_probability < 0.1)
-            background_report["lost_high_confidence_speech_frames"] = int(lost.sum())
-            if int(lost.sum()) > 1:
-                background_report["status"] = "rejected_speech_activity_loss"
-                background_output.unlink(missing_ok=True)
-            else:
-                processed = background_output
-        timings["optional_event_and_background_cleanup_seconds"] = (
-            time.perf_counter() - phase_started
+        # Whole-file optional stages (event repair, background cleanup) sit between
+        # denoising and finishing, so chunks then stop at the denoised output.
+        results = self._parallel.run(
+            {
+                "prepared": str(prepared),
+                "workspace": str(workspace),
+                "options": options,
+                "plan_json": plan.model_dump_json(),
+                "finishing": not whole_file_stages,
+                "channels": channels,
+            },
+            frames,
+            guard,
+            initializer=self.worker_initialize,
+            config_factory=self._chunk_config,
+            inline_engines=self.chunk_engines(),
         )
-        phase_started = time.perf_counter()
-        finish_filters = self._dsp.finishing_filters(options)
+        lap("chunk_processing_seconds")
+        timings.update(ParallelCleaner.chunk_timings(results))
+        ordered = sorted(results, key=lambda item: item.index)
+        original_measurement = AudioMasteringService.summarize(
+            [item.input_measurement for item in ordered], 48000
+        )
+        quality = AudioQualityGate().summarize(
+            BlockEnergies.concatenate([item.energies for item in ordered])
+        )
+        speech_report = ParallelCleaner.speech_report(ordered)
+        processed = workspace / "deepfilter_output.wav"
+        ParallelCleaner.stitch(ordered, processed, channels, guard)
+        for item in ordered:
+            Path(item.output).unlink(missing_ok=True)
+        AudioMasteringService.scan(processed, guard, rate=48000, channels=channels, frames=frames)
+        output_measurement: LoudnessMeasurement | None = AudioMasteringService.summarize(
+            [item.output_measurement for item in ordered], 48000
+        )
+        lap("stitch_seconds")
+        sound_report = {"enabled": False, "status": "not_requested"}
+        background_report = {"enabled": False, "status": "not_requested"}
+        if whole_file_stages:
+            assert self._sound_cleanup is not None
+            output_measurement = None
+            if sound_options.enabled:
+                if progress:
+                    progress("sound_cleanup", 55)
+                repaired = workspace / "sound_repaired.wav"
+                sound_report = self._sound_cleanup.run(
+                    prepared, processed, repaired, sound_options, guard
+                )
+                processed = repaired
+            if options.get("reduce_stationary_noise"):
+                if progress:
+                    progress("background_cleanup", 65)
+                background_evidence = self._sound_cleanup.analyser.analyse(
+                    prepared, processed, guard, detect_events=False
+                )
+                background_output = workspace / "background_cleaned.wav"
+                background_report = {
+                    "enabled": True,
+                    **BackgroundCleanup().render(
+                        processed, background_output, background_evidence, guard
+                    ),
+                }
+                background_probability = self._sound_cleanup.analyser.speech_probability(
+                    background_output, guard
+                )
+                anchors = background_evidence.speech >= 0.8
+                lost = anchors & (background_probability < 0.1)
+                background_report["lost_high_confidence_speech_frames"] = int(lost.sum())
+                if int(lost.sum()) > 1:
+                    background_report["status"] = "rejected_speech_activity_loss"
+                    background_output.unlink(missing_ok=True)
+                else:
+                    processed = background_output
+            finish_filters = self._dsp.finishing_filters(options)
+            if finish_filters:
+                finished = workspace / "profile_output.wav"
+                self._dsp.render(processed, finished, finish_filters, guard)
+                AudioMasteringService.scan(
+                    finished, guard, rate=48000, channels=channels, frames=frames
+                )
+                processed = finished
+        lap("optional_event_and_background_cleanup_seconds")
         master_input = processed
-        if finish_filters:
-            self._dsp.render(processed, finished, finish_filters, guard)
-            AudioMasteringService.scan(
-                finished, guard, rate=48000, channels=channels, frames=frames
-            )
-            master_input = finished
         trim = TrimResult(0, frames, frames)
         if options["trim_silence"]:
-            trimmed = workspace / "trimmed_output.wav"
-            trim = self._dsp.trim_edges(master_input, trimmed, guard)
-            master_input = trimmed
-        timings["finishing_and_trim_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
+            trim = self._dsp.trim_bounds(master_input, guard, frames)
+            if (trim.start_frame, trim.end_frame) != (0, frames):
+                trimmed = workspace / "trimmed_output.wav"
+                self._dsp.render(
+                    master_input,
+                    trimmed,
+                    [
+                        f"atrim=start_sample={trim.start_frame}:end_sample={trim.end_frame}",
+                        "asetpts=PTS-STARTPTS",
+                    ],
+                    guard,
+                )
+                AudioMasteringService.scan(
+                    trimmed,
+                    guard,
+                    rate=48000,
+                    channels=channels,
+                    frames=trim.end_frame - trim.start_frame,
+                )
+                master_input = trimmed
+        lap("finishing_and_trim_seconds")
         if progress:
             progress("mastering", 75)
-        mastered = self._mastering.master(master_input, plan, guard)
-        timings["mastering_and_export_seconds"] = time.perf_counter() - phase_started
-        phase_started = time.perf_counter()
+        mastered = self._mastering.master(master_input, plan, guard, measurement=output_measurement)
+        lap("mastering_and_export_seconds")
         delivery = workspace / "delivery_audio.mp3"
         guard.check()
         if delivery.exists():
@@ -267,12 +345,16 @@ class DeepFilterNetCleaner:
             warnings.append("loudness_target_limited_by_headroom_or_measurement_gate")
         if not options["auto_level"] and mastered.gain_db < 0:
             warnings.append("linear_attenuation_applied_for_peak_safety")
+        performance = {
+            **{k: round(v, 6) for k, v in timings.items()},
+            "chunks": len(ordered),
+            "workers": min(self._parallel.workers, len(ordered)),
+            "total_seconds": round(time.perf_counter() - started, 6),
+        }
+        logging.getLogger(__name__).info("magic_clean_performance %s", json.dumps(performance))
         return {
             "engine": self.engine,
-            "performance": {
-                **{k: round(v, 6) for k, v in timings.items()},
-                "total_seconds": round(time.perf_counter() - started, 6),
-            },
+            "performance": performance,
             "profile": options["profile"],
             "profile_version": PROFILE_VERSION,
             "sound_cleanup": sound_report,
@@ -280,7 +362,7 @@ class DeepFilterNetCleaner:
             "effective_options": {k: v for k, v in options.items() if k != "cleaner_ticket"},
             "input_measurement": asdict(original_measurement),
             "loudness_meter": {
-                "method": "ffmpeg_ebur128_true_peak",
+                "method": "bs1770_numpy_k_weighted_gated_true_peak_192k",
                 "loudness_resolution_lu": 0.1,
                 "true_peak_rounding_safety_db": 0.05,
             },

@@ -79,6 +79,7 @@ class TranscriptionService:
         long_audio_batch_size: int = 4,
         native: NativeExecutor | None = None,
         min_avg_logprob: float = -0.75,
+        vad_pool=None,
     ):
         if not 1 <= chunk_seconds <= 600 or batch_size < 1 or long_audio_batch_size < 1:
             raise ValueError("invalid_transcription_window_policy")
@@ -88,6 +89,7 @@ class TranscriptionService:
         self._long_audio_batch_size = long_audio_batch_size
         self._native = native
         self._policy = TranscriptionResultPolicy(min_avg_logprob)
+        self._vad_pool = vad_pool
 
     @staticmethod
     def _read_window(source, frames: int):
@@ -123,29 +125,37 @@ class TranscriptionService:
             )
             combined = {"segments": [], "audio_duration": duration, "language": language or "en"}
             frames = source.samplerate * self._chunk_seconds
-            while source.tell() < source.frames:
-                offset = source.tell() / source.samplerate
-                window_started = time.perf_counter()
-                operation = partial(self._read_window, source, frames)
-                samples = (
-                    await self._native.run(self._read_window, source, frames)
-                    if self._native is not None
-                    else await NativeExecutor.run_blocking_to_completion(operation)
+            rate, total_frames = source.samplerate, source.frames
+            if self._vad_pool is None:
+                while source.tell() < source.frames:
+                    offset = source.tell() / source.samplerate
+                    window_started = time.perf_counter()
+                    operation = partial(self._read_window, source, frames)
+                    samples = (
+                        await self._native.run(self._read_window, source, frames)
+                        if self._native is not None
+                        else await NativeExecutor.run_blocking_to_completion(operation)
+                    )
+                    performance["decode_resample_seconds"] += time.perf_counter() - window_started
+                    result = await self._transcribe_window(samples, batch_size, language)
+                    self._account(performance, result)
+                    append_shifted_result(combined, result, offset_seconds=offset)
+                    if progress is not None:
+                        await progress.publish(source.tell() / source.frames * 100.0)
+        if self._vad_pool is not None:
+            # Windows are read and VAD-segmented in worker processes ahead of the GPU.
+            windows = [(start, min(frames, total_frames - start)) for start in range(0, total_frames, frames)]
+            async for window in self._vad_pool.stream(path, windows):
+                performance["decode_resample_seconds"] += window.read_seconds
+                performance["vad_seconds"] = performance.get("vad_seconds", 0.0) + window.vad_seconds
+                result = await self._transcribe_window(
+                    window.samples, batch_size, language, segments=window.segments
                 )
-                performance["decode_resample_seconds"] += time.perf_counter() - window_started
-                inference_started = time.perf_counter()
-                result = await self._model_client.transcribe_window(
-                    samples, batch_size, language or "en"
-                )
-                if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
-                    raise RuntimeError("invalid_transcription_window_result")
-                performance["asr_and_alignment_seconds"] += time.perf_counter() - inference_started
-                for name in ("model_window_seconds", "executor_wait_seconds"):
-                    performance[name] += result.get("_runtime_timing", {}).get(name, 0.0)
-                performance["windows"] += 1
-                append_shifted_result(combined, result, offset_seconds=offset)
+                self._account(performance, result)
+                append_shifted_result(combined, result, offset_seconds=window.start_frame / rate)
                 if progress is not None:
-                    await progress.publish(source.tell() / source.frames * 100.0)
+                    done = window.start_frame + min(frames, total_frames - window.start_frame)
+                    await progress.publish(done / total_frames * 100.0)
         result = self._process_result(
             finalize_combined_result(combined), language=language, short_utterance=short_utterance
         )
@@ -158,6 +168,29 @@ class TranscriptionService:
             "alignment_enabled": True,
         }
         return result
+
+    async def _transcribe_window(self, samples, batch_size: int, language: str | None, *, segments=None) -> dict:
+        started = time.perf_counter()
+        if segments is None:
+            result = await self._model_client.transcribe_window(samples, batch_size, language or "en")
+        else:
+            result = await self._model_client.transcribe_window(
+                samples, batch_size, language or "en", segments=segments
+            )
+        if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+            raise RuntimeError("invalid_transcription_window_result")
+        result.setdefault("_runtime_timing", {})["asr_and_alignment_seconds"] = (
+            time.perf_counter() - started
+        )
+        return result
+
+    @staticmethod
+    def _account(performance: dict, result: dict) -> None:
+        timing = result.get("_runtime_timing", {})
+        performance["asr_and_alignment_seconds"] += timing.get("asr_and_alignment_seconds", 0.0)
+        for name in ("model_window_seconds", "executor_wait_seconds"):
+            performance[name] += timing.get(name, 0.0)
+        performance["windows"] += 1
 
     async def transcribe(
         self,

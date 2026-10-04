@@ -104,6 +104,19 @@ class LocalSileroVad:
         ]
 
 
+class PrecomputedSegments:
+    """Stands in for the VAD inside the ASR pipeline when segments were found upstream."""
+
+    preprocess_audio = staticmethod(LocalSileroVad.preprocess_audio)
+    merge_chunks = staticmethod(LocalSileroVad.merge_chunks)
+
+    def __init__(self, segments: list[tuple[float, float]]) -> None:
+        self._segments = [SpeechSegment(float(start), float(end)) for start, end in segments]
+
+    def __call__(self, audio, **kwargs):
+        return list(self._segments)
+
+
 class QwenAsrEngine:
     def __init__(
         self,
@@ -119,17 +132,19 @@ class QwenAsrEngine:
         max_batch_size: int,
         long_audio_batch_size: int,
         chunk_seconds: int,
+        segment_seconds: int = 30,
     ) -> None:
         self._worker = NativeExecutor("qwen-asr")
         self._temp_dir = temp_dir
         self._max_batch_size = max_batch_size
         self._long_audio_batch_size = long_audio_batch_size
         self._chunk_seconds = chunk_seconds
+        self._segment_seconds = segment_seconds
         self._cuda_healthy = True
         whisperx = importlib.import_module("whisperx")
         load_qwen_asr_model = importlib.import_module("whisperx.asr_qwen").load_model
         self._whisperx = whisperx
-        vad_model = LocalSileroVad(vad_onset, chunk_seconds)
+        vad_model = LocalSileroVad(vad_onset, segment_seconds)
         self._asr = load_qwen_asr_model(
             str(model_path),
             device="cuda",
@@ -158,6 +173,7 @@ class QwenAsrEngine:
         samples: np.ndarray,
         batch_size: int,
         language: str,
+        segments: list[tuple[float, float]] | None = None,
     ) -> dict:
         if not isinstance(samples, np.ndarray) or samples.ndim != 1:
             raise ValueError("invalid_transcription_window")
@@ -168,7 +184,9 @@ class QwenAsrEngine:
         if not 1 <= batch_size <= self._max_batch_size:
             raise ValueError("invalid_transcription_batch")
         started = time.perf_counter()
-        result = await self._worker.run(self._transcribe_window, samples, batch_size, language)
+        result = await self._worker.run(
+            self._transcribe_window, samples, batch_size, language, segments
+        )
         elapsed = time.perf_counter() - started
         timings = result.setdefault("_runtime_timing", {})
         timings["executor_wait_seconds"] = max(0.0, elapsed - timings["model_window_seconds"])
@@ -188,15 +206,25 @@ class QwenAsrEngine:
         samples: np.ndarray,
         batch_size: int,
         language: str,
+        segments: list[tuple[float, float]] | None = None,
     ) -> dict:
         try:
             started = time.perf_counter()
-            with torch.inference_mode():
-                result = self._asr.transcribe(
-                    samples,
-                    batch_size=batch_size,
-                    language=language,
-                )
+            # Calls are serialised on this engine's executor, so swapping the
+            # pipeline's VAD for one window cannot race another window.
+            original_vad = self._asr.vad_model
+            if segments is not None:
+                self._asr.vad_model = PrecomputedSegments(segments)
+            try:
+                with torch.inference_mode():
+                    result = self._asr.transcribe(
+                        samples,
+                        batch_size=batch_size,
+                        language=language,
+                        chunk_size=self._segment_seconds,
+                    )
+            finally:
+                self._asr.vad_model = original_vad
             if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
                 raise RuntimeError("invalid_transcription_window_result")
             result["_runtime_timing"] = {"model_window_seconds": time.perf_counter() - started}
@@ -233,11 +261,7 @@ class QwenAsrEngine:
                 sample_rate=16000,
                 chunk_seconds=self._chunk_seconds,
             ):
-                result = self._transcribe_window(
-                    chunk,
-                    effective_batch,
-                    "en",
-                )
+                result = self._transcribe_window(chunk, effective_batch, "en")
                 append_shifted_result(
                     combined,
                     result,
@@ -283,7 +307,9 @@ class LazyQwenAsrEngine:
         chunk_seconds: int,
         idle_seconds: float,
         eviction_enabled: bool,
+        segment_seconds: int = 30,
     ) -> None:
+        self._segment_seconds = segment_seconds
         self._model_path = model_path
         self._aligner_path = aligner_path
         self._cache_dir = cache_dir
@@ -318,6 +344,7 @@ class LazyQwenAsrEngine:
                 max_batch_size=self._max_batch_size,
                 long_audio_batch_size=self._long_audio_batch_size,
                 chunk_seconds=self._chunk_seconds,
+                segment_seconds=self._segment_seconds,
             )
         )
 
@@ -329,10 +356,16 @@ class LazyQwenAsrEngine:
         await self._resource.acquire()
         await self._resource.release()
 
-    async def transcribe_window(self, samples: np.ndarray, batch_size: int, language: str) -> dict:
+    async def transcribe_window(
+        self,
+        samples: np.ndarray,
+        batch_size: int,
+        language: str,
+        segments: list[tuple[float, float]] | None = None,
+    ) -> dict:
         engine = await self._resource.acquire()
         try:
-            return await engine.transcribe_window(samples, batch_size, language)
+            return await engine.transcribe_window(samples, batch_size, language, segments)
         finally:
             await self._resource.release()
 

@@ -36,9 +36,9 @@
       "HEAR_WORKER_ROLE": "pipeline",
       "HEAR_MODEL_FEATURES": "qwen_llm",
       "QWEN_LLM_GPU_MEMORY_GIB": "8.5",
-      "WHISPER_BATCH_SIZE": "8",
-      "WHISPER_LONG_AUDIO_BATCH_SIZE": "8",
-      "WHISPER_CHUNK_SECONDS": "240",
+      "WHISPER_BATCH_SIZE": "16",
+      "WHISPER_LONG_AUDIO_BATCH_SIZE": "16",
+      "WHISPER_CHUNK_SECONDS": "600",
       "QWEN_ASR_DTYPE": "bfloat16",
       "QWEN_ASR_DEVICE_MAP": "cuda:0"
     }

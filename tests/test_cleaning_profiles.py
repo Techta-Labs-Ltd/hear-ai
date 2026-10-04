@@ -18,6 +18,7 @@ from hear.contracts.jobs import JobType
 from hear.entrypoints.gateway import GatewayEntrypoint
 from hear.queue.topology import RabbitMQTopology
 from hear.runtime.cleaner.deepfilter_available import DeepFilterNetCleaner
+from hear.runtime.cleaner.parallel import ParallelCleaner
 from hear.runtime.cleaner.resource_guard import ResourceBudget, ResourceGuard
 from hear.runtime.cleaner.subprocesses import CancellableProcessRunner
 from hear.runtime.roles import WorkerCapabilityRegistry, WorkerRole
@@ -218,6 +219,7 @@ def stubbed_cleaner():
     cleaner._runner = CancellableProcessRunner()
     cleaner._dsp = ProfileDspService(cleaner._runner)
     cleaner._mastering = AudioMasteringService(cleaner._runner)
+    cleaner._parallel = ParallelCleaner(1, 300)
     return cleaner
 
 

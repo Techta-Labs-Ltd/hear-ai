@@ -80,8 +80,12 @@ class RuntimeSettings(BaseModel):
     audio_decode_timeout_seconds: float = Field(
         default=1200.0, gt=0, alias="AUDIO_DECODE_TIMEOUT_SECONDS"
     )
-    whisper_batch_size: int = Field(default=36, gt=0, alias="WHISPER_BATCH_SIZE")
-    whisper_chunk_seconds: int = Field(default=600, gt=0, alias="WHISPER_CHUNK_SECONDS")
+    whisper_batch_size: int = Field(default=16, gt=0, alias="WHISPER_BATCH_SIZE")
+    whisper_chunk_seconds: int = Field(default=600, gt=0, le=600, alias="WHISPER_CHUNK_SECONDS")
+    # Speech is cut into segments of at most this length so a window fills a batch.
+    whisper_segment_seconds: int = Field(default=30, ge=5, le=600, alias="WHISPER_SEGMENT_SECONDS")
+    # VAD runs on the CPU in these processes, ahead of the GPU.
+    whisper_vad_workers: int = Field(default=4, ge=1, le=32, alias="WHISPER_VAD_WORKERS")
     whisper_long_audio_batch_size: int = Field(
         default=4, gt=0, alias="WHISPER_LONG_AUDIO_BATCH_SIZE"
     )
@@ -131,6 +135,11 @@ class RuntimeSettings(BaseModel):
         default=4 * 1024**3, gt=0, alias="MAGIC_CLEAN_MAX_INPUT_BYTES"
     )
     magic_clean_max_frames: int = Field(default=96000 * 7200, gt=0, alias="MAGIC_CLEAN_MAX_FRAMES")
+    # Chunks cleaned concurrently, each in its own process with its own model copy
+    # (about 1 GB GPU and 1.5 GB RAM per worker). Also bounds MP3 piece parallelism.
+    magic_clean_parallelism: int = Field(default=8, ge=1, le=64, alias="HEAR_MAGIC_CLEAN_PARALLELISM")
+    magic_clean_chunk_seconds: int = Field(default=300, ge=60, le=1800, alias="HEAR_MAGIC_CLEAN_CHUNK_SECONDS")
+    mastering_parallelism: int = Field(default=8, ge=1, le=64, alias="HEAR_MASTERING_PARALLELISM")
     sound_cleanup_separator_bundle: Path | None = Field(
         default=None, alias="HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE"
     )

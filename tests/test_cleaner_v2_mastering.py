@@ -93,30 +93,25 @@ def test_encoded_input_cannot_be_mastered_again(tmp_path, mastering):
 def test_codec_correction_rerenders_delivery_from_float_source(tmp_path, mastering):
     _, plan, guard = mastering
 
-    class RecordingRunner(CancellableProcessRunner):
-        def __init__(self):
-            super().__init__()
-            self.commands = []
-
-        def run(self, argv, resource_guard):
-            self.commands.append(argv)
-            return super().run(argv, resource_guard)
-
     class OvershootOnce(AudioMasteringService):
-        def measure(self, path, resource_guard, duration):
-            measured = super().measure(path, resource_guard, duration)
-            if path.name == "delivery-0.mp3":
+        # Summaries: 1 = float master, 2 = delivery-0 (overshoots), 3 = delivery-1.
+        summaries = 0
+
+        def summarize(self, measurements, rate):
+            measured = super().summarize(measurements, rate)
+            self.summaries += 1
+            if self.summaries == 2:
                 return LoudnessMeasurement(measured.integrated_lufs, None, -0.5)
             return measured
 
     source = tmp_path / "engine.wav"
     sf.write(source, 0.1 * np.sin(np.arange(48000) * 0.1), 48000, subtype="FLOAT")
-    runner = RecordingRunner()
-    result = OvershootOnce(runner).master(source, plan, guard)
+    service = OvershootOnce(CancellableProcessRunner())
+    result = service.master(source, plan, guard)
     assert result.delivery.name == "delivery-1.mp3"
     assert not (tmp_path / "delivery-0.mp3").exists()
-    encodes = [args for args in runner.commands if "-c:a" in args]
-    assert len(encodes) == 2
-    for args in encodes:
-        assert args[args.index("-c:a") + 1] == "libmp3lame"
-        assert args[args.index("-i") + 1] == str(source)
+    # The second render is cut again from the float master, never from MP3.
+    assert not list(tmp_path.glob("mp3-*/*.mp3"))
+    assert service.summaries == 3
+
+

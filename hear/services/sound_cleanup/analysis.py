@@ -93,6 +93,12 @@ class SoundAnalyser:
         probability, _ = self._vad(path, guard)
         return probability.max(axis=1)
 
+    # Silero carries recurrent state between windows, so each lane runs its windows in
+    # order; LANES lanes with independent state share one batched call, which cuts the
+    # per-window overhead about four-fold. The file is read in slabs that bound memory.
+    SLAB_FRAMES = 1536 * 2000
+    LANES = 8
+
     def _vad(self, path: Path, guard: ResourceGuard) -> tuple[np.ndarray, np.ndarray]:
         model = torch.jit.load(str(self.assets.path("silero_vad.jit")), map_location="cpu").eval()
         with sf.SoundFile(path) as audio:
@@ -100,30 +106,44 @@ class SoundAnalyser:
             probability = np.zeros((count, audio.channels), dtype=np.float32)
             rms = np.zeros_like(probability)
             for channel in range(audio.channels):
-                model.reset_states()
-                for index in range(count):
+                for slab_start in range(0, audio.frames, self.SLAB_FRAMES):
                     guard.check()
-                    start = index * self.STEP
-                    left, right = max(0, start - 96), min(audio.frames, start + self.STEP + 96)
+                    slab_end = min(audio.frames, slab_start + self.SLAB_FRAMES)
+                    left = max(0, slab_start - 96)
+                    right = min(audio.frames, slab_end + 96)
                     audio.seek(left)
                     block = audio.read(right - left, dtype="float32", always_2d=True)[:, channel]
                     if not np.isfinite(block).all():
                         raise CleanExecutionError(
                             ErrorCode.INVALID_AUDIO, "invalid_sound_analysis_samples"
                         )
-                    core = block[start - left : min(start - left + self.STEP, len(block))]
-                    rms[index, channel] = np.sqrt(np.mean(core.astype(np.float64) ** 2))
-                    resampled = signal.resample_poly(block, 1, 3)
-                    offset = (start - left) // 3
-                    samples = resampled[offset : offset + 512]
-                    samples = np.pad(samples, (0, 512 - len(samples)))
-                    with torch.inference_mode():
-                        value = float(model(torch.from_numpy(samples).unsqueeze(0), 16000).item())
-                    if not math.isfinite(value) or not 0 <= value <= 1:
-                        raise CleanExecutionError(
-                            ErrorCode.INVALID_AUDIO, "invalid_speech_probability"
-                        )
-                    probability[index, channel] = value
+                    first = slab_start // self.STEP
+                    last = math.ceil(slab_end / self.STEP)
+                    windows = last - first
+                    core = block[slab_start - left : slab_end - left]
+                    padded = np.zeros(windows * self.STEP, dtype=np.float64)
+                    padded[: len(core)] = core
+                    rms[first:last, channel] = np.sqrt(
+                        np.mean(padded.reshape(windows, self.STEP) ** 2, axis=1)
+                    )
+                    resampled = signal.resample_poly(block, 1, 3).astype(np.float32)
+                    resampled = np.pad(resampled, (0, 512))
+                    offsets = (np.arange(first, last) * self.STEP - left) // 3
+                    matrix = np.stack([resampled[o : o + 512] for o in offsets]) if windows else np.zeros((0, 512), np.float32)
+                    lanes = max(1, min(self.LANES, windows))
+                    per_lane = math.ceil(windows / lanes)
+                    model.reset_states()
+                    for step in range(per_lane):
+                        rows = step + per_lane * np.arange(lanes)
+                        valid = rows < windows
+                        batch = torch.from_numpy(matrix[np.minimum(rows, windows - 1)])
+                        with torch.inference_mode():
+                            values = model(batch, 16000).reshape(-1).numpy()
+                        if not np.isfinite(values).all() or values.min() < 0 or values.max() > 1:
+                            raise CleanExecutionError(
+                                ErrorCode.INVALID_AUDIO, "invalid_speech_probability"
+                            )
+                        probability[first + rows[valid], channel] = values[valid]
         return probability, rms
 
     def _events(

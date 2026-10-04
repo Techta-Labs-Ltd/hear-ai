@@ -254,34 +254,63 @@ class DeepFilterSession:
                 format="RF64",
                 subtype="FLOAT",
             ) as output:
-                for start in range(0, audio.frames, self.policy.block_frames):
+                for group in self._block_groups(audio.frames):
                     guard.check()
-                    end = min(audio.frames, start + self.policy.block_frames)
-                    left = max(0, start - self.policy.context_frames)
-                    right = min(audio.frames, end + self.policy.context_frames)
-                    audio.seek(left)
-                    samples = audio.read(right - left, dtype="float32", always_2d=True).T.copy()
-                    if (
-                        samples.shape != (audio.channels, right - left)
-                        or not np.isfinite(samples).all()
-                    ):
-                        raise CleanExecutionError(
-                            ErrorCode.INVALID_AUDIO, "invalid DeepFilter input block"
-                        )
+                    # Every block is cropped from its own context window, so blocks of
+                    # equal length can share one forward pass as extra channels: the
+                    # model treats channels independently and the result is identical.
+                    stacked = []
+                    for _start, _end, left, right in group:
+                        audio.seek(left)
+                        samples = audio.read(right - left, dtype="float32", always_2d=True).T
+                        if (
+                            samples.shape != (audio.channels, right - left)
+                            or not np.isfinite(samples).all()
+                        ):
+                            raise CleanExecutionError(
+                                ErrorCode.INVALID_AUDIO, "invalid DeepFilter input block"
+                            )
+                        stacked.append(samples)
+                    batch = np.ascontiguousarray(np.concatenate(stacked, axis=0))
                     enhanced = self.backend.enhance(
-                        samples, self.attenuation(self.plan), self.plan.post_filter
+                        batch, self.attenuation(self.plan), self.plan.post_filter
                     )
                     guard.check()
                     if (
-                        enhanced.shape != samples.shape
+                        enhanced.shape != batch.shape
                         or enhanced.dtype != np.float32
                         or not np.isfinite(enhanced).all()
                     ):
                         raise CleanExecutionError(
                             ErrorCode.INVALID_AUDIO, "DeepFilter output shape or samples invalid"
                         )
-                    output.write(enhanced[:, start - left : end - left].T)
+                    for index, (start, end, left, _right) in enumerate(group):
+                        rows = slice(index * audio.channels, (index + 1) * audio.channels)
+                        output.write(enhanced[rows, start - left : end - left].T)
         guard.check()
+
+    BATCH_BLOCKS = 8
+
+    def _block_groups(self, frames: int) -> list[list[tuple[int, int, int, int]]]:
+        """Blocks with their context windows, grouped by equal length for batching."""
+        blocks = []
+        for start in range(0, frames, self.policy.block_frames):
+            end = min(frames, start + self.policy.block_frames)
+            left = max(0, start - self.policy.context_frames)
+            right = min(frames, end + self.policy.context_frames)
+            blocks.append((start, end, left, right))
+        groups: list[list[tuple[int, int, int, int]]] = []
+        for block in blocks:
+            length = block[3] - block[2]
+            if (
+                groups
+                and len(groups[-1]) < self.BATCH_BLOCKS
+                and groups[-1][-1][3] - groups[-1][-1][2] == length
+            ):
+                groups[-1].append(block)
+            else:
+                groups.append([block])
+        return groups
 
     @staticmethod
     def attenuation(plan: CleanPlan) -> int:

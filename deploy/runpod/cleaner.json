@@ -37,7 +37,8 @@
       "HEAR_SOUND_CLEANUP_BUNDLE": "/models/sound-cleanup-v1-runtime",
       "HEAR_SOUND_CLEANUP_SEPARATOR_BUNDLE": "/models/sound-cleanup-specialist/runtime",
       "HEAR_SOUND_CLEANUP_BUNDLE_SHA256": "6cf1259445ef7dc868521e59026007fb594c8006d6790e87f97b9e578751ac7e",
-      "HEAR_SOUND_CLEANUP_SEPARATOR_SHA256": "2278016f6becb669c5e073ff6b1931a95b03e9f4032f7e5f9ba35c82da22621f"
+      "HEAR_SOUND_CLEANUP_SEPARATOR_SHA256": "2278016f6becb669c5e073ff6b1931a95b03e9f4032f7e5f9ba35c82da22621f",
+      "HEAR_MAGIC_CLEAN_PARALLELISM": "8"
     }
   },
   "endpoint": {
@@ -52,8 +53,8 @@
     "executionTimeoutMs": 7200000,
     "name": "hear-ai-cleaner",
     "gpuTypeIds": [
-      "NVIDIA RTX A4000",
-      "NVIDIA RTX A4500"
+      "NVIDIA RTX A4500",
+      "NVIDIA RTX A5000"
     ]
   }
 }

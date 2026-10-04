@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import inspect
 import io
 import logging
@@ -49,12 +50,28 @@ class FishProcess:
             from fish_speech.models.text2semantic.llama import DualARTransformer
 
             original_from_pretrained = DualARTransformer.from_pretrained
+            original_init = DualARTransformer.__init__
 
-            def capped_from_pretrained(*args, **kwargs):
-                model = original_from_pretrained(*args, **kwargs)
+            def meta_init(self, *args, **kwargs):
+                # Only construction runs on meta; the later assign-load must register
+                # the real (GPU) tensors, so the patch cannot wrap from_pretrained itself.
+                with FishLoaderPatches.parameters_on_meta():
+                    original_init(self, *args, **kwargs)
+
+            def capped_from_pretrained(path, *args, **kwargs):
+                # Size the attention buffers at construction and load the safetensors
+                # straight onto the GPU: upstream otherwise materialises a 20 GB fp32
+                # CPU model before assigning weights.
+                kwargs.setdefault("max_length", MAX_SEQUENCE_TOKENS)
+                with FishLoaderPatches.safetensors_on_device("cuda"):
+                    model = original_from_pretrained(path, *args, **kwargs)
+                stranded = [name for name, p in model.named_parameters() if p.device.type == "meta"]
+                if stranded:
+                    raise RuntimeError(f"fish_weights_missing:{','.join(stranded[:3])}")
                 model.config.max_seq_len = min(model.config.max_seq_len, MAX_SEQUENCE_TOKENS)
                 return model
 
+            DualARTransformer.__init__ = meta_init
             DualARTransformer.from_pretrained = staticmethod(capped_from_pretrained)
             supported = inspect.signature(launch_thread_safe_queue).parameters
             if "max_seq_len" in supported:
@@ -145,6 +162,53 @@ class FishProcess:
                 pass
         finally:
             connection.close()
+
+
+class FishLoaderPatches:
+    """Keep the Fish checkpoint off the CPU while the upstream loader builds the model."""
+
+    @staticmethod
+    @contextlib.contextmanager
+    def parameters_on_meta():
+        """Register parameters on the meta device (buffers stay real) during construction.
+
+        With `load_state_dict(assign=True)` the loaded tensors then become the
+        parameters directly, so no CPU copy of the model is ever allocated.
+        """
+        import torch
+
+        original = torch.nn.Module.register_parameter
+
+        def register(module, name, param):
+            original(module, name, param)
+            if param is not None:
+                module._parameters[name] = torch.nn.Parameter(
+                    param.to("meta"), requires_grad=param.requires_grad
+                )
+
+        torch.nn.Module.register_parameter = register
+        try:
+            yield
+        finally:
+            torch.nn.Module.register_parameter = original
+
+
+    @staticmethod
+    @contextlib.contextmanager
+    def safetensors_on_device(device: str):
+        """Make `safetensors.torch.load_file` load tensors onto `device` regardless of caller."""
+        import safetensors.torch as safetensors_torch
+
+        original = safetensors_torch.load_file
+
+        def load_file(filename, device="cpu", *, target=device):
+            return original(filename, device=target)
+
+        safetensors_torch.load_file = load_file
+        try:
+            yield
+        finally:
+            safetensors_torch.load_file = original
 
 
 class FishSpeechEngine:

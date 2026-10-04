@@ -143,6 +143,7 @@ class RuntimeBootstrap:
             max_batch_size=self._settings.whisper_batch_size,
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             chunk_seconds=self._settings.whisper_chunk_seconds,
+            segment_seconds=self._settings.whisper_segment_seconds,
             idle_seconds=self._settings.pipeline_idle_ttl_seconds,
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
@@ -155,6 +156,7 @@ class RuntimeBootstrap:
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             native=native,
             min_avg_logprob=self._settings.whisper_min_avg_logprob,
+            vad_pool=self._vad_pool(),
         )
         audio = AudioIO(
             client,
@@ -225,6 +227,7 @@ class RuntimeBootstrap:
             max_batch_size=self._settings.whisper_batch_size,
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             chunk_seconds=self._settings.whisper_chunk_seconds,
+            segment_seconds=self._settings.whisper_segment_seconds,
             idle_seconds=self._settings.pipeline_idle_ttl_seconds,
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
@@ -263,6 +266,7 @@ class RuntimeBootstrap:
             long_audio_batch_size=self._settings.whisper_long_audio_batch_size,
             native=audio_native,
             min_avg_logprob=self._settings.whisper_min_avg_logprob,
+            vad_pool=self._vad_pool(),
         )
         audio = AudioIO(
             client,
@@ -406,6 +410,8 @@ class RuntimeBootstrap:
             sound_cleanup_service=sound_cleanup_service,
             idle_seconds=self._settings.magic_clean_idle_ttl_seconds,
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
+            workers=self._settings.magic_clean_parallelism,
+            chunk_seconds=self._settings.magic_clean_chunk_seconds,
         )
         readiness = self.readiness(role)
         readiness.add_check("ffmpeg", self._ffmpeg_ready)
@@ -442,6 +448,15 @@ class RuntimeBootstrap:
             JobExecutor({JobType.MAGIC_CLEAN: workflow}),
             self._attempt_reporter(client),
             [model_cleaner, native, client],
+        )
+
+    def _vad_pool(self):
+        from hear.services.transcription.vad_pool import VadWindowPool
+
+        return VadWindowPool(
+            self._settings.whisper_vad_workers,
+            self._settings.whisper_vad_onset,
+            self._settings.whisper_segment_seconds,
         )
 
     def _scratch_ledger(self):

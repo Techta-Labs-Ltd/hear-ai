@@ -105,9 +105,10 @@ class ProfileDspService:
             command += ["-t", str(guard.budget.max_frames / self.RATE + 0.1)]
         command += ["-ar", str(self.RATE), "-c:a", "pcm_f32le", "-threads", "1", str(target)]
         self.runner.run(command, guard)
-        self.validate(target, guard)
+        self.validate(target, guard, scan=not decode)
 
-    def validate(self, path: Path, guard: ResourceGuard) -> tuple[int, int]:
+    def validate(self, path: Path, guard: ResourceGuard, *, scan: bool = True) -> tuple[int, int]:
+        """Layout and length checks; `scan=False` leaves sample integrity to range readers."""
         with sf.SoundFile(path) as audio:
             frames, channels = audio.frames, audio.channels
             if audio.samplerate != self.RATE or channels not in (1, 2) or frames < 1:
@@ -118,36 +119,89 @@ class ProfileDspService:
                 raise CleanExecutionError(
                     ErrorCode.RESOURCE_EXHAUSTED, "audio duration exceeds limit"
                 )
-        AudioMasteringService.scan(path, guard, rate=self.RATE, channels=channels, frames=frames)
+        if scan:
+            AudioMasteringService.scan(path, guard, rate=self.RATE, channels=channels, frames=frames)
         return frames, channels
 
-    def trim_edges(self, source: Path, target: Path, guard: ResourceGuard) -> TrimResult:
-        """Trim only long near-silent edges. Preserve all internal pauses and handles."""
-        frames, channels = self.validate(source, guard)
-        first = None
-        last = 0
-        position = 0
-        with sf.SoundFile(source) as audio:
-            while True:
+    EDGE_BLOCK = 480
+    EDGE_RMS = 10 ** (-65 / 20)
+    EDGE_PEAK = 10 ** (-55 / 20)
+
+    @classmethod
+    def _active_blocks(cls, data: np.ndarray) -> np.ndarray:
+        """Which 10 ms blocks of `data` carry signal. Any active channel keeps the block.
+
+        Low thresholds protect quiet consonants/breaths; this is not a speech detector.
+        """
+        blocks = len(data) // cls.EDGE_BLOCK
+        if blocks == 0:
+            return np.zeros(0, dtype=bool)
+        shaped = data[: blocks * cls.EDGE_BLOCK].reshape(blocks, cls.EDGE_BLOCK, -1).astype(np.float64)
+        rms = np.sqrt(np.mean(shaped * shaped, axis=1)).max(axis=1)
+        peak = np.abs(shaped).max(axis=(1, 2))
+        return (rms > cls.EDGE_RMS) | (peak > cls.EDGE_PEAK)
+
+    @classmethod
+    def first_active_frame(cls, path: Path, guard: ResourceGuard, *, limit_frames: int) -> int | None:
+        """First active block start within `limit_frames` of the file start, else None."""
+        with sf.SoundFile(path) as audio:
+            position = 0
+            while position < min(audio.frames, limit_frames):
                 guard.check()
-                block = audio.read(480, dtype="float64", always_2d=True)
-                if not len(block):
+                audio.seek(position)
+                data = audio.read(cls.EDGE_BLOCK * 2000, dtype="float32", always_2d=True)
+                if not len(data):
                     break
-                # Any active channel preserves the block. Low thresholds protect
-                # quiet consonants/breaths; these are not a speech detector.
-                rms = float(np.max(np.sqrt(np.mean(block * block, axis=0))))
-                peak = float(np.max(np.abs(block)))
-                if rms > 10 ** (-65 / 20) or peak > 10 ** (-55 / 20):
-                    if first is None:
-                        first = position
-                    last = position + len(block)
-                position += len(block)
+                active = cls._active_blocks(data)
+                hits = np.flatnonzero(active)
+                if len(hits):
+                    return position + int(hits[0]) * cls.EDGE_BLOCK
+                tail = len(data) % cls.EDGE_BLOCK
+                if tail and (np.abs(data[-tail:]).max() > cls.EDGE_PEAK):
+                    return position + len(data) - tail
+                position += len(data)
+        return None
+
+    @classmethod
+    def last_active_frame(cls, path: Path, guard: ResourceGuard, *, limit_frames: int) -> int | None:
+        """End of the last active block within `limit_frames` of the file end, else None."""
+        with sf.SoundFile(path) as audio:
+            frames = audio.frames
+            position = frames
+            floor = max(0, frames - limit_frames)
+            while position > floor:
+                guard.check()
+                start = max(floor, position - cls.EDGE_BLOCK * 2000)
+                start -= start % cls.EDGE_BLOCK
+                audio.seek(start)
+                data = audio.read(position - start, dtype="float32", always_2d=True)
+                active = cls._active_blocks(data)
+                tail = len(data) % cls.EDGE_BLOCK
+                if tail and (np.abs(data[-tail:]).max() > cls.EDGE_PEAK):
+                    return position
+                hits = np.flatnonzero(active)
+                if len(hits):
+                    return start + (int(hits[-1]) + 1) * cls.EDGE_BLOCK
+                position = start
+        return None
+
+    def trim_bounds(self, source: Path, guard: ResourceGuard, frames: int) -> TrimResult:
+        """Bounds that drop only long near-silent edges; internal pauses stay."""
+        first = self.first_active_frame(source, guard, limit_frames=frames)
+        last = self.last_active_frame(source, guard, limit_frames=frames) or 0
         handle = round(0.25 * self.RATE)
         minimum = round(0.75 * self.RATE)
         start = max(0, first - handle) if first is not None and first >= minimum else 0
         end = (
             min(frames, last + handle) if first is not None and frames - last >= minimum else frames
         )
+        return TrimResult(start, end, frames)
+
+    def trim_edges(self, source: Path, target: Path, guard: ResourceGuard) -> TrimResult:
+        """Trim only long near-silent edges. Preserve all internal pauses and handles."""
+        frames, channels = self.validate(source, guard)
+        bounds = self.trim_bounds(source, guard, frames)
+        start, end = bounds.start_frame, bounds.end_frame
         self.render(
             source,
             target,
