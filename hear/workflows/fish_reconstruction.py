@@ -123,7 +123,6 @@ class FishReconstructionWorkflow:
 
             yield self.event(envelope, sequence, "uploading", 85)
             sequence += 1
-            master = await upload(result["master"], "reconstructed_master.flac", "audio/flac")
             delivery = await upload(result["delivery"], "reconstructed.mp3", "audio/mpeg")
             rows = []
             for index, (segment, row) in enumerate(
@@ -144,7 +143,7 @@ class FishReconstructionWorkflow:
             payload = {
                 k: v
                 for k, v in result.items()
-                if k not in {"master", "delivery", "segments", "timeline"}
+                if k not in {"delivery", "segments", "timeline"}
             }
             payload.update(
                 {
@@ -163,7 +162,6 @@ class FishReconstructionWorkflow:
                     "audio_url": delivery.audio_url,
                     "bucket_name": delivery.bucket_name,
                     "segments": rows,
-                    "master": master.model_dump(mode="json"),
                     "delivery": delivery.model_dump(mode="json"),
                 }
             )

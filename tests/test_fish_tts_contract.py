@@ -268,7 +268,7 @@ def test_full_tts_workflow_returns_audio_ownership_and_changed_timeline(tmp_path
         and fish.calls[0]["references"][0]["text"] == "Original words."
     )
     assert hashlib.sha256(path.read_bytes()).hexdigest() == old_digest
-    assert len(storage.uploads) == 3 and result["word_accuracy_verified"] is False
+    assert len(storage.uploads) == 2 and result["word_accuracy_verified"] is False
 
 
 def test_source_revision_hash_failure_prevents_tts_and_upload(tmp_path):

@@ -75,7 +75,6 @@ class AvailableMagicCleanWorkflow:
                 )
             yield self._event(envelope, sequence, "processing", 20, ExecutionEventType.STAGE)
             sequence += 1
-            master = workspace.file("cleaned_master.flac")
             cleaner = self._model_cleaner
             if cleaner is None or profile.value not in getattr(
                 cleaner, "supported_profiles", (cleaner.profile,)
@@ -89,7 +88,6 @@ class AvailableMagicCleanWorkflow:
                 self._native.run_cancellable(
                     cleaner.clean,
                     source,
-                    master,
                     workspace.path,
                     envelope.options,
                     envelope.deadline,
@@ -117,7 +115,6 @@ class AvailableMagicCleanWorkflow:
             if (
                 not isinstance(clean_report, dict)
                 or not delivery.is_file()
-                or not master.is_file()
                 or clean_report.get("technical_validation") != "passed"
                 or clean_report.get("profile") != profile.value
                 or clean_report.get("engine") != engine
@@ -133,14 +130,6 @@ class AvailableMagicCleanWorkflow:
             yield self._event(envelope, sequence, "uploading", 85, ExecutionEventType.STAGE)
             sequence += 1
             storage = self._storage_factory.create(envelope.storage)
-            master_digest = await self._native.run(self._sha256, master)
-            master_artifact = await self._native.run(
-                storage.upload_file,
-                master,
-                storage.key("jobs", envelope.job_id, envelope.attempt_id, "cleaned_master.flac"),
-                sha256=master_digest,
-                content_type="audio/flac",
-            )
             delivery_artifact = await self._native.run(
                 storage.upload_file,
                 delivery,
@@ -155,7 +144,6 @@ class AvailableMagicCleanWorkflow:
                 "engine": engine,
                 "profile": profile.value,
                 "duration_seconds": encoded["duration_seconds"],
-                "master_sha256": master_digest,
                 "delivery_sha256": encoded["sha256"],
                 "status": "passed",
             }
@@ -171,12 +159,11 @@ class AvailableMagicCleanWorkflow:
                 job_type=envelope.job_type,
                 source_revision=envelope.source.revision,
                 status="completed",
-                artifacts=(master_artifact, delivery_artifact, validation_artifact),
+                artifacts=(delivery_artifact, validation_artifact),
                 result={
                     "profile": profile.value,
                     "engine": engine,
                     "requires_approval": True,
-                    "cleaned_master": master_artifact.model_dump(mode="json"),
                     "delivery_audio": delivery_artifact.model_dump(mode="json"),
                     "validation": validation,
                 },

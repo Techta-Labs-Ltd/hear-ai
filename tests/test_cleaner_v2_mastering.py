@@ -27,7 +27,7 @@ def mastering(tmp_path):
 
 @pytest.mark.parametrize("channels,amplitude", [(1, 0.02), (2, 0.7)])
 @pytest.mark.parametrize("rate", [8000, 22050, 48000, 96000])
-def test_real_master_and_delivery_validate(tmp_path, mastering, channels, amplitude, rate):
+def test_real_delivery_validates(tmp_path, mastering, channels, amplitude, rate):
     service, plan, guard = mastering
     frames = 2 * rate + 1
     wave = amplitude * np.sin(2 * np.pi * 997 * np.arange(frames) / rate)
@@ -35,17 +35,17 @@ def test_real_master_and_delivery_validate(tmp_path, mastering, channels, amplit
     source = tmp_path / "engine.wav"
     sf.write(source, samples, rate, subtype="FLOAT")
     result = service.master(source, plan, guard)
-    with sf.SoundFile(result.master) as master:
-        assert master.subtype == "PCM_24"
-        assert master.frames == frames
-        assert master.samplerate == rate
-        assert master.channels == channels
+    with sf.SoundFile(result.delivery) as delivery:
+        assert delivery.samplerate == 48000
+        assert delivery.channels == channels
+        assert abs(delivery.frames - round(frames * 48000 / rate)) <= 1440
+    assert result.frames == frames
     assert result.gain_db <= 6
     assert result.delivery_rate == 48000
     assert result.processing_rate == rate
     assert result.delivery_measurement.true_peak_dbtp <= -1
-    assert result.master_measurement.true_peak_dbtp <= -1
     assert result.delivery_measurement.integrated_lufs is not None
+    assert not list(tmp_path.glob("*.flac"))
 
 
 @pytest.mark.parametrize("frames", [100, 48000])
@@ -54,8 +54,8 @@ def test_silence_has_null_loudness_and_reason(tmp_path, mastering, frames):
     source = tmp_path / "engine.wav"
     sf.write(source, np.zeros(frames), 48000, subtype="FLOAT")
     result = service.master(source, plan, guard)
-    assert result.master_measurement.integrated_lufs is None
-    assert result.master_measurement.unavailable_reason is not None
+    assert result.delivery_measurement.integrated_lufs is None
+    assert result.delivery_measurement.unavailable_reason is not None
     assert result.gain_db == 0
 
 
@@ -69,8 +69,8 @@ def test_loudness_off_preserves_safe_amplitude(tmp_path, mastering):
     sf.write(source, data, 48000, subtype="FLOAT")
     result = service.master(source, plan, guard)
     assert result.gain_db == 0
-    decoded, _ = sf.read(result.master)
-    np.testing.assert_allclose(decoded, data, atol=2e-7)
+    # MP3 is not sample-exact; the delivery peak must sit at the source peak (-20 dBFS).
+    assert abs(result.delivery_measurement.true_peak_dbtp - (-20.0)) < 1.0
 
 
 def test_nonfinite_audio_rejected_before_encoding(tmp_path, mastering):
@@ -79,7 +79,7 @@ def test_nonfinite_audio_rejected_before_encoding(tmp_path, mastering):
     sf.write(source, np.array([0.0, np.nan]), 48000, subtype="FLOAT")
     with pytest.raises(CleanExecutionError):
         service.master(source, plan, guard)
-    assert not list(tmp_path.glob("*.flac"))
+    assert not list(tmp_path.glob("*.mp3"))
 
 
 def test_encoded_input_cannot_be_mastered_again(tmp_path, mastering):
@@ -90,7 +90,7 @@ def test_encoded_input_cannot_be_mastered_again(tmp_path, mastering):
         service.master(source, plan, guard)
 
 
-def test_codec_correction_renders_new_master_from_float_source(tmp_path, mastering):
+def test_codec_correction_rerenders_delivery_from_float_source(tmp_path, mastering):
     _, plan, guard = mastering
 
     class RecordingRunner(CancellableProcessRunner):
@@ -113,14 +113,10 @@ def test_codec_correction_renders_new_master_from_float_source(tmp_path, masteri
     sf.write(source, 0.1 * np.sin(np.arange(48000) * 0.1), 48000, subtype="FLOAT")
     runner = RecordingRunner()
     result = OvershootOnce(runner).master(source, plan, guard)
-    assert result.master.name == "master-1.flac"
-    assert not (tmp_path / "master-0.flac").exists()
+    assert result.delivery.name == "delivery-1.mp3"
     assert not (tmp_path / "delivery-0.mp3").exists()
     encodes = [args for args in runner.commands if "-c:a" in args]
+    assert len(encodes) == 2
     for args in encodes:
-        input_path = args[args.index("-i") + 1]
-        codec = args[args.index("-c:a") + 1]
-        if codec == "flac":
-            assert input_path == str(source)
-        else:
-            assert input_path.endswith(".flac")
+        assert args[args.index("-c:a") + 1] == "libmp3lame"
+        assert args[args.index("-i") + 1] == str(source)

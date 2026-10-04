@@ -224,23 +224,21 @@ def stubbed_cleaner():
 @pytest.mark.parametrize("profile", list(MagicCleanProfile))
 @pytest.mark.parametrize("channels", [1, 2])
 def test_complete_profile_pipeline_exports_measured_files(dsp, tmp_path, profile, channels):
-    source, target = tmp_path / "source.wav", tmp_path / "cleaned_master.flac"
+    source, delivery = tmp_path / "source.wav", tmp_path / "delivery_audio.mp3"
     samples = tone(rate=44100, seconds=3, channels=channels)
     sf.write(source, samples, 44100, subtype="FLOAT")
     cleaner = stubbed_cleaner()
     report = cleaner.clean(
         source,
-        target,
         tmp_path,
         {"profile": profile.value},
         datetime.now(UTC) + timedelta(seconds=90),
         90,
     )
-    assert target.is_file() and (tmp_path / "delivery_audio.mp3").is_file()
-    assert sf.info(target).subtype == "PCM_24"
-    assert sf.info(target).frames == 144000 and sf.info(target).channels == channels
+    assert delivery.is_file() and not list(tmp_path.glob("*.flac"))
+    assert sf.info(delivery).channels == channels
+    assert abs(sf.info(delivery).frames - 144000) <= 1440
     assert report["profile"] == profile.value and report["channels"] == channels
-    assert report["master_measurement"]["true_peak_dbtp"] <= -1
     assert report["delivery_measurement"]["true_peak_dbtp"] <= -1
     assert report["perceptual_review_required"] is True
     assert cleaner._engine.closed
@@ -251,20 +249,19 @@ def test_complete_profile_pipeline_exports_measured_files(dsp, tmp_path, profile
 
 
 def test_raw_profile_preserves_dynamics_and_does_not_boost(dsp, tmp_path):
-    source, target = tmp_path / "source.wav", tmp_path / "cleaned_master.flac"
+    source = tmp_path / "source.wav"
     samples = tone(seconds=3)
     sf.write(source, samples, 48000, subtype="FLOAT")
     report = stubbed_cleaner().clean(
         source,
-        target,
         tmp_path,
         {"profile": "clean_raw"},
         datetime.now(UTC) + timedelta(seconds=90),
         90,
     )
-    result, _ = sf.read(target, always_2d=True)
     assert report["gain_db"] == 0 and report["target_lufs"] is None
-    np.testing.assert_allclose(result, samples, atol=2e-7, rtol=0)
+    source_peak_db = 20 * np.log10(float(np.max(np.abs(samples))))
+    assert abs(report["delivery_measurement"]["true_peak_dbtp"] - source_peak_db) < 1.0
 
 
 def test_retired_role_does_not_break_other_workers_during_migration(monkeypatch):

@@ -48,9 +48,10 @@ original/retained frame range uses a 48 kHz grid; divide offsets by 48,000 when
 updating transcript times after approval.
 
 Processing decodes to 48 kHz float PCM, applies selected pre-processing, denoising,
-optional event repair, finishing, and export validation. Outputs are a 24-bit FLAC
-master, a 128 kbps mono or 192 kbps stereo MP3, and a JSON report. Both exports are
-measured for finite samples, duration/channels, content-loss risk, and true peaks.
+optional event repair, finishing, and export validation. Outputs are a 128 kbps
+mono or 192 kbps stereo MP3 and a JSON report; no lossless master is produced or
+uploaded. The export is measured for finite samples, duration/channels,
+content-loss risk, and true peaks.
 A -1 dBTP ceiling is checked after MP3 encoding. Overshoot correction re-renders
 from float audio rather than repeatedly transcoding an MP3.
 
@@ -185,7 +186,7 @@ generic voice. Text chunks do not add emotion tags or paraphrase the requested t
 
 Outcomes include identities, source revision, backend ownership,
 `engine=fish_speech_s2_pro`, operation, and `requires_approval=true`.
-`reconstructed_audio` contains final/source frames, duration, master/delivery
+`reconstructed_audio` contains final/source frames, duration, delivery
 artifacts, storage keys/URLs/hashes, and per-edit records. Those records retain
 source times, generated durations, output positions, replacement MP3s, and reference
 digests. Generated speech is not stretched into the old interval; the backend must

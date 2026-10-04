@@ -1,7 +1,8 @@
-"""Single Cleaner v2 mastering path with exact-file validation.
+"""Single mastering path with exact-file validation.
 
 Only linear gain is applied. Loudness targets yield to +6 dB and true-peak
-constraints. Codec correction always starts with the float engine output.
+constraints. The delivery MP3 is rendered straight from the float engine output
+and any codec overshoot correction re-renders from that float source.
 """
 
 import math
@@ -31,17 +32,13 @@ class LoudnessMeasurement:
 
 @dataclass(frozen=True)
 class MasteredAudio:
-    master: Path
     delivery: Path
     gain_db: float
     processing_rate: int
     delivery_rate: int
     frames: int
     channels: int
-    master_measurement: LoudnessMeasurement
     delivery_measurement: LoudnessMeasurement
-    bit_depth: int = 24
-    dither_policy: str = "none"
 
 
 class AudioMasteringService:
@@ -168,43 +165,18 @@ class AudioMasteringService:
         created: list[Path] = []
         try:
             for correction in range(self.MAX_CORRECTIONS + 1):
-                master = guard.workspace / f"master-{correction}.flac"
                 delivery = guard.workspace / f"delivery-{correction}.mp3"
-                if master.exists() or delivery.exists():
+                if delivery.exists():
                     raise CleanExecutionError(
-                        ErrorCode.ARTIFACT_CONFLICT, "master output already exists"
+                        ErrorCode.ARTIFACT_CONFLICT, "delivery output already exists"
                     )
-                created.extend((master, delivery))
+                created.append(delivery)
                 self.runner.run(
                     self._input_args(source)
                     + [
                         "-n",
                         "-af",
                         f"volume={gain:.8f}dB:precision=double",
-                        "-c:a",
-                        "flac",
-                        "-sample_fmt",
-                        "s32",
-                        "-bits_per_raw_sample",
-                        "24",
-                        "-ar",
-                        str(rate),
-                        "-threads",
-                        "1",
-                        str(master),
-                    ],
-                    guard,
-                )
-                self.scan(master, guard, rate=rate, channels=channels, frames=frames)
-                with sf.SoundFile(master) as audio:
-                    if audio.subtype != "PCM_24":
-                        raise CleanExecutionError(
-                            ErrorCode.INVALID_AUDIO, "master bit depth mismatch"
-                        )
-                self.runner.run(
-                    self._input_args(master)
-                    + [
-                        "-n",
                         "-c:a",
                         "libmp3lame",
                         "-b:a",
@@ -226,30 +198,21 @@ class AudioMasteringService:
                     frames=expected_delivery_frames,
                     tolerance=1440,
                 )
-                master_stats = self.measure(master, guard, frames / rate)
                 delivery_stats = self.measure(delivery, guard, frames / rate)
-                peaks = [
-                    value
-                    for value in (master_stats.true_peak_dbtp, delivery_stats.true_peak_dbtp)
-                    if value is not None
-                ]
-                peak = max(peaks, default=-math.inf)
-                if peak <= -1:
+                peak = delivery_stats.true_peak_dbtp
+                if peak is None or peak <= -1:
                     guard.check()
                     return MasteredAudio(
-                        master,
                         delivery,
                         gain,
                         rate,
                         self.DELIVERY_RATE,
                         frames,
                         channels,
-                        master_stats,
                         delivery_stats,
                     )
                 # Re-render from the original float intermediate, never from MP3.
                 gain -= peak + 1.2
-                master.unlink()
                 delivery.unlink()
             raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "delivered true-peak gate failed")
         except BaseException:

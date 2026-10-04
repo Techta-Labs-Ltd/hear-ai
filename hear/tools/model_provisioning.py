@@ -39,9 +39,15 @@ class ModelProvisioner:
         role: WorkerRole,
         *,
         enabled_features: frozenset[str] = frozenset(),
+        acknowledge_license_review: bool = False,
     ) -> tuple[str, ...]:
+        blockers = (
+            ()
+            if acknowledge_license_review
+            else self._manifest.license_blockers(role, enabled_features=enabled_features)
+        )
         return (
-            *self._manifest.license_blockers(role, enabled_features=enabled_features),
+            *blockers,
             *self._manifest.validate_local(
                 self._model_root,
                 role,
@@ -74,6 +80,7 @@ class ModelProvisioner:
             missing = instance.verify(
                 WorkerRole(args.role),
                 enabled_features=features,
+                acknowledge_license_review=args.acknowledge_license_review,
             )
             if missing:
                 raise RuntimeError("model verification failed: " + ", ".join(missing))
@@ -86,6 +93,7 @@ class ModelProvisioner:
         missing = instance.verify(
             WorkerRole(args.role),
             enabled_features=features,
+            acknowledge_license_review=args.acknowledge_license_review,
         )
         if missing:
             raise RuntimeError("model verification failed: " + ", ".join(missing))

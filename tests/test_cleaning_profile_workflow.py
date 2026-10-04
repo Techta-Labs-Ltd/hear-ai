@@ -39,9 +39,8 @@ class ReportFixture:
         self.invalid = invalid
         self.called = False
 
-    def clean(self, source, master, workspace, options, deadline, timeout, **kwargs):
+    def clean(self, source, workspace, options, deadline, timeout, **kwargs):
         self.called = True
-        master.write_bytes(b"fake-master-for-transport-test-only")
         if self.invalid != "missing_delivery":
             (workspace / "delivery_audio.mp3").write_bytes(b"fake-delivery-for-transport-test-only")
         return {
@@ -132,13 +131,13 @@ def run(tmp_path, profile="natural", digest=None, invalid=None):
 
 
 @pytest.mark.parametrize("profile", [p.value for p in MagicCleanProfile])
-def test_all_profiles_publish_three_artifacts_with_approval(tmp_path, profile):
+def test_all_profiles_publish_two_artifacts_with_approval(tmp_path, profile):
     digest = hashlib.sha256(b"pinned-test-input").hexdigest()
     result = run(tmp_path, profile, digest)
     assert result.outcome["status"] == "completed"
     assert result.outcome["result"]["profile"] == profile
     assert result.outcome["result"]["requires_approval"] is True
-    assert len(result.storage.uploads) == 3
+    assert len(result.storage.uploads) == 2
     assert result.storage.report["source_sha256"] == digest
     assert result.storage.report["source_revision"] == 1
 

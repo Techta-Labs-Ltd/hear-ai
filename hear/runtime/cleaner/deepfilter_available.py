@@ -104,7 +104,6 @@ class DeepFilterNetCleaner:
     def clean(
         self,
         source: Path,
-        target: Path,
         workspace: Path,
         options: dict,
         deadline: datetime,
@@ -249,9 +248,8 @@ class DeepFilterNetCleaner:
         phase_started = time.perf_counter()
         delivery = workspace / "delivery_audio.mp3"
         guard.check()
-        if target.exists() or delivery.exists():
+        if delivery.exists():
             raise CleanExecutionError(ErrorCode.ARTIFACT_CONFLICT, "cleaning output already exists")
-        os.replace(mastered.master, target)
         os.replace(mastered.delivery, delivery)
         warnings = list(quality.warning_codes)
         if speech_report.get("status") != "analyser_not_provisioned":
@@ -286,7 +284,6 @@ class DeepFilterNetCleaner:
                 "loudness_resolution_lu": 0.1,
                 "true_peak_rounding_safety_db": 0.05,
             },
-            "master_measurement": asdict(mastered.master_measurement),
             "delivery_measurement": asdict(mastered.delivery_measurement),
             "target_lufs": target_lufs,
             "gain_db": mastered.gain_db,

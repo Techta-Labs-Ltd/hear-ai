@@ -24,7 +24,7 @@ from hear.services.magic_clean.profile_dsp import ProfileDspService
 @dataclass
 class RenderedSpeechEdit:
     edit: SpeechEdit
-    master: Path | None
+    audio: Path | None
     delivery: Path | None
     frames: int
     reference_sha256: str | None
@@ -161,8 +161,8 @@ class FishReconstructionRenderer:
                         remaining -= len(data)
                         output_cursor += len(data)
                     output_start = output_cursor
-                    if item.master is not None:
-                        with sf.SoundFile(item.master) as replacement:
+                    if item.audio is not None:
+                        with sf.SoundFile(item.audio) as replacement:
                             position = 0
                             while True:
                                 guard.check_scratch()
@@ -315,22 +315,21 @@ class FishReconstructionRenderer:
                         raise ValueError("generated_speech_budget_exceeded")
             total_generated += count
             mastered = await self.native.run(self.mastering.master, raw, MasteringSettings(), guard)
-            master = guard.workspace / f"segment-{index:03d}.flac"
+            segment_audio = guard.workspace / f"segment-{index:03d}.wav"
             delivery = guard.workspace / f"segment-{index:03d}.mp3"
-            mastered.master.rename(master)
+            raw.rename(segment_audio)
             mastered.delivery.rename(delivery)
             ref = references.get(index)
             rendered.append(
                 RenderedSpeechEdit(
                     edit,
-                    master,
+                    segment_audio,
                     delivery,
                     count,
                     hashlib.sha256(ref[0]["audio"]).hexdigest() if ref else None,
                     mastered.gain_db,
                 )
             )
-            raw.unlink()
             if progress:
                 progress(20 + 55 * (index + 1) / len(edits))
         target = guard.workspace / "reconstructed_float.wav"
@@ -353,7 +352,6 @@ class FishReconstructionRenderer:
         )
         mastered = await self.native.run(self.mastering.master, target, MasteringSettings(), guard)
         return {
-            "master": mastered.master,
             "delivery": mastered.delivery,
             "segments": rendered,
             "timeline": timeline,
@@ -368,7 +366,6 @@ class FishReconstructionRenderer:
             "generated_stereo_policy": "dual_mono_inside_edited_regions"
             if channels == 2
             else "mono",
-            "master_measurement": asdict(mastered.master_measurement),
             "delivery_measurement": asdict(mastered.delivery_measurement),
             "final_gain_db": mastered.gain_db,
             "word_accuracy_verified": False,
