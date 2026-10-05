@@ -99,3 +99,56 @@ def test_aligner_placeholder_scores_do_not_fake_confidence_and_zero_words_get_sp
     assert words[0]["prob"] is None
     assert words[0]["start"] == 0.40 and words[0]["end"] == 0.41
     assert words[1]["end"] == 0.80
+
+
+def _truncated_mp3(tmp_path):
+    """An MP3 whose Xing header says 30 s but whose frames stop at about 20 s."""
+    full = tmp_path / "full.mp3"
+    sf.write(full, np.full(16000 * 30, 0.1, dtype=np.float32), 16000, format="MP3")
+    data = full.read_bytes()
+    path = tmp_path / "truncated.mp3"
+    path.write_bytes(data[: len(data) * 2 // 3])
+    assert sf.info(path).frames == 16000 * 30
+    return path
+
+
+def _counting_client(windows):
+    async def transcribe_window(audio, batch_size, language, segments=None):
+        if len(audio) == 0:
+            raise ValueError("invalid_transcription_window")  # as QwenAsrEngine does
+        windows.append(len(audio))
+        return {"segments": [{"text": "hello", "start": 0, "end": 1, "words": []}]}
+
+    return SimpleNamespace(transcribe_window=transcribe_window)
+
+
+@pytest.mark.anyio
+async def test_header_longer_than_audio_keeps_the_transcript_it_has(tmp_path):
+    windows = []
+    service = TranscriptionService(_counting_client(windows), chunk_seconds=5)
+    result = await service.transcribe_file(str(_truncated_mp3(tmp_path)))
+    assert len(windows) == 5
+    assert 19 < result["audio_duration"] < 21
+    assert 9 < result["performance"]["header_overstated_seconds"] < 11
+    assert len(result["segments"]) == 5
+
+
+@pytest.mark.anyio
+async def test_vad_windows_past_the_real_end_are_skipped(tmp_path):
+    from hear.services.transcription.vad_pool import WindowResult
+
+    class ReadingPool:
+        async def stream(self, path, planned):
+            with sf.SoundFile(path) as source:
+                for start, frames in planned:
+                    source.seek(start)
+                    samples = TranscriptionService._read_window(source, frames)
+                    yield WindowResult(start, samples, [(0.0, 1.0)], 0.0, 0.0)
+
+    windows = []
+    service = TranscriptionService(
+        _counting_client(windows), chunk_seconds=5, vad_pool=ReadingPool()
+    )
+    result = await service.transcribe_file(str(_truncated_mp3(tmp_path)))
+    assert len(windows) == 5
+    assert 19 < result["audio_duration"] < 21

@@ -224,6 +224,7 @@ class TranscriptionService:
                 duration, self._batch_size, self._long_audio_batch_size
             )
             combined = {"segments": [], "audio_duration": duration, "language": language or "en"}
+            decoded_seconds = 0.0
             frames = source.samplerate * self._chunk_seconds
             rate, total_frames = source.samplerate, source.frames
             if self._vad_pool is None:
@@ -237,6 +238,10 @@ class TranscriptionService:
                         else await NativeExecutor.run_blocking_to_completion(operation)
                     )
                     performance["decode_resample_seconds"] += time.perf_counter() - window_started
+                    if samples.size == 0:
+                        # The header overstates the length (truncated MP3): the audio has ended.
+                        break
+                    decoded_seconds = offset + samples.size / 16000
                     result = await self._transcribe_window(samples, batch_size, language)
                     self._account(performance, result)
                     append_shifted_result(combined, result, offset_seconds=offset)
@@ -248,6 +253,10 @@ class TranscriptionService:
             async for window in self._vad_pool.stream(path, windows):
                 performance["decode_resample_seconds"] += window.read_seconds
                 performance["vad_seconds"] = performance.get("vad_seconds", 0.0) + window.vad_seconds
+                if window.samples.size == 0:
+                    # Planned from an overstated header; the audio ended before this window.
+                    continue
+                decoded_seconds = window.start_frame / rate + window.samples.size / 16000
                 result = await self._transcribe_window(
                     window.samples, batch_size, language, segments=window.segments
                 )
@@ -256,6 +265,10 @@ class TranscriptionService:
                 if progress is not None:
                     done = window.start_frame + min(frames, total_frames - window.start_frame)
                     await progress.publish(done / total_frames * 100.0)
+        if decoded_seconds < duration - 1.0:
+            # MP3 frame counts come from the header; report the audio that actually decoded.
+            performance["header_overstated_seconds"] = duration - decoded_seconds
+            duration = combined["audio_duration"] = decoded_seconds
         result = self._process_result(
             finalize_combined_result(combined), language=language, short_utterance=short_utterance
         )
