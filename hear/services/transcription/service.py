@@ -1,18 +1,27 @@
 import re
+import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from math import gcd
+from pathlib import Path
 from typing import Protocol
 
+import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 
 from hear.execution.native import NativeExecutor
+from hear.services.magic_clean.contracts import CleanExecutionError, ErrorCode
 from hear.utils.transcription_chunks import (
     adaptive_batch_size,
     append_shifted_result,
     finalize_combined_result,
 )
+
+FFMPEG_FALLBACK_TIMEOUT_SECONDS = 1800
+FFMPEG_FALLBACK_PARTS = 8
+FFMPEG_FALLBACK_PART_SECONDS = 600
 
 _HALLUCINATION_ONLY = {
     "thank you",
@@ -93,6 +102,85 @@ class TranscriptionService:
         self._vad_pool = vad_pool
 
     @staticmethod
+    def _libsndfile_can_read(path: str) -> bool:
+        """Header probe only (about a millisecond); the fast path stays libsndfile."""
+        try:
+            sf.info(path)
+        except (RuntimeError, OSError):
+            return False
+        return True
+
+    @classmethod
+    def _decode_with_ffmpeg(cls, path: str) -> str:
+        """Decode what libsndfile cannot open to the model's own 16 kHz mono float WAV.
+
+        ffmpeg resyncs past leading junk (legacy padded uploads) and reads AAC/M4A
+        and other containers. A single ffmpeg decodes about 5 minutes of MP3 per
+        second, so long files are cut into ranges decoded in parallel and joined in
+        order; the job then reads the WAV exactly like any readable source.
+        """
+        target = f"{path}.decoded.wav"
+        duration = cls._probe_duration(path)
+        parts = max(1, min(FFMPEG_FALLBACK_PARTS, int(duration // FFMPEG_FALLBACK_PART_SECONDS)))
+        bounds = [duration * index / parts for index in range(parts)]
+        raws = [f"{path}.part{index:02d}.f32" for index in range(parts)]
+        try:
+            with ThreadPoolExecutor(max_workers=parts) as pool:
+                list(
+                    pool.map(
+                        lambda index: cls._decode_range(
+                            path,
+                            raws[index],
+                            bounds[index],
+                            None if index == parts - 1 else bounds[index + 1] - bounds[index],
+                        ),
+                        range(parts),
+                    )
+                )
+            with sf.SoundFile(
+                target, "w", samplerate=16000, channels=1, subtype="FLOAT", format="RF64"
+            ) as out:
+                for raw in raws:
+                    with open(raw, "rb") as stream:
+                        while block := stream.read(1 << 24):
+                            out.write(np.frombuffer(block, dtype=np.float32))
+        finally:
+            for raw in raws:
+                Path(raw).unlink(missing_ok=True)
+        if sf.info(target).frames == 0:
+            raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "source_audio_undecodable")
+        return target
+
+    @staticmethod
+    def _probe_duration(path: str) -> float:
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", path],
+                capture_output=True, text=True, check=True, timeout=60,
+            )
+            return max(0.0, float(probe.stdout.strip() or 0))
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as exc:
+            raise CleanExecutionError(
+                ErrorCode.INVALID_AUDIO, "source_audio_undecodable"
+            ) from exc
+
+    @staticmethod
+    def _decode_range(path: str, target: str, start: float, length: float | None) -> None:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-nostdin", "-v", "error", "-y",
+                 *(["-ss", f"{start:.6f}"] if start > 0 else []), "-i", path,
+                 *(["-t", f"{length:.6f}"] if length is not None else []),
+                 "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", target],
+                capture_output=True, check=True, timeout=FFMPEG_FALLBACK_TIMEOUT_SECONDS,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            raise CleanExecutionError(
+                ErrorCode.INVALID_AUDIO, "source_audio_undecodable"
+            ) from exc
+
+    @staticmethod
     def _read_window(source, frames: int):
         samples = source.read(frames, dtype="float32", always_2d=True).mean(axis=1)
         if source.samplerate != 16000:
@@ -119,6 +207,17 @@ class TranscriptionService:
             "executor_wait_seconds": 0.0,
             "windows": 0,
         }
+        if not self._libsndfile_can_read(path):
+            # Rare inputs only (padded legacy MP3s, AAC/M4A); readable files never get here.
+            fallback_started = time.perf_counter()
+            path = (
+                await self._native.run(self._decode_with_ffmpeg, path)
+                if self._native is not None
+                else await NativeExecutor.run_blocking_to_completion(
+                    partial(self._decode_with_ffmpeg, path)
+                )
+            )
+            performance["ffmpeg_fallback_seconds"] = time.perf_counter() - fallback_started
         with sf.SoundFile(path) as source:
             duration = source.frames / source.samplerate
             batch_size = adaptive_batch_size(
