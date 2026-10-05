@@ -195,3 +195,22 @@ def test_transient_error_still_propagates_for_a_retry():
     executor = JobExecutor({JobType.RECONSTRUCTION: FailingWorkflow(RuntimeError("cuda hiccup"))})
     with pytest.raises(RuntimeError, match="cuda hiccup"):
         asyncio.run(collect(executor, envelope()))
+
+
+def test_gpu_memory_floor_rejects_small_cards(monkeypatch):
+    import types
+
+    import torch
+
+    from hear.bootstrap import RuntimeBootstrap
+
+    def card(gigabytes):
+        return types.SimpleNamespace(total_memory=int(gigabytes * 1e9))
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda index: card(19.6))
+    assert not RuntimeBootstrap._gpu_has_capacity(22)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda index: card(24.0))
+    assert RuntimeBootstrap._gpu_has_capacity(22)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert not RuntimeBootstrap._gpu_has_capacity(22)

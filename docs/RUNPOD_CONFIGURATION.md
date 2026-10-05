@@ -75,8 +75,9 @@ Defaults that apply without being set: `HEAR_MAGIC_CLEAN_PARALLELISM=8`,
 `HEAR_MAGIC_CLEAN_CHUNK_SECONDS=300`, `HEAR_MASTERING_PARALLELISM=8`,
 `WHISPER_SEGMENT_SECONDS=30`, `WHISPER_VAD_WORKERS=4`,
 `RECONSTRUCTION_MAX_SOURCE_SECONDS=14400`, `RECONSTRUCTION_SCRATCH_BYTES=34359738368`.
-The LLM pipeline is off on the Pod (`HEAR_MODEL_FEATURES` unset); route pipeline jobs
-to the `pipeline-llm` Serverless endpoint for LLM tags and discovery.
+The LLM pipeline is off on the Pod (`HEAR_MODEL_FEATURES` unset). On Serverless the
+plain pipeline endpoint was retired on 2026-10-05; `pipeline-llm` serves pipeline and
+transcription jobs.
 
 Measured on this Pod with a 3-hour track: pipeline 3 min 25 s, transcription
 3 min 20 s, Magic Clean 2 min 30 s, reconstruction 2 min 16 s; peak 15.5 GB GPU and
@@ -84,18 +85,17 @@ Measured on this Pod with a 3-hour track: pipeline 3 min 25 s, transcription
 
 ## Serverless endpoints
 
-All four: 1 GPU per worker, `workersMin 0`, idle timeout 180 s, scaler
+All three: 1 GPU per worker, `workersMin 0`, idle timeout 180 s, scaler
 `QUEUE_DELAY` 4 s, execution timeout 2 h, FlashBoot on, images pulled from GHCR
 with registry auth `cmusm0r4r008o7xydkedy1g67`, digest-pinned.
 
 | Endpoint | ID | Template | GPUs | Max workers | Disk | Image |
 | --- | --- | --- | --- | --- | --- | --- |
-| `hear-ai-pipeline` | `f2rfwwfr8zz51e` | `rdumefwltc` | RTX A5000, RTX A4500 | 3 | 50 GB | `ghcr.io/techta-labs-ltd/hear-ai@sha256:11096346377c55f18b84b6444d66e585b213f9ca59a1a438b330c7a1eeea73ac` |
-| `hear-ai-pipeline-llm` | `w4vh65dlnfchs4` | `mx4mashiis` | RTX A5000, RTX 3090 | 2 | 50 GB | `…@sha256:a85f1e3a545cbb7ea8dc044919b3b9fee594d7472f489cbef8efd1bdc2dcb425` |
-| `hear-ai-cleaner` | `rhe8iqebqrif70` | `l1swqghx1x` | RTX A4500, RTX A5000 | 3 | 50 GB | `…@sha256:aca00823540e1d4e0905e2bc22afd9ae8f09cf1eb27573ad6873a6edadbb08c1` |
+| `hear-ai-pipeline-llm` | `w4vh65dlnfchs4` | `mx4mashiis` | RTX A5000, RTX 3090, L4 (24 GB minimum) | 5 | 50 GB | `…@sha256:a85f1e3a545cbb7ea8dc044919b3b9fee594d7472f489cbef8efd1bdc2dcb425` |
+| `hear-ai-cleaner` | `rhe8iqebqrif70` | `l1swqghx1x` | RTX A5000 | 3 | 50 GB | `…@sha256:aca00823540e1d4e0905e2bc22afd9ae8f09cf1eb27573ad6873a6edadbb08c1` |
 | `hear-ai-reconstruction` | `erkgx070wpn494` | `zq360ynxji` | A40, RTX A6000 | 2 | 60 GB | `…@sha256:14fb5346e2bf51c2fdf6d0915aa1db715a8afba77eb24b28d7e236ef1b1c86a5` |
 
-Env common to all four templates:
+Env common to all three templates:
 
 ```env
 ENVIRONMENT=production
@@ -131,18 +131,10 @@ HF_DATASETS_OFFLINE=1
 Per endpoint:
 
 ```env
-# hear-ai-pipeline (f2rfwwfr8zz51e)
-HEAR_WORKER_ROLE=pipeline
-HEAR_ENGINE_REVISION=11096346377c55f18b84b6444d66e585
-QWEN_ASR_DTYPE=bfloat16
-QWEN_ASR_DEVICE_MAP=cuda:0
-WHISPER_BATCH_SIZE=16
-WHISPER_LONG_AUDIO_BATCH_SIZE=16
-WHISPER_CHUNK_SECONDS=600
-
 # hear-ai-pipeline-llm (w4vh65dlnfchs4)
-HEAR_WORKER_ROLE=pipeline
+HEAR_WORKER_ROLE=pipeline                  # also serves transcription jobs
 HEAR_MODEL_FEATURES=qwen_llm
+HEAR_MIN_GPU_MEMORY_GIB=22                 # refuse cards under 24 GB
 QWEN_LLM_GPU_MEMORY_GIB=8.5                # 4-bit Qwen2.5-7B-Instruct-AWQ
 HEAR_ENGINE_REVISION=a85f1e3a545cbb7ea8dc044919b3b9fe
 QWEN_ASR_DTYPE=bfloat16

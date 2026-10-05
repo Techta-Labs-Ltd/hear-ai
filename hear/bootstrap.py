@@ -79,8 +79,23 @@ class RuntimeBootstrap:
             "scratch",
             lambda: self._scratch_has_capacity(scratch_root, required_scratch_bytes),
         )
+        if self._settings.min_gpu_memory_gib > 0:
+            minimum = self._settings.min_gpu_memory_gib
+            current.add_check("gpu_memory", lambda: self._gpu_has_capacity(minimum))
         self._readiness[role] = current
         return current
+
+    @staticmethod
+    def _gpu_has_capacity(minimum_gib: float) -> bool:
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return False
+            # Cards are sold in whole GB (24 GB reports ~23.6 GiB); compare against the label.
+            return torch.cuda.get_device_properties(0).total_memory / 1e9 >= minimum_gib
+        except Exception:
+            return False
 
     @staticmethod
     def _scratch_has_capacity(path: Path, required_bytes: int) -> bool:

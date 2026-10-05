@@ -48,6 +48,9 @@ class RuntimeSettings(BaseModel):
     model_features: frozenset[str] = Field(default_factory=frozenset, alias="HEAR_MODEL_FEATURES")
     temp_dir: Path = Field(default=Path("/audio"), alias="HEAR_TEMP_DIR")
     min_free_scratch_bytes: int = Field(default=1024**3, ge=0, alias="HEAR_MIN_FREE_SCRATCH_BYTES")
+    # A worker on a card smaller than this reports not ready instead of failing every
+    # job with CUDA out-of-memory (Serverless then rents a different GPU). 0 disables.
+    min_gpu_memory_gib: float = Field(default=0, ge=0, alias="HEAR_MIN_GPU_MEMORY_GIB")
     pod_api_key: SecretStr | None = Field(default=None, alias="HEAR_POD_API_KEY")
     rabbitmq_url: str | None = Field(default=None, alias="HEAR_RABBITMQ_URL")
     pod_max_concurrent_jobs: int = Field(

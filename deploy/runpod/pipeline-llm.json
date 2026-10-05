@@ -40,14 +40,15 @@
       "WHISPER_LONG_AUDIO_BATCH_SIZE": "16",
       "WHISPER_CHUNK_SECONDS": "600",
       "QWEN_ASR_DTYPE": "bfloat16",
-      "QWEN_ASR_DEVICE_MAP": "cuda:0"
+      "QWEN_ASR_DEVICE_MAP": "cuda:0",
+      "HEAR_MIN_GPU_MEMORY_GIB": "22"
     }
   },
   "endpoint": {
     "computeType": "GPU",
     "gpuCount": 1,
     "workersMin": 0,
-    "workersMax": 2,
+    "workersMax": 5,
     "idleTimeout": 180,
     "flashboot": true,
     "scalerType": "QUEUE_DELAY",
@@ -56,7 +57,8 @@
     "name": "hear-ai-pipeline-llm",
     "gpuTypeIds": [
       "NVIDIA RTX A5000",
-      "NVIDIA GeForce RTX 3090"
+      "NVIDIA GeForce RTX 3090",
+      "NVIDIA L4"
     ]
   }
 }

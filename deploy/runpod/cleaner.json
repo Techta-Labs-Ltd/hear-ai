@@ -53,7 +53,6 @@
     "executionTimeoutMs": 7200000,
     "name": "hear-ai-cleaner",
     "gpuTypeIds": [
-      "NVIDIA RTX A4500",
       "NVIDIA RTX A5000"
     ]
   }

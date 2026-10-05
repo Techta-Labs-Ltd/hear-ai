@@ -125,7 +125,7 @@ def test_committed_plans_hold_no_secrets_and_name_every_role():
     from pathlib import Path
 
     plans = {p.stem: json.loads(p.read_text()) for p in Path("deploy/runpod").glob("*.json")}
-    assert set(plans) == {"pipeline", "pipeline-llm", "cleaner", "reconstruction"}
+    assert set(plans) == {"pipeline-llm", "cleaner", "reconstruction"}
     for plan in plans.values():
         env = plan["template"]["env"]
         assert "HEAR_BACKEND_SERVICE_KEY" not in env and "HEAR_BACKEND_POLICY_JSON" not in env
@@ -168,7 +168,7 @@ SECRETS = {
 }
 
 
-@pytest.mark.parametrize("role", ["pipeline", "pipeline-llm", "cleaner", "reconstruction"])
+@pytest.mark.parametrize("role", ["pipeline-llm", "cleaner", "reconstruction"])
 def test_every_committed_plan_passes_preflight_once_stamped(role):
     from pathlib import Path
 

@@ -9,14 +9,13 @@ team's secret store.
 | Transport | Role | Address | Card |
 | --- | --- | --- | --- |
 | Pod (A40, all roles) | gateway | `https://0as9lqk138vfwz-8000.proxy.runpod.net` | A40 48 GB |
-| Serverless | `pipeline` (also transcription) | endpoint `f2rfwwfr8zz51e` | RTX A5000 / A4500 |
-| Serverless | `pipeline` with LLM tags/discovery | endpoint `w4vh65dlnfchs4` | RTX A5000 / 3090 |
-| Serverless | `magic_clean_natural` | endpoint `rhe8iqebqrif70` | RTX A4500 / A5000 |
+| Serverless | `pipeline` and `transcription` (LLM tags/discovery) | endpoint `w4vh65dlnfchs4` | RTX A5000 / 3090 / L4 (needs 24 GB) |
+| Serverless | `magic_clean_natural` | endpoint `rhe8iqebqrif70` | RTX A5000 |
 | Serverless | `reconstruction` (Fish) | endpoint `erkgx070wpn494` | A40 / RTX A6000 |
 
-Serverless API base: `https://api.runpod.ai/v2/{endpoint_id}`. Use one pipeline
-endpoint per deployment: `w4vh65dlnfchs4` for LLM-quality tags and discovery,
-`f2rfwwfr8zz51e` for the cheaper path.
+Serverless API base: `https://api.runpod.ai/v2/{endpoint_id}`. `w4vh65dlnfchs4` is the only
+pipeline endpoint and takes both `pipeline` and `transcription` jobs; it needs 24 GB
+cards and its workers refuse to start on smaller ones (`HEAR_MIN_GPU_MEMORY_GIB=22`).
 
 ## Secrets (values held by the owner)
 

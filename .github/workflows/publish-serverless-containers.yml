@@ -21,9 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: pipeline-serverless
-            tag: pipeline-serverless
-            serverless: true
           - target: pipeline-llm-serverless
             tag: pipeline-llm-serverless
             serverless: true
@@ -84,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tag: [pipeline-serverless, pipeline-llm-serverless, cleaner-serverless, reconstruction-serverless]
+        tag: [pipeline-llm-serverless, cleaner-serverless, reconstruction-serverless]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -111,9 +108,7 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - role: pipeline
-            tag: pipeline-serverless
-            canary_role: pipeline
+          # One pipeline endpoint: the LLM build handles pipeline and transcription jobs.
           - role: pipeline-llm
             tag: pipeline-llm-serverless
             canary_role: pipeline
