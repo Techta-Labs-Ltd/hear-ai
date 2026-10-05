@@ -37,7 +37,7 @@ class WorkerPool:
     ) -> None:
         if workers < 1:
             raise ValueError("worker_pool_needs_a_worker")
-        self._executor = ProcessPoolExecutor(
+        self._executor: ProcessPoolExecutor | None = ProcessPoolExecutor(
             max_workers=workers,
             mp_context=multiprocessing.get_context("spawn"),
             initializer=initializer,
@@ -62,7 +62,10 @@ class WorkerPool:
 
     def map(self, function: Callable[[Any], Any], tasks: Iterable[Any], guard: ResourceGuard) -> list:
         """Run `function` over `tasks`, results in submission order; fail fast."""
-        futures = [self._executor.submit(function, item) for item in tasks]
+        if self._executor is None:
+            raise RuntimeError("worker_pool_closed")
+        executor = self._executor
+        futures = [executor.submit(function, item) for item in tasks]
         try:
             pending = set(futures)
             while pending:

@@ -94,7 +94,7 @@ class ParallelMp3:
     def plan(frames: int, piece_seconds: int = PIECE_SECONDS) -> list[Mp3Piece]:
         total = max(2, -(-frames // FRAME_SAMPLES))
         per_piece = max(1, piece_seconds * RATE // FRAME_SAMPLES)
-        pieces = []
+        pieces: list[Mp3Piece] = []
         first = 0
         while first < total:
             count = min(per_piece, total - first)

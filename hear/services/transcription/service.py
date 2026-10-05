@@ -30,6 +30,7 @@ class TranscriptionModel(Protocol):
         samples,
         batch_size: int,
         language: str,
+        segments: list[tuple[float, float]] | None = None,
     ) -> dict: ...
 
 

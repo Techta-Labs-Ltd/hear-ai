@@ -1,4 +1,15 @@
+"""Chunked, parallel Magic Clean.
+
+A recording is split into chunks with context handles on both sides. Each chunk
+runs the full per-chunk chain (preparation filters, DeepFilterNet3, integrity and
+speech checks, finishing filters, loudness metering) in its own worker process
+with its own copy of the model, so a three-hour track finishes in about the time
+of one chunk. The parent stitches the handled outputs with short crossfades and
+combines the per-chunk evidence exactly as a single pass would have judged it.
+"""
+
 from __future__ import annotations
+
 import os
 import time
 from collections.abc import Callable
