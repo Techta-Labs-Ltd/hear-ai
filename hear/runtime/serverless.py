@@ -10,7 +10,7 @@ import httpx
 from hear.contracts.events import ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope
 from hear.contracts.outcomes import ExecutionOutcome
-from hear.execution.executor import JobExecutor
+from hear.execution.executor import FailureSummary, JobExecutor, WorkerFailure
 from hear.execution.reporter import BackendAttemptClient
 from hear.health.service import RuntimeReadiness
 from hear.runtime.attempt_stream import AttemptRejection, AttemptStream
@@ -112,6 +112,15 @@ class ServerlessRuntime:
                     except (OSError, httpx.HTTPError):
                         logging.getLogger(__name__).warning("Optional provider progress update failed")
                 yield event.model_dump(mode="json")
+        except Exception as exc:
+            # RunPod keeps "handler: <message>" plus format_exc(); a chained process-pool
+            # traceback would push the real error past what the backend stores.
+            logging.getLogger(__name__).exception(
+                "serverless_attempt_failed job_id=%s attempt_id=%s",
+                envelope.job_id,
+                envelope.attempt_id,
+            )
+            raise WorkerFailure(FailureSummary.describe(exc)) from None
         finally:
             try:
                 if prepared is not None:

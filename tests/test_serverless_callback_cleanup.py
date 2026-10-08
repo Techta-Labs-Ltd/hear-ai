@@ -5,7 +5,7 @@ import pytest
 
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptClaim, ClaimDecision, JobType
-from hear.execution.executor import JobExecutor
+from hear.execution.executor import JobExecutor, WorkerFailure
 from hear.runtime.roles import WorkerRole
 from hear.runtime.serverless import ServerlessRuntime
 from tests.test_job_executor_v2 import TestJobExecutor
@@ -51,7 +51,7 @@ async def test_backend_callback_failure_closes_workflow_before_releasing_admissi
         Backend(),
         SimpleNamespace(serverless=SimpleNamespace(progress_update=lambda *args: None)),
     )
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(WorkerFailure, match="^HTTPStatusError: "):
         _ = [
             event
             async for event in runtime.handler(
@@ -92,6 +92,6 @@ async def test_backend_claim_verdicts_become_rejection_events_like_the_pod(statu
             }
         ]
     else:
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(WorkerFailure, match="^HTTPStatusError: "):
             _ = [event async for event in runtime.handler(job)]
     assert runtime._admission._value == 1

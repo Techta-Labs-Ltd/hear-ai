@@ -54,3 +54,33 @@ class TestJobExecutor:
         events = [event async for event in executor.stream(self.envelope())]
         assert len(events) == 1
         assert events[0].progress_pct == 50
+
+def test_failure_summary_leads_with_the_error_and_names_the_worker_frame():
+    from concurrent.futures.process import _RemoteTraceback
+
+    from hear.execution.executor import FailureSummary
+
+    error = RuntimeError("Unspecified internal error")
+    error.__cause__ = _RemoteTraceback(
+        '\n"""\nTraceback (most recent call last):\n'
+        '  File "/usr/lib/python3.12/concurrent/futures/process.py", line 263, in _process_worker\n'
+        '    r = call_item.fn(*call_item.args, **call_item.kwargs)\n'
+        '  File "/app/hear/services/transcription/vad_pool.py", line 66, in run_window\n'
+        "    samples = TranscriptionService._read_window(source, task.frames)\n"
+        '              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"""'
+    )
+    assert FailureSummary.describe(error) == (
+        "RuntimeError: Unspecified internal error (at vad_pool.py:66 in run_window)"
+    )
+
+
+def test_failure_summary_is_bounded_and_keeps_its_origin():
+    from hear.execution.executor import FailureSummary
+
+    try:
+        raise ValueError("x" * 2000)
+    except ValueError as error:
+        summary = FailureSummary.describe(error)
+    assert len(summary) == FailureSummary.LIMIT
+    assert summary.startswith("ValueError: xxx")
+    assert summary.endswith("in test_failure_summary_is_bounded_and_keeps_its_origin)")

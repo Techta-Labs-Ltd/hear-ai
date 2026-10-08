@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Protocol
 
 import httpx
@@ -43,6 +45,46 @@ class FailurePolicy:
         return None
 
 
+class WorkerFailure(RuntimeError):
+    """A failure the transport reports; its message is a FailureSummary, not a traceback."""
+
+
+class FailureSummary:
+    """The exception type and message first, then where it was raised.
+
+    Transports and callbacks keep only the first few hundred characters. A chained
+    traceback leads with the worker process's frames and loses the actual error,
+    so the summary puts the error first and keeps only the innermost frame.
+    """
+
+    LIMIT = 500
+    _REMOTE_FRAME = re.compile(r'File "([^"]+)", line (\d+), in (\S+)')
+
+    @classmethod
+    def describe(cls, error: BaseException) -> str:
+        message = f"{type(error).__name__}: {error}".strip().rstrip(":")
+        origin = cls._origin(error)
+        suffix = f" (at {origin})" if origin else ""
+        return message[: cls.LIMIT - len(suffix)] + suffix
+
+    @classmethod
+    def _origin(cls, error: BaseException) -> str:
+        # A process-pool error carries the worker's traceback as text on its cause.
+        remote = getattr(error.__cause__, "tb", None)
+        if isinstance(remote, str):
+            frames = cls._REMOTE_FRAME.findall(remote)
+            if frames:
+                path, line, function = frames[-1]
+                return f"{Path(path).name}:{line} in {function}"
+        frame = error.__traceback__
+        if frame is None:
+            return ""
+        while frame.tb_next is not None:
+            frame = frame.tb_next
+        code = frame.tb_frame.f_code
+        return f"{Path(code.co_filename).name}:{frame.tb_lineno} in {code.co_name}"
+
+
 class JobExecutor:
     def __init__(self, workflows: dict[JobType, ExecutionWorkflow]) -> None:
         self._workflows = dict(workflows)
@@ -72,7 +114,7 @@ class JobExecutor:
                 return
             if code is None:
                 raise
-            yield self._failed(envelope, sequence + 1, code, str(error))
+            yield self._failed(envelope, sequence + 1, code, FailureSummary.describe(error))
         finally:
             close = getattr(iterator, "aclose", None)
             if callable(close):

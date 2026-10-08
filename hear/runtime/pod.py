@@ -14,7 +14,7 @@ import httpx
 from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope
 from hear.contracts.outcomes import ExecutionOutcome
-from hear.execution.executor import JobExecutor
+from hear.execution.executor import FailureSummary, JobExecutor
 from hear.execution.reporter import BackendAttemptClient
 from hear.health.service import RuntimeReadiness
 from hear.queue.topology import RabbitMQTopology
@@ -469,6 +469,7 @@ class PodRuntime:
                     "job_id": envelope.job_id,
                     "attempt_id": envelope.attempt_id,
                     "retry_count": retry_count,
+                    "error": FailureSummary.describe(failure),
                 },
             ),
             reply_to,
