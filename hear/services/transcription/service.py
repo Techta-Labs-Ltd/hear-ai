@@ -2,6 +2,7 @@ import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from functools import partial
 from math import gcd
 from pathlib import Path
@@ -22,6 +23,11 @@ from hear.utils.transcription_chunks import (
 FFMPEG_FALLBACK_TIMEOUT_SECONDS = 1800
 FFMPEG_FALLBACK_PARTS = 8
 FFMPEG_FALLBACK_PART_SECONDS = 600
+# A one-second frame louder than this holds sound; a file with at most
+# SILENT_MAX_AUDIBLE_SECONDS such frames (a click, a pop) is silent.
+AUDIBLE_DBFS = -50.0
+SILENT_MAX_AUDIBLE_SECONDS = 1
+SILENCE_FLOOR_DBFS = -120.0
 
 _HALLUCINATION_ONLY = {
     "thank you",
@@ -78,6 +84,18 @@ class TranscriptionResultPolicy:
         ):
             return []
         return credible
+
+
+@dataclass
+class _WindowRun:
+    """What one file's windows share, across a retry from the ffmpeg-decoded WAV."""
+
+    combined: dict
+    state: dict
+    batch_size: int
+    language: str | None
+    performance: dict
+    progress: TranscriptionProgressSink | None
 
 
 class TranscriptionService:
@@ -207,64 +225,32 @@ class TranscriptionService:
             "executor_wait_seconds": 0.0,
             "windows": 0,
         }
+        decoded = False
         if not self._libsndfile_can_read(path):
             # Rare inputs only (padded legacy MP3s, AAC/M4A); readable files never get here.
             fallback_started = time.perf_counter()
-            path = (
-                await self._native.run(self._decode_with_ffmpeg, path)
-                if self._native is not None
-                else await NativeExecutor.run_blocking_to_completion(
-                    partial(self._decode_with_ffmpeg, path)
-                )
-            )
+            path = await self._ffmpeg_decode(path)
+            decoded = True
             performance["ffmpeg_fallback_seconds"] = time.perf_counter() - fallback_started
         with sf.SoundFile(path) as source:
             duration = source.frames / source.samplerate
-            batch_size = adaptive_batch_size(
-                duration, self._batch_size, self._long_audio_batch_size
-            )
-            combined = {"segments": [], "audio_duration": duration, "language": language or "en"}
-            decoded_seconds = 0.0
-            frames = source.samplerate * self._chunk_seconds
-            rate, total_frames = source.samplerate, source.frames
-            if self._vad_pool is None:
-                while source.tell() < source.frames:
-                    offset = source.tell() / source.samplerate
-                    window_started = time.perf_counter()
-                    operation = partial(self._read_window, source, frames)
-                    samples = (
-                        await self._native.run(self._read_window, source, frames)
-                        if self._native is not None
-                        else await NativeExecutor.run_blocking_to_completion(operation)
-                    )
-                    performance["decode_resample_seconds"] += time.perf_counter() - window_started
-                    if samples.size == 0:
-                        # The header overstates the length (truncated MP3): the audio has ended.
-                        break
-                    decoded_seconds = offset + samples.size / 16000
-                    result = await self._transcribe_window(samples, batch_size, language)
-                    self._account(performance, result)
-                    append_shifted_result(combined, result, offset_seconds=offset)
-                    if progress is not None:
-                        await progress.publish(source.tell() / source.frames * 100.0)
-        if self._vad_pool is not None:
-            # Windows are read and VAD-segmented in worker processes ahead of the GPU.
-            windows = [(start, min(frames, total_frames - start)) for start in range(0, total_frames, frames)]
-            async for window in self._vad_pool.stream(path, windows):
-                performance["decode_resample_seconds"] += window.read_seconds
-                performance["vad_seconds"] = performance.get("vad_seconds", 0.0) + window.vad_seconds
-                if window.samples.size == 0:
-                    # Planned from an overstated header; the audio ended before this window.
-                    continue
-                decoded_seconds = window.start_frame / rate + window.samples.size / 16000
-                result = await self._transcribe_window(
-                    window.samples, batch_size, language, segments=window.segments
-                )
-                self._account(performance, result)
-                append_shifted_result(combined, result, offset_seconds=window.start_frame / rate)
-                if progress is not None:
-                    done = window.start_frame + min(frames, total_frames - window.start_frame)
-                    await progress.publish(done / total_frames * 100.0)
+        batch_size = adaptive_batch_size(duration, self._batch_size, self._long_audio_batch_size)
+        combined = {"segments": [], "audio_duration": duration, "language": language or "en"}
+        state = {"decoded_seconds": 0.0, "audible_seconds": 0, "loudest_dbfs": SILENCE_FLOOR_DBFS}
+        windows = _WindowRun(combined, state, batch_size, language, performance, progress)
+        try:
+            await self._transcribe_windows(path, 0.0, windows)
+        except sf.SoundFileRuntimeError:
+            if decoded:
+                raise
+            # Damaged frames part-way through: libsndfile gives up where ffmpeg resyncs.
+            # Keep the windows already transcribed and read the rest from ffmpeg's WAV.
+            fallback_started = time.perf_counter()
+            path = await self._ffmpeg_decode(path)
+            performance["ffmpeg_retry_seconds"] = time.perf_counter() - fallback_started
+            performance["ffmpeg_retry_from_seconds"] = state["decoded_seconds"]
+            await self._transcribe_windows(path, state["decoded_seconds"], windows)
+        decoded_seconds = state["decoded_seconds"]
         if decoded_seconds < duration - 1.0:
             # MP3 frame counts come from the header; report the audio that actually decoded.
             performance["header_overstated_seconds"] = duration - decoded_seconds
@@ -272,6 +258,12 @@ class TranscriptionService:
         result = self._process_result(
             finalize_combined_result(combined), language=language, short_utterance=short_utterance
         )
+        # "No speech" and "silent" differ: music beds and intros are audible without words.
+        result["silent"] = result["no_speech"] and state["audible_seconds"] <= SILENT_MAX_AUDIBLE_SECONDS
+        result["audio_level"] = {
+            "audible_seconds": state["audible_seconds"],
+            "loudest_second_dbfs": round(state["loudest_dbfs"], 1),
+        }
         result["audio_duration"] = duration
         result["performance"] = {
             **{k: round(v, 6) for k, v in performance.items()},
@@ -281,6 +273,78 @@ class TranscriptionService:
             "alignment_enabled": True,
         }
         return result
+
+    async def _ffmpeg_decode(self, path: str) -> str:
+        if self._native is not None:
+            return await self._native.run(self._decode_with_ffmpeg, path)
+        return await NativeExecutor.run_blocking_to_completion(
+            partial(self._decode_with_ffmpeg, path)
+        )
+
+    async def _transcribe_windows(self, path: str, start_seconds: float, run: _WindowRun) -> None:
+        """Transcribe `path` from `start_seconds` on, appending to the run's transcript."""
+        with sf.SoundFile(path) as source:
+            rate, total_frames = source.samplerate, source.frames
+            frames = rate * self._chunk_seconds
+            first = min(total_frames, int(round(start_seconds * rate)))
+            if self._vad_pool is None:
+                source.seek(first)
+                while source.tell() < total_frames:
+                    offset = source.tell() / rate
+                    window_started = time.perf_counter()
+                    operation = partial(self._read_window, source, frames)
+                    samples = (
+                        await self._native.run(self._read_window, source, frames)
+                        if self._native is not None
+                        else await NativeExecutor.run_blocking_to_completion(operation)
+                    )
+                    run.performance["decode_resample_seconds"] += time.perf_counter() - window_started
+                    if samples.size == 0:
+                        # The header overstates the length (truncated MP3): the audio has ended.
+                        break
+                    result = await self._transcribe_window(samples, run.batch_size, run.language)
+                    self._append(run, result, samples, offset)
+                    if run.progress is not None:
+                        await run.progress.publish(source.tell() / total_frames * 100.0)
+                return
+        # Windows are read and VAD-segmented in worker processes ahead of the GPU.
+        windows = [(start, min(frames, total_frames - start)) for start in range(first, total_frames, frames)]
+        async for window in self._vad_pool.stream(path, windows):
+            run.performance["decode_resample_seconds"] += window.read_seconds
+            run.performance["vad_seconds"] = run.performance.get("vad_seconds", 0.0) + window.vad_seconds
+            if window.samples.size == 0:
+                # Planned from an overstated header; the audio ended before this window.
+                continue
+            result = await self._transcribe_window(
+                window.samples, run.batch_size, run.language, segments=window.segments
+            )
+            self._append(run, result, window.samples, window.start_frame / rate)
+            if run.progress is not None:
+                done = window.start_frame + min(frames, total_frames - window.start_frame)
+                await run.progress.publish(done / total_frames * 100.0)
+
+    def _append(self, run: _WindowRun, result: dict, samples, offset: float) -> None:
+        self._account(run.performance, result)
+        append_shifted_result(run.combined, result, offset_seconds=offset)
+        run.state["decoded_seconds"] = offset + samples.size / 16000
+        audible, loudest = self._measure_level(samples)
+        run.state["audible_seconds"] += audible
+        run.state["loudest_dbfs"] = max(run.state["loudest_dbfs"], loudest)
+
+    @staticmethod
+    def _measure_level(samples) -> tuple[int, float]:
+        """Count the 16 kHz window's audible one-second frames and its loudest frame."""
+        whole = samples.size // 16000
+        frames = [samples[: whole * 16000].reshape(whole, 16000)] if whole else []
+        if samples.size - whole * 16000 >= 4000:
+            frames.append(samples[whole * 16000 :].reshape(1, -1))
+        if not frames:
+            return 0, SILENCE_FLOOR_DBFS
+        levels = np.concatenate(
+            [np.sqrt(np.mean(np.square(block, dtype=np.float64), axis=1)) for block in frames]
+        )
+        dbfs = 20.0 * np.log10(np.maximum(levels, 1e-10))
+        return int(np.count_nonzero(dbfs > AUDIBLE_DBFS)), float(max(dbfs.max(), SILENCE_FLOOR_DBFS))
 
     async def _transcribe_window(self, samples, batch_size: int, language: str | None, *, segments=None) -> dict:
         started = time.perf_counter()
@@ -333,6 +397,7 @@ class TranscriptionService:
             "duration": 0.0,
             "confidence": 0.0,
             "silent": True,
+            "no_speech": True,
         }
         if not result:
             return _silent
@@ -412,4 +477,5 @@ class TranscriptionService:
             "confidence": confidence,
             "word_confidence_available": scored_words > 0,
             "silent": False,
+            "no_speech": False,
         }

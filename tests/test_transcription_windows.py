@@ -152,3 +152,86 @@ async def test_vad_windows_past_the_real_end_are_skipped(tmp_path):
     result = await service.transcribe_file(str(_truncated_mp3(tmp_path)))
     assert len(windows) == 5
     assert 19 < result["audio_duration"] < 21
+
+
+@pytest.mark.anyio
+async def test_damaged_frames_mid_file_resume_from_the_ffmpeg_decode(tmp_path):
+    from hear.services.transcription.vad_pool import WindowResult
+
+    source = tmp_path / "damaged.wav"
+    sf.write(source, np.full(16000 * 20, 0.1, dtype=np.float32), 16000)
+
+    class DamagedPool:
+        """libsndfile gives up at 10 s of the source; ffmpeg's WAV reads cleanly."""
+
+        def __init__(self):
+            self.paths = []
+
+        async def stream(self, path, planned):
+            self.paths.append(path)
+            with sf.SoundFile(path) as audio:
+                for start, frames in planned:
+                    if not path.endswith(".decoded.wav") and start >= 16000 * 10:
+                        raise sf.LibsndfileError(29)  # "Unspecified internal error"
+                    audio.seek(start)
+                    samples = TranscriptionService._read_window(audio, frames)
+                    yield WindowResult(start, samples, [(0.0, 1.0)], 0.0, 0.0)
+
+    windows = []
+    pool = DamagedPool()
+    service = TranscriptionService(_counting_client(windows), chunk_seconds=5, vad_pool=pool)
+    result = await service.transcribe_file(str(source))
+    assert pool.paths == [str(source), f"{source}.decoded.wav"]
+    assert len(windows) == 4  # two before the damage, two resumed; none repeated
+    assert [segment["start"] for segment in result["segments"]] == [0, 5, 10, 15]
+    assert result["performance"]["ffmpeg_retry_from_seconds"] == 10
+    assert 19.9 < result["audio_duration"] < 20.1
+
+
+@pytest.mark.anyio
+async def test_a_failure_after_the_ffmpeg_decode_is_not_retried_again(tmp_path):
+    source = tmp_path / "source.wav"
+    sf.write(source, np.full(16000 * 10, 0.1, dtype=np.float32), 16000)
+
+    class BrokenPool:
+        async def stream(self, path, planned):
+            raise sf.LibsndfileError(29)
+            yield  # pragma: no cover
+
+    service = TranscriptionService(_counting_client([]), chunk_seconds=5, vad_pool=BrokenPool())
+    with pytest.raises(sf.LibsndfileError):
+        await service.transcribe_file(str(source))
+
+
+def _silent_client():
+    async def transcribe_window(audio, batch_size, language, segments=None):
+        return {"segments": []}
+
+    return SimpleNamespace(transcribe_window=transcribe_window)
+
+
+@pytest.mark.anyio
+async def test_audible_audio_without_words_is_no_speech_not_silent(tmp_path):
+    path = tmp_path / "music.wav"
+    t = np.arange(16000 * 12) / 16000
+    sf.write(path, (0.2 * np.sin(2 * np.pi * 440 * t)).astype(np.float32), 16000)
+    result = await TranscriptionService(_silent_client(), chunk_seconds=5).transcribe_file(
+        str(path)
+    )
+    assert result["transcript"] == ""
+    assert result["no_speech"] is True
+    assert result["silent"] is False
+    assert result["audio_level"]["audible_seconds"] == 12
+    assert -18 < result["audio_level"]["loudest_second_dbfs"] < -16
+
+
+@pytest.mark.anyio
+async def test_near_silent_audio_is_silent(tmp_path):
+    path = tmp_path / "quiet.wav"
+    rng = np.random.default_rng(0)
+    sf.write(path, (rng.standard_normal(16000 * 12) * 3e-5).astype(np.float32), 16000)
+    result = await TranscriptionService(_silent_client(), chunk_seconds=5).transcribe_file(
+        str(path)
+    )
+    assert result["silent"] is True and result["no_speech"] is True
+    assert result["audio_level"]["audible_seconds"] == 0
