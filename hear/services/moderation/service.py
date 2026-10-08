@@ -32,6 +32,15 @@ HARMFUL_INTENT_LABELS = {
 }
 _SAFE_THRESHOLD = 0.3
 _HIGH_THRESHOLD = 0.8
+BLOCKED_KEYWORD_CATEGORY = "Blocked keyword"
+# toxic-bert scores each sentence on its own: packed with neutral text, a threat that
+# scores 0.88 alone dropped to 0.38. Unpunctuated runs are cut to this length.
+_MAX_SENTENCE_CHARS = 300
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+# Sentences either side of a keyword hit or toxic sentence that the LLM sees, and its budget.
+_CONTEXT_SENTENCES = 2
+_MAX_TOXIC_PASSAGES = 4
+_MAX_PASSAGE_CHARS = 6000
 
 
 class ModerationService:
@@ -55,73 +64,19 @@ class ModerationService:
 
     async def moderate(self, text: str) -> dict:
         if not text or not text.strip():
-            return {
-                "flagged": False,
-                "severity": SEVERITY_NONE,
-                "intent": "safe",
-                "reason": "",
-                "flagged_categories": [],
-                "blocked_words_found": [],
-            }
-        text_lower = text.lower()
-        built_in_keywords = self._harm_keywords
+            return self._safe()
         loop = asyncio.get_event_loop()
-        built_in_hits = [kw for kw in built_in_keywords if self._contains_keyword(text_lower, kw)]
-        if built_in_hits:
-            return {
-                "flagged": True,
-                "severity": SEVERITY_CRITICAL,
-                "intent": "harmful",
-                "reason": f"Contains flagged harmful language: {', '.join(built_in_hits[:5])}",
-                "flagged_categories": ["Threats / Violence"],
-                "blocked_words_found": built_in_hits,
-            }
-        keyword_hits: list[str] = []
-        local_result = await loop.run_in_executor(None, self._classify_local, text)
+        text_lower = text.lower()
+        keyword_hits = [kw for kw in self._harm_keywords if self._contains_keyword(text_lower, kw)]
+        sentences = self._sentences(text)
+        local_result = await loop.run_in_executor(None, self._classify_local, sentences)
         scores: dict[str, float] = local_result.get("scores", {})
         max_score: float = local_result.get("max_score", 0.0)
-        if max_score < _SAFE_THRESHOLD:
-            return {
-                "flagged": False,
-                "severity": SEVERITY_NONE,
-                "intent": "safe",
-                "reason": "",
-                "flagged_categories": [],
-                "blocked_words_found": keyword_hits,
-            }
-        if max_score < _HIGH_THRESHOLD:
-            if self._llm_service().is_available:
-                try:
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: self._llm_service().moderate(
-                            text,
-                            detoxify_scores=scores,
-                            harm_keywords=list(built_in_keywords),
-                            is_borderline=True,
-                        ),
-                    )
-                    return result
-                except Exception as exc:
-                    logger.warning(
-                        "[MODERATION] Qwen failed on borderline (%.2f) (%s) — using NLI fallback",
-                        max_score,
-                        exc,
-                    )
-            intent_result = await loop.run_in_executor(None, self._classify_intent, text)
-            severity = self._compute_severity(local_result, intent_result)
-            flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
-            intent = intent_result.get("intent", "safe")
-            reason = self._build_reason(local_result, intent_result, keyword_hits, intent, severity)
-            return {
-                "flagged": flagged,
-                "severity": severity,
-                "intent": intent,
-                "reason": reason,
-                "flagged_categories": self._get_flagged_categories(local_result),
-                "blocked_words_found": keyword_hits,
-            }
-        severity = self._score_to_severity(max_score, local_result)
+        if not keyword_hits and max_score < _SAFE_THRESHOLD:
+            return self._safe()
+        # A watch-list keyword is a reason to look closer, not a verdict: "police warn of
+        # a phone scam" is news. The LLM judges the passages around each hit.
+        passages = self._passages(sentences, keyword_hits, local_result)
         if self._llm_service().is_available:
             try:
                 result = await loop.run_in_executor(
@@ -129,43 +84,175 @@ class ModerationService:
                     lambda: self._llm_service().moderate(
                         text,
                         detoxify_scores=scores,
-                        harm_keywords=list(built_in_keywords),
-                        is_borderline=False,
+                        keyword_hits=keyword_hits,
+                        passages=passages,
+                        is_borderline=max_score < _HIGH_THRESHOLD,
                     ),
                 )
-                result["severity"] = severity
-                result["flagged"] = True
-                return result
+                return self._with_keywords(result, keyword_hits)
             except Exception as exc:
                 logger.warning(
-                    "[MODERATION] Qwen failed on high-score (%.2f) (%s) — using toxic-bert result",
+                    "[MODERATION] Qwen review failed (score %.2f, keywords %s) (%s) — using local fallback",
                     max_score,
+                    keyword_hits,
                     exc,
                 )
+        if keyword_hits:
+            return self._unverified_keywords(keyword_hits, passages, local_result)
+        if max_score < _HIGH_THRESHOLD:
+            intent_result = await loop.run_in_executor(
+                None, self._classify_intent, " ".join(passages) or text
+            )
+            severity = self._compute_severity(local_result, intent_result)
+            flagged = severity in (SEVERITY_HIGH, SEVERITY_CRITICAL)
+            intent = intent_result.get("intent", "safe")
+            reason = self._build_reason(local_result, intent_result, [], intent, severity)
+            return {
+                "flagged": flagged,
+                "severity": severity,
+                "intent": intent,
+                "reason": reason,
+                "flagged_categories": self._get_flagged_categories(local_result),
+                "blocked_words_found": [],
+            }
         return {
             "flagged": True,
-            "severity": severity,
+            "severity": self._score_to_severity(max_score, local_result),
             "intent": "harmful",
             "reason": f"High toxicity detected (score {max_score:.2f})",
             "flagged_categories": self._get_flagged_categories(local_result),
-            "blocked_words_found": keyword_hits,
+            "blocked_words_found": [],
         }
 
-    def _classify_local(self, text: str) -> dict:
-        results = self._models().moderate_sync(text[:512])
-        scores = {}
-        if isinstance(results, dict):
-            labels = results.get("labels", [])
-            scores_list = results.get("scores", [])
-            for label, score in zip(labels, scores_list, strict=False):
-                scores[label.lower()] = round(score, 4)
-        elif isinstance(results, list):
-            if results and isinstance(results[0], list):
-                results = results[0]
-            for item in results:
-                if isinstance(item, dict):
-                    label = item.get("label", "").lower()
-                    scores[label] = round(item.get("score", 0), 4)
+    @staticmethod
+    def _safe() -> dict:
+        return {
+            "flagged": False,
+            "severity": SEVERITY_NONE,
+            "intent": "safe",
+            "reason": "",
+            "flagged_categories": [],
+            "blocked_words_found": [],
+        }
+
+    @staticmethod
+    def _with_keywords(result: dict, keyword_hits: list[str]) -> dict:
+        """Name the keywords on an LLM verdict; they count as found only if it flags."""
+        result = dict(result)
+        if keyword_hits and result.get("flagged"):
+            categories = [
+                c for c in result.get("flagged_categories") or [] if c != BLOCKED_KEYWORD_CATEGORY
+            ]
+            result["flagged_categories"] = [BLOCKED_KEYWORD_CATEGORY, *categories]
+            reason = str(result.get("reason") or "").strip()
+            result["reason"] = f"Blocked keyword: {', '.join(keyword_hits[:5])}." + (
+                f" {reason}" if reason else ""
+            )
+            result["blocked_words_found"] = list(keyword_hits)
+        else:
+            result["blocked_words_found"] = []
+        result["keywords_reviewed"] = list(keyword_hits)
+        return result
+
+    def _unverified_keywords(
+        self, keyword_hits: list[str], passages: list[str], local_result: dict
+    ) -> dict:
+        """Without the LLM a keyword hit cannot be cleared, so it goes to human review."""
+        max_score = local_result.get("max_score", 0.0)
+        severity = (
+            self._score_to_severity(max_score, local_result)
+            if max_score >= _HIGH_THRESHOLD
+            else SEVERITY_MEDIUM
+        )
+        reason = (
+            f"Blocked keyword: {', '.join(keyword_hits[:5])}. "
+            "Context not checked: the language model is unavailable."
+        )
+        excerpt = self._excerpt(passages, keyword_hits)
+        if excerpt:
+            reason += f' Context: "{excerpt}"'
+        return {
+            "flagged": True,
+            "severity": severity,
+            "intent": "questionable",
+            "reason": reason,
+            "flagged_categories": [
+                BLOCKED_KEYWORD_CATEGORY,
+                *self._get_flagged_categories(local_result),
+            ],
+            "blocked_words_found": list(keyword_hits),
+            "keywords_reviewed": list(keyword_hits),
+        }
+
+    @staticmethod
+    def _excerpt(passages: list[str], keyword_hits: list[str], radius: int = 100) -> str:
+        """About two hundred characters of context centred on the first keyword hit."""
+        for passage in passages:
+            lowered = passage.lower()
+            found = [lowered.find(kw.lower()) for kw in keyword_hits if kw.lower() in lowered]
+            if found:
+                start = max(0, min(found) - radius)
+                return passage[start : min(found) + radius].strip()
+        return ""
+
+    @staticmethod
+    def _sentences(text: str) -> list[str]:
+        """Sentences, with unpunctuated runs cut at word boundaries to bounded pieces."""
+        pieces: list[str] = []
+        for sentence in _SENTENCE_BOUNDARY.split(text.strip()):
+            words = sentence.split()
+            current: list[str] = []
+            length = 0
+            for word in words:
+                if current and length + 1 + len(word) > _MAX_SENTENCE_CHARS:
+                    pieces.append(" ".join(current))
+                    current, length = [], 0
+                current.append(word[:_MAX_SENTENCE_CHARS])
+                length += len(current[-1]) + (1 if length else 0)
+            if current:
+                pieces.append(" ".join(current))
+        return pieces
+
+    def _passages(
+        self, sentences: list[str], keyword_hits: list[str], local_result: dict
+    ) -> list[str]:
+        """What the LLM judges: the sentences around each keyword hit and toxic sentence."""
+        centres = [
+            index
+            for index, sentence in enumerate(sentences)
+            if any(self._contains_keyword(sentence.lower(), kw) for kw in keyword_hits)
+        ]
+        ranked = sorted(local_result.get("sentences", []), key=lambda item: item[0], reverse=True)
+        centres.extend(
+            index for score, index in ranked[:_MAX_TOXIC_PASSAGES] if score >= _SAFE_THRESHOLD
+        )
+        spans: list[list[int]] = []
+        used = 0
+        for centre in centres:
+            low = max(0, centre - _CONTEXT_SENTENCES)
+            high = min(len(sentences), centre + _CONTEXT_SENTENCES + 1)
+            overlapping = next((s for s in spans if low <= s[1] and s[0] <= high), None)
+            if overlapping is not None:
+                overlapping[0], overlapping[1] = min(low, overlapping[0]), max(high, overlapping[1])
+                continue
+            length = sum(len(sentence) + 1 for sentence in sentences[low:high])
+            if spans and used + length > _MAX_PASSAGE_CHARS:
+                break
+            spans.append([low, high])
+            used += length
+        return [
+            " ".join(sentences[low:high])[:_MAX_PASSAGE_CHARS] for low, high in sorted(spans)
+        ]
+
+    def _classify_local(self, sentences: list[str]) -> dict:
+        """Score every sentence, so neither its position nor the text around it hides it."""
+        scores: dict[str, float] = {}
+        ranked: list[tuple[float, int]] = []
+        for index, result in enumerate(self._models().moderate_batch_sync(sentences)):
+            sentence_scores = self._label_scores(result)
+            for label, score in sentence_scores.items():
+                scores[label] = max(scores.get(label, 0.0), score)
+            ranked.append((max(sentence_scores.values(), default=0.0), index))
         high_scores = {k: v for k, v in scores.items() if v >= 0.5}
         flagged = any(
             (
@@ -179,7 +266,25 @@ class ModerationService:
             "max_score": max(scores.values()) if scores else 0,
             "high_scores": high_scores,
             "scores": scores,
+            "sentences": ranked,
         }
+
+    @staticmethod
+    def _label_scores(results) -> dict[str, float]:
+        scores: dict[str, float] = {}
+        if isinstance(results, dict):
+            labels = results.get("labels", [])
+            scores_list = results.get("scores", [])
+            for label, score in zip(labels, scores_list, strict=False):
+                scores[label.lower()] = round(score, 4)
+        elif isinstance(results, list):
+            if results and isinstance(results[0], list):
+                results = results[0]
+            for item in results:
+                if isinstance(item, dict):
+                    label = item.get("label", "").lower()
+                    scores[label] = round(item.get("score", 0), 4)
+        return scores
 
     def _score_to_severity(self, max_score: float, local_result: dict) -> str:
         local_flagged = local_result.get("flagged", False)

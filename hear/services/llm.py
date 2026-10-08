@@ -6,6 +6,9 @@ import threading
 from hear.inference.client import LocalInferenceClient
 
 logger = logging.getLogger(__name__)
+# Moderation sends the whole transcript up to this size, else the passages around each hit.
+MODERATION_TRANSCRIPT_CHARS = 6000
+MODERATION_OPENING_CHARS = 600
 
 
 class LLMService:
@@ -82,12 +85,13 @@ class LLMService:
         transcript: str,
         *,
         detoxify_scores: dict[str, float] | None = None,
-        harm_keywords: list[str] | None = None,
+        keyword_hits: list[str] | None = None,
+        passages: list[str] | None = None,
         is_borderline: bool = False,
     ) -> dict:
         if not self.is_available:
             raise RuntimeError("LLM not available")
-        found_kw = [kw for kw in harm_keywords or [] if kw in transcript.lower()][:10]
+        found_kw = list(keyword_hits or [])[:10]
         context_parts: list[str] = []
         if detoxify_scores:
             top = sorted(detoxify_scores.items(), key=lambda x: x[1], reverse=True)[:6]
@@ -95,13 +99,19 @@ class LLMService:
             if score_str:
                 context_parts.append(f"Toxicity model pre-scores: {score_str}")
         if found_kw:
-            context_parts.append(f"Flagged keywords found: {', '.join(found_kw)}")
+            context_parts.append(
+                f"Watch-list keywords found: {', '.join(found_kw)}. A keyword alone is not a "
+                "reason to flag: judge how it is used. Reporting on, or warning listeners about, "
+                "scams, fraud, crime or violence is news, not harm. Flag (intent harmful) when "
+                "the content itself does what a keyword names, for example it runs or promotes "
+                "a scam or fraud or is spam, and name that in flagged_categories."
+            )
         if is_borderline:
             context_parts.append(
                 "The toxicity model is UNCERTAIN. Only flag if you are confident this is harmful."
             )
         context = "\n" + "\n".join(context_parts) if context_parts else ""
-        user_content = f'Transcript:\n{transcript[:2000]}{context}\n\nClassify this content. Return ONLY this JSON (no markdown, no extra text):\n{{"flagged":false,"severity":"none","intent":"safe","reason":"","flagged_categories":[]}}\n\nseverity: none | low | medium | high | critical\nintent: safe | questionable | harmful\n\nFLAG as harmful ONLY for:\n  - Direct threats of violence against a specific person\n  - Hate speech targeting a group (race, religion, gender, sexuality)\n  - Sexual content involving minors\n  - Explicit incitement to terrorism or mass violence\n\nDO NOT FLAG:\n  - Sports commentary, match results, player analysis\n  - Cooking shows, recipes, food content\n  - News reporting, journalism, current affairs\n  - Music lyrics about general themes (love, life, community)\n  - Podcasts, interviews, general conversation\n  - Fiction and storytelling\n'
+        user_content = f'{self._moderation_body(transcript, passages)}{context}\n\nClassify this content. Return ONLY this JSON (no markdown, no extra text):\n{{"flagged":false,"severity":"none","intent":"safe","reason":"","flagged_categories":[]}}\n\nseverity: none | low | medium | high | critical\nintent: safe | questionable | harmful\n\nFLAG as harmful ONLY for:\n  - Direct threats of violence against a specific person\n  - Hate speech targeting a group (race, religion, gender, sexuality)\n  - Sexual content involving minors\n  - Explicit incitement to terrorism or mass violence\n\nDO NOT FLAG:\n  - Sports commentary, match results, player analysis\n  - Cooking shows, recipes, food content\n  - News reporting, journalism, current affairs\n  - Music lyrics about general themes (love, life, community)\n  - Podcasts, interviews, general conversation\n  - Fiction and storytelling\n'
         messages = [
             {
                 "role": "system",
@@ -138,6 +148,19 @@ class LLMService:
             "flagged_categories": parsed.get("flagged_categories", []),
             "blocked_words_found": found_kw,
         }
+
+    @staticmethod
+    def _moderation_body(transcript: str, passages: list[str] | None) -> str:
+        """The whole transcript when it fits, else its opening plus the passages to judge."""
+        text = (transcript or "").strip()
+        if len(text) <= MODERATION_TRANSCRIPT_CHARS or not passages:
+            return f"Transcript:\n{text[:MODERATION_TRANSCRIPT_CHARS]}"
+        excerpts = "\n".join(f"[{index}] {passage}" for index, passage in enumerate(passages, 1))
+        return (
+            f"Transcript opening, for context:\n{text[:MODERATION_OPENING_CHARS]}\n\n"
+            f"The full transcript is {len(text)} characters long. Judge these excerpts, the "
+            f"passages around each watch-list keyword or high toxicity score:\n{excerpts}"
+        )
 
     def categorize(
         self,

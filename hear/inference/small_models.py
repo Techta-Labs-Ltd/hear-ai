@@ -110,6 +110,22 @@ class SmallModelsEngine:
             }
         raise ValueError("unsupported_small_model")
 
+    def toxicity_batch_sync(self, texts: list[str]) -> list[dict]:
+        """Score many short texts in GPU batches (a transcript's sentences)."""
+        if not texts:
+            return []
+        with self._lock:
+            results = self._toxic(
+                [text[:512] for text in texts], truncation=True, top_k=None, batch_size=32
+            )
+        return [
+            {
+                "labels": [item["label"] for item in result],
+                "scores": [float(item["score"]) for item in result],
+            }
+            for result in results
+        ]
+
     def check_health(self) -> None:
         if not all(hasattr(self, name) for name in ("_toxic", "_sentiment", "_nli")):
             raise RuntimeError("small_models_unavailable")
@@ -193,6 +209,13 @@ class LazySmallModelsEngine:
             hypothesis_template,
             multi_label=multi_label,
         )
+
+    def toxicity_batch_sync(self, texts: list[str]) -> list[dict]:
+        engine = self._resource.acquire()
+        try:
+            return engine.toxicity_batch_sync(texts)
+        finally:
+            self._resource.release()
 
     def check_health(self) -> None:
         if self._resource.state == "failed":

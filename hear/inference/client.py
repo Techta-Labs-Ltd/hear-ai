@@ -14,6 +14,8 @@ class SmallModelsProtocol(Protocol):
         multi_label: bool = False,
     ) -> dict: ...
 
+    def toxicity_batch_sync(self, texts: list[str]) -> list[dict]: ...
+
 
 class TextGenerationProtocol(Protocol):
     @property
@@ -49,6 +51,9 @@ class LocalInferenceClient:
 
     def moderate_sync(self, text: str) -> dict:
         return self._require_small_models().infer_sync("toxic_bert", text)
+
+    def moderate_batch_sync(self, texts: list[str]) -> list[dict]:
+        return self._require_small_models().toxicity_batch_sync(texts)
 
     def nli_sync(
         self,
