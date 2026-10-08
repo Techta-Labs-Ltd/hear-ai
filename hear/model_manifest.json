@@ -115,6 +115,25 @@
       "license_url": "https://huggingface.co/cross-encoder/nli-distilroberta-base/tree/b14d131f9d32668a5e6a982729b57ff6ed5dfcbd"
     },
     {
+      "logical_name": "ast-audioset",
+      "repo_id": "MIT/ast-finetuned-audioset-10-10-0.4593",
+      "revision": "f826b80d28226b62986cc218e5cec390b1096902",
+      "relative_path": "ast-audioset",
+      "roles": [
+        "pipeline"
+      ],
+      "required_files": [
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json"
+      ],
+      "engine_adapter": "transformers_audio_tagger",
+      "provenance_url": "https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593/tree/f826b80d28226b62986cc218e5cec390b1096902",
+      "license_name": "BSD-3-Clause",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593/tree/f826b80d28226b62986cc218e5cec390b1096902"
+    },
+    {
       "logical_name": "qwen2.5-7b-instruct-awq",
       "repo_id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
       "revision": "b25037543e9394b818fdfca67ab2a00ecc7dd641",

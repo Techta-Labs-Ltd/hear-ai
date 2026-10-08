@@ -168,3 +168,81 @@ async def test_pipeline_streams_all_core_stages(tmp_path: Path):
     assert outcome["result"]["content_description"] == "Local news."
     assert outcome["result"]["transcription"]["transcript"]
     assert all(event.backend_id == outcome["backend_id"] for event in events)
+
+
+class FlaggingModerator:
+    async def moderate(self, text):
+        return {
+            "flagged": True,
+            "severity": "medium",
+            "intent": "questionable",
+            "reason": "Blocked keyword: scam.",
+            "flagged_categories": ["Blocked keyword"],
+            "blocked_words_found": ["scam"],
+        }
+
+
+@pytest.mark.anyio
+async def test_a_flagged_recording_keeps_its_tags_and_discovery(tmp_path: Path):
+    native = NativeExecutor("pipeline-test")
+    workflow = PipelineWorkflow(
+        FakeTranscriber(),
+        FlaggingModerator(),
+        FakeCategorizer(),
+        FakeDiscovery(),
+        FakeAudio(),
+        native,
+        workspace_root=tmp_path,
+    )
+    events = [event async for event in workflow.stream(envelope())]
+    await native.close()
+    result = events[-1].data["outcome"]["result"]
+    assert result["flagged"] is True
+    assert result["categorization"]["categories"] == ["News"]
+    assert result["discovery"]["title_suggestion"] == "Local community news"
+
+
+class InstrumentalTranscriber:
+    async def transcribe_file(self, path, **kwargs):
+        return {
+            "transcript": "",
+            "segments": [],
+            "language": None,
+            "duration": 0.0,
+            "audio_duration": 120.0,
+            "confidence": 0.0,
+            "silent": False,
+            "no_speech": True,
+        }
+
+
+class MusicContent:
+    async def analyse(self, path, duration_seconds, *, has_speech):
+        assert duration_seconds == 120.0 and has_speech is False
+        return {"kind": "music", "music": True, "music_share": 1.0}
+
+
+@pytest.mark.anyio
+async def test_music_without_a_single_word_is_categorised_as_a_song(tmp_path: Path):
+    from hear.services.categorization.service import CategorizationService
+
+    native = NativeExecutor("pipeline-test")
+    workflow = PipelineWorkflow(
+        InstrumentalTranscriber(),
+        FakeModerator(),
+        CategorizationService(),
+        FakeDiscovery(),
+        FakeAudio(),
+        native,
+        workspace_root=tmp_path,
+        audio_content=MusicContent(),
+    )
+    events = [event async for event in workflow.stream(envelope())]
+    await native.close()
+    result = events[-1].data["outcome"]["result"]
+    assert result["categorization"]["categories"] == ["Song"]
+    assert result["categorization"]["tags"] == ["#song", "#music"]
+    assert result["silent"] is False and result["no_speech"] is True
+    assert result["audio_content"]["kind"] == "music"
+    assert result["discovery"] is None
+    assert "discovering" not in [event.stage for event in events]

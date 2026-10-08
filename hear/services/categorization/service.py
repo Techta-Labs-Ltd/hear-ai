@@ -84,6 +84,11 @@ _STOPWORDS = {
 _FORMAT_CATEGORIES = frozenset(
     {"podcast", "documentary", "entertainment", "lifestyle", "opinion", "media"}
 )
+# Recordings the audio tagger hears as music; the catalog's own spelling wins.
+SONG_CATEGORY = "Song"
+SONG_CATEGORY_NAMES = frozenset({"song", "songs"})
+SONG_TAGS = ("#song", "#music")
+
 
 class CategorizationService:
     def __init__(
@@ -110,6 +115,37 @@ class CategorizationService:
         return self._llm
 
     _FORMAT_TAGS = frozenset({"#podcast", "#radio", "#broadcast", "#streaming"})
+
+    def with_song(self, categorization: dict | None, *, confidence: float, max_tags: int = 8) -> dict:
+        """Label a recording the audio tagger heard as music a song, words or no words."""
+        song = next(
+            (
+                c.strip()
+                for c in self._categories.flat_catalog_categories()
+                if c.strip().lower() in SONG_CATEGORY_NAMES
+            ),
+            SONG_CATEGORY,
+        )
+        base = dict(
+            categorization
+            or {
+                "tags": [],
+                "categories": [],
+                "confidence_scores": {},
+                "sentiment": "neutral",
+                "llm_used": False,
+                "categorizer_mode": "audio",
+            }
+        )
+        categories = [c for c in base.get("categories") or [] if str(c).lower() != song.lower()]
+        tags = list(dict.fromkeys([*SONG_TAGS, *(base.get("tags") or [])]))
+        base["categories"] = [song, *categories]
+        base["tags"] = tags[: max(max_tags, len(SONG_TAGS))]
+        base["confidence_scores"] = {
+            **(base.get("confidence_scores") or {}),
+            song: round(confidence, 4),
+        }
+        return base
 
     async def categorize(
         self,

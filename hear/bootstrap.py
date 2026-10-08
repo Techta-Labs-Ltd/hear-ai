@@ -198,6 +198,7 @@ class RuntimeBootstrap:
 
     def pipeline_executor(self) -> tuple[JobExecutor, BackendAttemptClient, list[object]]:
         from hear.inference.client import LocalInferenceClient
+        from hear.services.categorization.audio_content import AudioContentService
         from hear.services.categorization.discovery import DiscoveryService
         from hear.services.categorization.service import CategorizationService
         from hear.services.llm import LLMService
@@ -229,6 +230,7 @@ class RuntimeBootstrap:
             raise RuntimeError("pipeline_catalog_has_no_categories")
         qwen_module = importlib.import_module("hear.inference.qwen_asr")
         small_module = importlib.import_module("hear.inference.small_models")
+        tagger_module = importlib.import_module("hear.inference.audio_tagger")
         text_module = importlib.import_module("hear.inference.text_generation")
         asr = qwen_module.LazyQwenAsrEngine(
             model_path=self._model_path("qwen3-asr-1.7b"),
@@ -254,6 +256,12 @@ class RuntimeBootstrap:
             idle_seconds=self._settings.pipeline_idle_ttl_seconds,
             eviction_enabled=self._settings.gpu_idle_eviction_enabled,
         )
+        audio_tagger = tagger_module.LazyAudioTaggerEngine(
+            self._model_path("ast-audioset"),
+            model_native,
+            idle_seconds=self._settings.pipeline_idle_ttl_seconds,
+            eviction_enabled=self._settings.gpu_idle_eviction_enabled,
+        )
         features = self._settings.model_features
         if "qwen_llm" in features:
             text_generation = text_module.VllmTextGenerationEngine(
@@ -265,6 +273,7 @@ class RuntimeBootstrap:
         readiness = self.readiness(WorkerRole.PIPELINE)
         readiness.add_check("asr", lambda: self._engine_healthy(asr))
         readiness.add_check("small_models", lambda: self._engine_healthy(small_models))
+        readiness.add_check("audio_tagger", lambda: self._engine_healthy(audio_tagger))
         model_client = LocalInferenceClient(
             small_models=small_models,
             text_generation=text_generation,
@@ -313,6 +322,7 @@ class RuntimeBootstrap:
             audio,
             audio_native,
             workspace_root=scratch_root,
+            audio_content=AudioContentService(audio_tagger, audio_native),
         )
         backend = self._attempt_reporter(client)
         return (
@@ -326,6 +336,7 @@ class RuntimeBootstrap:
             [
                 asr,
                 small_models,
+                audio_tagger,
                 model_native,
                 audio_native,
                 client,

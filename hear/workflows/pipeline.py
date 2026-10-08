@@ -11,6 +11,7 @@ from hear.contracts.events import ExecutionEvent, ExecutionEventType
 from hear.contracts.jobs import AttemptEnvelope
 from hear.contracts.outcomes import ExecutionOutcome
 from hear.execution.native import NativeExecutor
+from hear.services.categorization.audio_content import AudioContentService
 from hear.services.categorization.discovery import DiscoverySerialization, DiscoveryService
 from hear.services.categorization.service import CategorizationService
 from hear.services.moderation.service import ModerationService
@@ -45,6 +46,7 @@ class PipelineWorkflow:
         native: NativeExecutor,
         *,
         workspace_root: Path,
+        audio_content: AudioContentService | None = None,
     ) -> None:
         self._transcriber = transcriber
         self._moderator = moderator
@@ -53,6 +55,7 @@ class PipelineWorkflow:
         self._audio = audio
         self._native = native
         self._workspace_root = workspace_root
+        self._audio_content = audio_content or AudioContentService(None, native)
 
     async def stream(self, envelope: AttemptEnvelope):
         workspace = AudioWorkspace(
@@ -98,6 +101,15 @@ class PipelineWorkflow:
             transcription = await task
             transcript = str(transcription.get("transcript") or "").strip()
             segments = list(transcription.get("segments") or [])
+            audio_content = (
+                AudioContentService.result_for("silence")
+                if transcription.get("silent")
+                else await self._audio_content.analyse(
+                    str(source),
+                    float(transcription.get("audio_duration") or 0.0),
+                    has_speech=bool(transcript),
+                )
+            )
             yield self._event(
                 envelope,
                 sequence,
@@ -122,15 +134,25 @@ class PipelineWorkflow:
             categorization = None
             discovery = None
             content_description = None
-            if transcript and not moderation.get("flagged"):
+            max_tags = int(envelope.options.get("max_tags") or 8)
+            # Moderation adds a review flag; it never withholds tags or discovery, so an
+            # admin who clears a flag does not have to re-run the analysis.
+            if transcript or audio_content["music"]:
                 yield self._event(envelope, sequence, ExecutionEventType.STAGE, "categorizing", 65)
                 sequence += 1
-                categorization = await self._categorizer.categorize(
-                    transcript=transcript,
-                    segments=segments,
-                    max_tags=int(envelope.options.get("max_tags") or 8),
-                    per_track_transcripts={envelope.track_id: transcript},
-                )
+                if transcript:
+                    categorization = await self._categorizer.categorize(
+                        transcript=transcript,
+                        segments=segments,
+                        max_tags=max_tags,
+                        per_track_transcripts={envelope.track_id: transcript},
+                    )
+                if audio_content["music"]:
+                    categorization = self._categorizer.with_song(
+                        categorization,
+                        confidence=audio_content["music_share"],
+                        max_tags=max_tags,
+                    )
                 yield self._event(
                     envelope,
                     sequence,
@@ -140,6 +162,7 @@ class PipelineWorkflow:
                     {"categorization": categorization},
                 )
                 sequence += 1
+            if transcript:
                 yield self._event(envelope, sequence, ExecutionEventType.STAGE, "discovering", 75)
                 sequence += 1
                 profile = await self._discovery.build_profile(
@@ -181,6 +204,8 @@ class PipelineWorkflow:
                     "content_description": content_description,
                     "flagged": bool(moderation.get("flagged")),
                     "silent": bool(transcription.get("silent", False)),
+                    "no_speech": not transcript,
+                    "audio_content": audio_content,
                 },
             )
             yield self._event(
@@ -207,6 +232,7 @@ class PipelineWorkflow:
             "duration": transcription.get("duration"),
             "confidence": transcription.get("confidence"),
             "silent": transcription.get("silent", False),
+            "no_speech": transcription.get("no_speech", False),
         }
 
     @staticmethod
