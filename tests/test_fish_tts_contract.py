@@ -178,8 +178,12 @@ class MemoryStorage:
         )
 
 
-def source_file(tmp_path, channels=1):
-    t = np.arange(48000 * 4) / 48000
+REFERENCE_TEXT = "These are the original words spoken in the first part of this recording."
+REFERENCE = {"start_seconds": 0, "end_seconds": 5.5, "text": REFERENCE_TEXT}
+
+
+def source_file(tmp_path, channels=1, seconds=4):
+    t = np.arange(48000 * seconds) / 48000
     wave = (0.05 * np.sin(2 * np.pi * 210 * t)).astype("float32")
     values = wave if channels == 1 else np.column_stack([wave, -wave])
     path = tmp_path / "original.wav"
@@ -214,10 +218,11 @@ def request(source, operation="replace_segments", options=None):
         options=options
         or {
             "same_speaker": True,
+            "reference": REFERENCE,
             "changes": [
                 {
-                    "segment_start": 1,
-                    "segment_end": 2,
+                    "segment_start": 6,
+                    "segment_end": 7,
                     "new_text": "Replaced words.",
                     "original_text": "Original words.",
                 }
@@ -232,7 +237,7 @@ def request(source, operation="replace_segments", options=None):
 
 @pytest.mark.parametrize("channels", [1, 2])
 def test_full_tts_workflow_returns_audio_ownership_and_changed_timeline(tmp_path, channels):
-    path, values = source_file(tmp_path, channels)
+    path, values = source_file(tmp_path, channels, seconds=8)
     old_digest = hashlib.sha256(path.read_bytes()).hexdigest()
     fish = SyntheticSpeechDouble()
     storage = MemoryStorage()
@@ -258,15 +263,19 @@ def test_full_tts_workflow_returns_audio_ownership_and_changed_timeline(tmp_path
     result = outcome["result"]["reconstructed_audio"]
     assert outcome["result"]["engine"] == "fish_speech_s2_pro" and outcome["backend_id"] == "backend-a"
     assert outcome["source_revision"] == 7 and outcome["result"]["requires_approval"] is True
-    assert result["duration"] == 3.5 and result["output_frames"] == 168000
-    assert result["segments"][0]["output_start_frame"] == 48000
-    assert result["segments"][0]["output_end_frame"] == 72000
+    assert result["duration"] == 7.5 and result["output_frames"] == 360000
+    assert result["segments"][0]["output_start_frame"] == 288000
+    assert result["segments"][0]["output_end_frame"] == 312000
     assert result["segments"][0]["audio_url"]
     assert result["channels"] == channels and result["delivery_measurement"]["true_peak_dbtp"] <= -1
     assert (
         fish.calls[0]["text"] == "Replaced words."
-        and fish.calls[0]["references"][0]["text"] == "Original words."
+        and fish.calls[0]["references"][0]["text"] == REFERENCE_TEXT
     )
+    row = result["segments"][0]
+    assert row["voice_reference"]["duration_seconds"] == 5.5 and row["seed"] is not None
+    assert row["acoustic_match"]["channels"][0]["context_seconds"] == 3.0
+    assert result["preview"] is False and result["delivery"]["duration_seconds"] == 7.5
     assert hashlib.sha256(path.read_bytes()).hexdigest() == old_digest
     assert len(storage.uploads) == 2  # delivery MP3 plus the one segment MP3; no manifest upload
     assert {a["content_type"] for a in outcome["artifacts"]} == {"audio/mpeg"}
@@ -319,7 +328,7 @@ class BackendRecorder:
 
 
 def test_serverless_posts_authoritative_outcome_before_returning_completion(tmp_path):
-    path, _ = source_file(tmp_path)
+    path, _ = source_file(tmp_path, seconds=8)
     fish = SyntheticSpeechDouble()
     storage = MemoryStorage()
     backend = BackendRecorder()

@@ -12,7 +12,7 @@ report events and the outcome to the owning backend.
 | --- | --- | --- |
 | `pipeline` | `pipeline` | Transcription, moderation, categorization, discovery, and audio export |
 | `transcription` | `pipeline` or `transcription` | Qwen ASR with aligned timestamps |
-| `reconstruction` | `reconstruction` | Fish Speech S2 Pro (bf16) edits and timeline assembly |
+| `reconstruction` | `reconstruction` | Fish Speech S2 Pro (bf16) edits verified by wav2vec2 CTC and WavLM-SV, timeline assembly |
 | `magic_clean` | `magic_clean_natural` | DeepFilterNet3 with four cleaning profiles |
 
 See [audio jobs](docs/AUDIO_JOBS.md) for cleaning, optional event repair, and Fish

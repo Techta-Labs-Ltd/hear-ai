@@ -288,8 +288,9 @@ Per-type `operation`/`options` (validated by the worker; validate the same in Go
 | `pipeline` | — | `{"max_tags": 8, "track_name": "...", "source": "...", "speaker": "...", "content_description": "..."}` (all optional) |
 | `transcription` | — | `{}` |
 | `magic_clean` | — | `{"profile": "natural|studio_voice|outdoor_mobile|clean_raw", "auto_level"?, "remove_clicks"?, "trim_silence"?, "attenuation_limit_db"?: 12|18|24|36|60, "sound_cleanup"?: {...}, "reduce_stationary_noise"?}` — profiles, rules and the full result are in `docs/CLEANING_PROFILES.md` |
-| `reconstruction` | `replace_segments` | `{"same_speaker": true, "changes": [{"segment_start": 84.866, "segment_end": 93.662, "original_text": "…", "new_text": "…"}]}` |
+| `reconstruction` | `replace_segments` | `{"same_speaker": true, "seed": 1234, "reference": {"start_seconds": 40.2, "end_seconds": 51.7, "text": "…"}, "changes": [{"segment_start": 84.866, "segment_end": 85.3, "original_text": "…", "new_text": "…", "context_before": "…", "context_after": "…"}]}` (edits under 5 s need the explicit `reference`; context words enable word-level splicing) |
 | `reconstruction` | `edit_transcript` | same as `replace_segments` |
+| `reconstruction` | `preview` | same body; outcome has `delivery: null` and only segment MP3s; confirm resends it with the same `seed` as `replace_segments` |
 | `reconstruction` | `rebuild` | `{"same_speaker": true, "edited_transcript": "…", "reference": {"start_seconds": 0, "end_seconds": 15, "text": "…"}}` |
 | `reconstruction` | `remove_segments` | `{"segment_start": 10.0, "segment_end": 12.5}` |
 

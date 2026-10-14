@@ -29,6 +29,8 @@ class TestModelManifest:
         names = {model.logical_name for model in manifest.models_for(WorkerRole.RECONSTRUCTION)}
         assert names == {
             "fish-speech-s2-pro",
+            "wav2vec2-base-960h",
+            "wavlm-base-plus-sv",
         }
 
     def test_pipeline_llm_is_opt_in(self):
