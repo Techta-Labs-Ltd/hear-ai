@@ -476,7 +476,11 @@ class FishReconstructionRenderer:
             raise ValueError("generated_words_unverified")
         pool = acceptable or candidates
         best = max(pool, key=lambda c: (-1.0 if c.similarity is None else c.similarity, -c.take))
-        if best.similarity_reliable and best.similarity < self.min_similarity:
+        if (
+            best.similarity is not None
+            and best.similarity_reliable
+            and best.similarity < self.min_similarity
+        ):
             raise ValueError("voice_match_below_threshold")
         return best
 

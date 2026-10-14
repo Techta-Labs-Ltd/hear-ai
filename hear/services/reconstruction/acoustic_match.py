@@ -146,14 +146,12 @@ class AcousticMatcher:
         # Fish output has digital silence in its pauses and at its edges; the quietest
         # 100 ms decides whether the source's room tone has to be laid underneath.
         generated_rms = AcousticMatcher.frame_rms(generated)
-        window = min(5, len(generated_rms))
+        span = min(5, len(generated_rms))
         generated_floor = (
             float(
-                np.sqrt(
-                    np.min(np.convolve(generated_rms**2, np.ones(window) / window, mode="valid"))
-                )
+                np.sqrt(np.min(np.convolve(generated_rms**2, np.ones(span) / span, mode="valid")))
             )
-            if window
+            if span
             else 0.0
         )
         gain_db = 0.0
