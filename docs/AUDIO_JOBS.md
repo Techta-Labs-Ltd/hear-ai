@@ -168,11 +168,20 @@ Example reconstruction-specific payload, inside a complete authenticated envelop
   "options": {
     "same_speaker": true,
     "language": "en-GB",
+    "seed": 1234,
+    "reference": {
+      "start_seconds": 40.2,
+      "end_seconds": 51.7,
+      "text": "The aligner's exact words for this clean stretch of the same speaker."
+    },
+    "takes": 3,
     "changes": [{
-      "segment_start": 12.0,
-      "segment_end": 16.0,
-      "original_text": "The exact words spoken in this source interval.",
-      "new_text": "The edited words to generate."
+      "segment_start": 13.4,
+      "segment_end": 14.1,
+      "original_text": "Tuesday",
+      "new_text": "Thursday",
+      "context_before": "we will ship the update on",
+      "context_after": "after the review."
     }]
   }
 }
@@ -184,20 +193,111 @@ start/end positions and require new text. Edits must have finite in-range times
 and cannot overlap. The caller supplies text and authorized references, not
 pre-generated replacement audio.
 
-Same-speaker generation requires matching `original_text` over an uncut 1–20 second
-source interval or an explicit `reference` with `start_seconds`, `end_seconds`,
-and matching text. Rebuild needs an aligned reference when `same_speaker` is true.
-Independent stereo speakers require `reference.channel` (0 or 1). References come
-from the authorized source. Missing references fail rather than substituting a
-generic voice. Text chunks do not add emotion tags or paraphrase the requested text.
+### Voice reference
+
+Fish clones the voice from a reference prompt: 5–20 seconds of continuous speech
+from the authorized source plus the exact words spoken in it. Send it as an
+explicit `reference` with `start_seconds`, `end_seconds`, and `text`; one
+reference serves every edit in the job. Only an edit whose own interval is 5–20
+seconds with a matching `original_text` may omit it and clone from the words it
+replaces; shorter same-speaker edits fail with
+`same_speaker_requires_explicit_reference_or_5_to_20_second_aligned_interval`.
+Rebuild always needs an explicit reference when `same_speaker` is true.
+
+Choose the reference, not the edit, for voice quality: 8–15 seconds of
+confidently transcribed, uninterrupted speech by the same speaker, near the edit,
+with the aligner's words verbatim as `text`. The worker rejects references that
+are mostly silent (`voice_reference_mostly_silent`), clipped
+(`voice_reference_clipped`), or whose text length does not fit the interval
+(`voice_reference_text_length_mismatch`), and reports `voice_reference`
+measurements with `reference_shorter_than_recommended` or
+`reference_has_long_pauses` warnings on each segment. Independent stereo speakers
+require `reference.channel` (0 or 1). Missing references fail rather than
+substituting a generic voice. Text chunks do not add emotion tags or paraphrase
+the requested text.
+
+### Sentence context and word-level splicing
+
+Send the neighbouring words of the same sentence as `context_before` and
+`context_after` on each change; the interval `[segment_start, segment_end]`
+covers only the replaced words, snapped to the aligner's word boundaries. The
+worker generates the whole sentence so the new words carry natural prosody,
+force-aligns the take with wav2vec2 CTC, and cuts only the new words out at the
+quietest point of the gaps to their neighbours. The source audio for the context
+words is never replaced, so everything but the changed words stays the user's own
+recording. Each segment's `splice` reports the mode (`words` or
+`whole_segment`), the cut points inside the take, and the timed new words. When
+the sentence cannot be aligned (digits or symbols in the text, or a take longer
+than 60 s) the worker regenerates the new words alone with the chosen seed and
+replaces the whole interval; a worker without the verifier does the same from
+the start and reports `verifier_unavailable`.
+
+### Verification and takes
+
+Every take is checked before it can be delivered. wav2vec2-base-960h transcribes
+the take; the new words must all appear in order (90 % for edits over five
+words, fuzzy to CTC spelling), otherwise the take is rejected. WavLM-base-plus-sv
+embeds the take and the voice reference; their cosine similarity must reach
+`HEAR_RECONSTRUCTION_MIN_VOICE_SIMILARITY` (default 0.75). The worker renders up
+to `HEAR_RECONSTRUCTION_TAKES` (default 3, `takes` in the options overrides it,
+1–4) candidate takes per edit with consecutive seeds, stops early once a take is
+verified and at least 0.1 above the floor, and keeps the most similar verified
+take. If no take says the new words the job fails with
+`generated_words_unverified`; if none reaches the floor it fails with
+`voice_match_below_threshold`. Both mean "regenerate with another seed or a
+better reference", not "approve anyway". Segments report `takes`,
+`selected_take`, `voice_similarity`, and `words_verified`; the outcome's
+`word_accuracy_verified` is true only when every generated segment passed. Words
+the CTC model cannot spell (digits, symbols) are reported as unverifiable rather
+than failing; spell them out in `new_text` to have them checked.
+
+Both verification models are manifest entries for the reconstruction role and
+are provisioned with it; `HEAR_RECONSTRUCTION_VERIFICATION_ENABLED=false`
+disables them, in which case takes drop to one and nothing is verified.
+`facebook/wav2vec2-base-960h` is Apache-2.0. `microsoft/wavlm-base-plus-sv` is
+released under CC BY-SA 3.0 (its model card points to the UniSpeech licence):
+commercial use is permitted, attribution to Microsoft's WavLM is required in
+product notices, and any fine-tuned derivative must be shared under the same
+licence. The worker only runs inference on the unmodified weights.
+
+The verifier loads at worker start (`warmup`) in float16 on CUDA, about 0.2 GB
+of weights per model; a typical ten-second take verifies in well under a second
+with a transient peak of a few hundred megabytes, and the hard ceiling is the
+60 s alignment limit at roughly 1 GB. `SpeechVerifier.last_metrics` reports the
+measured seconds and peak CUDA bytes of the last call. The reference embedding
+is cached per reference, so the takes and edits of one job compute it once.
+
+### Takes, previews and confirmation
+
+Every edit is generated with one seed, so all of its text chunks are the same
+take of the voice. Omit `seed` for a job-derived seed, or send `seed` (0 to
+2^31-1): edit *i* uses `seed + 16·i`, its candidate takes add 0–3, and the
+chosen take's seed is recorded on each segment. A new seed asks for another take;
+the same seed reproduces the previous one.
+
+`preview` generates, matches and uploads only the segment MP3s. Its outcome has
+`delivery: null`, `preview: true`, and the same `segments` timeline a full render
+would produce, so the UI can play source, segment, source in place. Confirm by
+resubmitting the identical `changes`, `reference`, and `seed` as
+`replace_segments` or `edit_transcript`; the full track is assembled once.
+
+### Matching the insert to the recording
+
+Generated speech is matched to the two seconds of source on either side of the
+edit before assembly: its voiced level is brought to the surrounding speaking
+level (bounded to ±12 dB), it is low-passed to the source bandwidth when the
+source rolls off below 16 kHz, and the quietest half second of surrounding room
+tone is looped under it when the recording has an audible noise floor. Each
+segment's `acoustic_match` reports the measurements. Regions blend over 20 ms at
+each edge inside the generated interval; `crossfade_frames` records the length.
 
 Outcomes include identities, source revision, backend ownership,
 `engine=fish_speech_s2_pro`, operation, and `requires_approval=true`.
 `reconstructed_audio` (inline in the outcome, no manifest upload) contains
 final/source frames, duration, delivery
 artifacts, storage keys/URLs/hashes, and per-edit records. Those records retain
-source times, generated durations, output positions, replacement MP3s, and reference
-digests. Generated speech is not stretched into the old interval; the backend must
+source times, generated durations, output positions, replacement MP3s, reference
+digests and measurements, seeds, chunk counts, and acoustic matching. Generated speech is not stretched into the old interval; the backend must
 apply this timeline map when approving transcript updates.
 
 Assembly is disk-backed at 48 kHz with blends inside generated regions. Untouched

@@ -139,6 +139,14 @@ class PodGateway:
                     "remove_segments",
                     "preview",
                 ],
+                "voice_reference_seconds": [5, 20],
+                "short_edits_require_explicit_reference": True,
+                "seed_option": True,
+                "preview_returns_segments_only": True,
+                "acoustic_matching": True,
+                "sentence_context_word_splicing": True,
+                "takes_option": [1, 4],
+                "voice_verification": "wav2vec2_ctc_words_wavlm_sv_similarity",
             },
         }
 

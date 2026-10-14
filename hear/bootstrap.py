@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import shutil
 import uuid
@@ -375,6 +376,21 @@ class RuntimeBootstrap:
         )
         readiness = self.readiness(WorkerRole.RECONSTRUCTION)
         readiness.add_check("fish_speech", lambda: self._engine_healthy(fish))
+        verifier = None
+        if self._settings.reconstruction_verification_enabled:
+            verifier_module = importlib.import_module("hear.inference.speech_verifier")
+            verifier = verifier_module.SpeechVerifier(
+                self._model_path("wav2vec2-base-960h"), self._model_path("wavlm-base-plus-sv")
+            )
+            # Two small models: load them now so the first edit pays no cold start.
+            warm = verifier.warmup()
+            logging.getLogger(__name__).info(
+                "speech_verifier_ready device=%s seconds=%s peak_allocated_bytes=%s",
+                verifier.device,
+                warm.get("seconds"),
+                warm.get("peak_allocated_bytes"),
+            )
+            readiness.add_check("speech_verifier", lambda: self._engine_healthy(verifier))
         audio = AudioIO(
             client,
             audio_native,
@@ -382,7 +398,13 @@ class RuntimeBootstrap:
             decode_timeout_seconds=self._settings.audio_decode_timeout_seconds,
         )
         workflow = FishReconstructionWorkflow(
-            FishReconstructionRenderer(fish, audio_native),
+            FishReconstructionRenderer(
+                fish,
+                audio_native,
+                verifier=verifier,
+                takes=self._settings.reconstruction_takes,
+                min_similarity=self._settings.reconstruction_min_voice_similarity,
+            ),
             audio,
             B2StorageFactory(),
             audio_native,

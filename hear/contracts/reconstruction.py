@@ -4,6 +4,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
+# Fish S2 Pro locks timbre from roughly five seconds of continuous speech upwards;
+# one-word edit intervals are far too short to clone from, so they must carry an
+# explicit reference chosen elsewhere in the recording.
+MIN_REFERENCE_SECONDS = 5.0
+MAX_REFERENCE_SECONDS = 20.0
+MAX_SEED = 2**31 - 1
+
 
 class VoiceReference(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -14,8 +21,9 @@ class VoiceReference(BaseModel):
 
     @model_validator(mode="after")
     def bounds(self):
-        if not 1 <= self.end_seconds - self.start_seconds <= 20 or not self.text.strip():
-            raise ValueError("voice_reference_requires_1_to_20_seconds_and_matching_text")
+        duration = self.end_seconds - self.start_seconds
+        if not MIN_REFERENCE_SECONDS <= duration <= MAX_REFERENCE_SECONDS or not self.text.strip():
+            raise ValueError("voice_reference_requires_5_to_20_seconds_and_matching_text")
         return self
 
 
@@ -25,6 +33,11 @@ class SpeechEdit(BaseModel):
     segment_end: float = Field(ge=0, allow_inf_nan=False)
     new_text: str = Field(default="", max_length=20000)
     original_text: str = Field(default="", max_length=4000)
+    # Neighbouring words of the same sentence, outside the replaced interval. The
+    # worker generates the whole sentence for natural prosody, then splices only
+    # the new words back over [segment_start, segment_end].
+    context_before: str = Field(default="", max_length=1000)
+    context_after: str = Field(default="", max_length=1000)
     is_deletion: StrictBool = False
 
     @model_validator(mode="after")
@@ -34,9 +47,37 @@ class SpeechEdit(BaseModel):
         if self.is_deletion:
             if self.segment_end <= self.segment_start or self.new_text.strip():
                 raise ValueError("deletion_requires_nonempty_interval_and_no_new_text")
+            if self.context_before.strip() or self.context_after.strip():
+                raise ValueError("deletion_takes_no_context")
         elif not self.new_text.strip():
             raise ValueError("new_text_required_empty_text_is_not_implicit_deletion")
         return self
+
+    @property
+    def generation_text(self) -> str:
+        return " ".join(
+            part.strip()
+            for part in (self.context_before, self.new_text, self.context_after)
+            if part.strip()
+        )
+
+    @property
+    def context_word_counts(self) -> tuple[int, int, int]:
+        return (
+            len(self.context_before.split()),
+            len(self.new_text.split()),
+            len(self.context_after.split()),
+        )
+
+    @property
+    def can_self_reference(self) -> bool:
+        """Whether the replaced interval itself is long enough to clone the voice from."""
+        return (
+            bool(self.original_text.strip())
+            and MIN_REFERENCE_SECONDS
+            <= self.segment_end - self.segment_start
+            <= MAX_REFERENCE_SECONDS
+        )
 
 
 class ReconstructionOptions(BaseModel):
@@ -45,6 +86,12 @@ class ReconstructionOptions(BaseModel):
     language: str = Field(default="en", pattern=r"^en(?:-GB)?$")
     changes: list[SpeechEdit] = Field(default_factory=list, max_length=64)
     reference: VoiceReference | None = None
+    # One take per seed: resend the seed from a preview to reproduce it on confirm,
+    # or send a new one to ask for another take ("regenerate").
+    seed: int | None = Field(default=None, ge=0, le=MAX_SEED, strict=True)
+    # Candidate takes per edit; the worker keeps the best verified one. Omit for
+    # the worker default.
+    takes: int | None = Field(default=None, ge=1, le=4, strict=True)
     edited_transcript: str | None = Field(default=None, max_length=20000)
     original_transcript: str | None = Field(default=None, max_length=20000)
     segment_start: float | None = Field(default=None, ge=0, allow_inf_nan=False)
@@ -62,7 +109,7 @@ class ReconstructionOptions(BaseModel):
         if sum(len(e.new_text) for e in edits) > 20000:
             raise ValueError("reconstruction_text_budget_exceeded")
         if operation in {"replace_segments", "edit_transcript", "preview"}:
-            if any(len(e.new_text) > 2000 for e in edits):
+            if any(len(e.generation_text) > 2000 for e in edits):
                 raise ValueError("segment_text_budget_exceeded")
             if (
                 not edits
@@ -73,12 +120,9 @@ class ReconstructionOptions(BaseModel):
                 raise ValueError("segment_operations_require_only_changes")
             if result.same_speaker and result.reference is None:
                 for edit in edits:
-                    if not edit.is_deletion and (
-                        not edit.original_text.strip()
-                        or not 1 <= edit.segment_end - edit.segment_start <= 20
-                    ):
+                    if not edit.is_deletion and not edit.can_self_reference:
                         raise ValueError(
-                            "same_speaker_requires_aligned_original_text_or_explicit_reference"
+                            "same_speaker_requires_explicit_reference_or_5_to_20_second_aligned_interval"
                         )
         elif operation == "rebuild":
             if (

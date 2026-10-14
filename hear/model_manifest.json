@@ -201,6 +201,47 @@
         "chat_template.jinja": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
         "LICENSE.md": "aa7d9206e9d710590987a3636934f643529c00cd490323594e6206aaa0c32d80"
       }
+    },
+    {
+      "logical_name": "wav2vec2-base-960h",
+      "repo_id": "facebook/wav2vec2-base-960h",
+      "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+      "relative_path": "wav2vec2-base-960h",
+      "roles": [
+        "reconstruction"
+      ],
+      "required_files": [
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "special_tokens_map.json"
+      ],
+      "engine_adapter": "transformers_ctc_aligner",
+      "provenance_url": "https://huggingface.co/facebook/wav2vec2-base-960h/tree/22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
+      "license_name": "Apache-2.0",
+      "license_status": "verified",
+      "license_url": "https://huggingface.co/facebook/wav2vec2-base-960h/tree/22aad52d435eb6dbaf354bdad9b0da84ce7d6156"
+    },
+    {
+      "logical_name": "wavlm-base-plus-sv",
+      "repo_id": "microsoft/wavlm-base-plus-sv",
+      "revision": "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e",
+      "relative_path": "wavlm-base-plus-sv",
+      "roles": [
+        "reconstruction"
+      ],
+      "required_files": [
+        "config.json",
+        "preprocessor_config.json",
+        "pytorch_model.bin"
+      ],
+      "engine_adapter": "transformers_speaker_verifier",
+      "provenance_url": "https://huggingface.co/microsoft/wavlm-base-plus-sv/tree/feb593a6c23c1cc3d9510425c29b0a14d2b07b1e",
+      "license_name": "CC-BY-SA-3.0",
+      "license_status": "verified",
+      "license_url": "https://github.com/microsoft/UniSpeech/blob/main/LICENSE"
     }
   ]
 }

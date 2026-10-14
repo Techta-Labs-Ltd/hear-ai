@@ -15,6 +15,10 @@ from hear.execution.native import NativeExecutor
 from hear.runtime.gpu_idle import AsyncIdleResource
 
 MAX_SEQUENCE_TOKENS = 4096
+# Edits must sound like one take of the same voice; lower temperature trades a
+# little expressiveness for timbre stability between candidates and chunks.
+TEMPERATURE = 0.6
+TOP_P = 0.7
 
 
 class FishProcess:
@@ -113,8 +117,8 @@ class FishProcess:
                     references=[ServeReferenceAudio(**ref) for ref in values["references"]],
                     reference_id=None,
                     seed=values["seed"],
-                    top_p=0.7,
-                    temperature=0.7,
+                    top_p=TOP_P,
+                    temperature=TEMPERATURE,
                     format="wav",
                     streaming=False,
                     use_memory_cache="off",

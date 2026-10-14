@@ -123,7 +123,11 @@ class FishReconstructionWorkflow:
 
             yield self.event(envelope, sequence, "uploading", 85)
             sequence += 1
-            delivery = await upload(result["delivery"], "reconstructed.mp3", "audio/mpeg")
+            # A preview carries only the generated segments; confirm re-renders the
+            # whole track with the same seeds.
+            delivery = None
+            if result["delivery"] is not None:
+                delivery = await upload(result["delivery"], "reconstructed.mp3", "audio/mpeg")
             rows = []
             for index, (segment, row) in enumerate(
                 zip(result["segments"], result["timeline"], strict=True)
@@ -131,7 +135,7 @@ class FishReconstructionWorkflow:
                 row = dict(row)
                 # A rebuild's single segment is the whole output; reuse the delivery
                 # instead of uploading an identical second MP3.
-                if segment.delivery is not None and operation != "rebuild":
+                if segment.delivery is not None and (operation != "rebuild" or delivery is None):
                     segment_artifact = await upload(
                         segment.delivery, f"segments/segment-{index:03d}.mp3", "audio/mpeg"
                     )
@@ -157,13 +161,19 @@ class FishReconstructionWorkflow:
                     "timeline_policy",
                     "delivery_measurement",
                     "final_gain_db",
+                    "preview",
+                    "generated_stereo_policy",
+                    "word_accuracy_verified",
+                    "voice_verification",
                 )
                 if key in result
             }
             payload.update(
                 {
                     "source_sha256": digest,
-                    "delivery": {**delivery.model_dump(mode="json"), "duration_seconds": result.get("duration")},
+                    "delivery": None
+                    if delivery is None
+                    else {**delivery.model_dump(mode="json"), "duration_seconds": result.get("duration")},
                     "segments": rows,
                 }
             )

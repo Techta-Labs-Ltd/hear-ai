@@ -134,6 +134,15 @@ class RuntimeSettings(BaseModel):
     reconstruction_max_seconds: int = Field(
         default=4 * 3600, gt=0, alias="RECONSTRUCTION_MAX_SOURCE_SECONDS"
     )
+    # Generated takes per edit when the verifier is loaded; the best verified take
+    # is kept. Similarity is WavLM-SV cosine between the take and the reference.
+    reconstruction_takes: int = Field(default=3, ge=1, le=4, alias="HEAR_RECONSTRUCTION_TAKES")
+    reconstruction_min_voice_similarity: float = Field(
+        default=0.75, ge=0, le=1, alias="HEAR_RECONSTRUCTION_MIN_VOICE_SIMILARITY"
+    )
+    reconstruction_verification_enabled: bool = Field(
+        default=True, alias="HEAR_RECONSTRUCTION_VERIFICATION_ENABLED"
+    )
     magic_clean_max_input_bytes: int = Field(
         default=4 * 1024**3, gt=0, alias="MAGIC_CLEAN_MAX_INPUT_BYTES"
     )
