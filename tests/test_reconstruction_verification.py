@@ -1,10 +1,12 @@
 """Word verification, best-of-N take selection and word-level splicing."""
 
 import asyncio
+import io
 from pathlib import Path
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 from hear.execution.native import NativeExecutor
 from hear.services.reconstruction.fish_renderer import FishReconstructionRenderer
@@ -147,9 +149,29 @@ def edit(**extra):
     }
 
 
-def run(tmp_path, options, verifier, operation="replace_segments", takes=3, min_similarity=0.75):
+class LongSpeechDouble(SyntheticSpeechDouble):
+    """Two seconds per chunk: long enough for speaker similarity to be enforced."""
+
+    async def generate_speech(self, **kwargs):
+        self.calls.append(kwargs)
+        t = np.arange(RATE * 2) / RATE
+        wave = (0.06 * np.sin(2 * np.pi * 330 * t)).astype("float32")
+        buffer = io.BytesIO()
+        sf.write(buffer, wave, RATE, format="WAV", subtype="FLOAT")
+        return buffer.getvalue()
+
+
+def run(
+    tmp_path,
+    options,
+    verifier,
+    operation="replace_segments",
+    takes=3,
+    min_similarity=0.75,
+    fish=None,
+):
     path, _ = source_file(tmp_path, seconds=8)
-    fish = SyntheticSpeechDouble()
+    fish = fish or LongSpeechDouble()
     storage = MemoryStorage()
 
     async def go():
@@ -180,13 +202,13 @@ def test_only_the_new_words_are_spliced_into_the_interval(tmp_path):
     assert (
         verifier.calls[0][1] == "we ship it tomorrow at noon" and verifier.calls[0][2] == 5.5 * RATE
     )
-    # Six words over the 0.5 s synthetic take: the new word is the fourth 1/6th.
-    assert row["splice"]["mode"] == "words" and row["duration"] == pytest.approx(0.5 / 6, abs=0.002)
+    # Six words over the 2 s synthetic take: the new word is the fourth 1/6th.
+    assert row["splice"]["mode"] == "words" and row["duration"] == pytest.approx(2 / 6, abs=0.002)
     assert row["splice"]["new_words"][0]["word"] == "TOMORROW"
     assert row["words_verified"] is True and row["voice_similarity"] == 0.9
     assert row["selected_take"] == 0 and row["seed"] == 100 and len(row["takes"]) == 1
     assert result["word_accuracy_verified"] is True
-    assert abs(result["output_frames"] - (8 * RATE - RATE // 2 + 4000)) <= 4
+    assert abs(result["output_frames"] - (8 * RATE - RATE // 2 + 16000)) <= 4
     assert result["voice_verification"] == "wav2vec2_ctc_words_wavlm_sv_similarity"
 
 
@@ -219,10 +241,10 @@ def test_unalignable_sentence_falls_back_to_generating_the_new_words_alone(tmp_p
         "mode": "whole_segment",
         "reason": "context_alignment_unavailable",
         "cut_start_seconds": 0.0,
-        "cut_end_seconds": 0.5,
+        "cut_end_seconds": 2.0,
         "new_words": [],
     }
-    assert row["duration"] == 0.5
+    assert row["duration"] == 2.0
 
 
 def test_without_a_verifier_only_the_new_words_are_generated(tmp_path):
@@ -259,3 +281,36 @@ def test_deletions_cannot_carry_context():
         == "a b c"
     )
     assert Path  # keep the import used for readers of the helper signatures
+
+
+def hi_alone(**extra):
+    """A one-word utterance with no sentence around it."""
+    return {
+        "same_speaker": True,
+        "reference": REFERENCE,
+        "changes": [
+            {"segment_start": 6, "segment_end": 6.3, "new_text": "Hi", "original_text": "Hey"}
+        ],
+        **extra,
+    }
+
+
+def test_a_lone_short_word_is_not_failed_on_unreliable_similarity(tmp_path):
+    # Half-second takes: similarity ranks them but cannot reject them.
+    outcome, fish, _ = run(
+        tmp_path, hi_alone(), FakeVerifier([0.3, 0.55, 0.4]), fish=SyntheticSpeechDouble()
+    )
+    row = outcome["result"]["reconstructed_audio"]["segments"][0]
+    assert len(fish.calls) == 3 and row["selected_take"] == 1 and row["voice_similarity"] == 0.55
+    assert row["takes"][1]["similarity_reliable"] is False
+    assert row["words_verified"] is True and row["splice"]["reason"] == "no_context"
+    assert row["duration"] == 0.5
+
+
+def test_a_take_that_says_more_than_asked_is_rejected(tmp_path):
+    chatty = FakeVerifier([0.9], decoded=["HI", "THERE", "EVERYONE", "WELCOME"])
+    with pytest.raises(ValueError, match="generated_words_unverified"):
+        run(tmp_path, hi_alone(), chatty)
+    # One extra decoded word is tolerated: CTC sometimes splits a word in two.
+    outcome, _, _ = run(tmp_path, hi_alone(), FakeVerifier([0.9], decoded=["HI", "THERE"]))
+    assert outcome["result"]["reconstructed_audio"]["segments"][0]["words_verified"] is True

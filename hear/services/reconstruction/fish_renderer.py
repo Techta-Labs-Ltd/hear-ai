@@ -92,6 +92,15 @@ class GeneratedTake:
         return None if self.verification is None else self.verification.similarity
 
     @property
+    def similarity_reliable(self) -> bool:
+        """x-vectors need a couple of seconds of speech; a one-word take cannot be judged."""
+        return (
+            self.similarity is not None
+            and self.frames
+            >= FishReconstructionRenderer.MIN_SIMILARITY_SECONDS * FishReconstructionRenderer.RATE
+        )
+
+    @property
     def acceptable(self) -> bool:
         return self.words_verified is not False
 
@@ -101,6 +110,7 @@ class GeneratedTake:
             "seed": self.seed,
             "duration": self.frames / FishReconstructionRenderer.RATE,
             "similarity": None if self.similarity is None else round(self.similarity, 4),
+            "similarity_reliable": self.similarity_reliable,
             "words_verified": self.words_verified,
             "word_match_ratio": self.word_match_ratio,
             "decoded": None if self.verification is None else " ".join(self.verification.decoded),
@@ -138,6 +148,11 @@ class FishReconstructionRenderer:
     # A take this far above the floor is kept without rendering the remaining ones.
     EARLY_STOP_MARGIN = 0.1
     TAKE_SEED_STRIDE = 16
+    # Below this take length speaker similarity only ranks takes; it cannot fail them.
+    MIN_SIMILARITY_SECONDS = 1.5
+    # A take may decode into a word or two more than asked (CTC splits words); a
+    # take that says a whole extra phrase is not the requested edit.
+    EXTRA_WORD_TOLERANCE = 1
 
     def __init__(
         self,
@@ -315,11 +330,16 @@ class FishReconstructionRenderer:
         """Whether the decoded transcript contains the new words; None when unverifiable."""
         from_text = cls.normalized_words(edit.generation_text)
         before, new, _ = edit.context_word_counts
-        matched = WordMatcher.match(from_text, list(verification.decoded))
+        decoded = list(verification.decoded)
+        matched = WordMatcher.match(from_text, decoded)
         checked = [matched[i] for i in range(before, before + new) if from_text[i]]
         if not checked:
             return None, None
-        return WordMatcher.passes(checked), round(sum(checked) / len(checked), 3)
+        ratio = round(sum(checked) / len(checked), 3)
+        extra = len(decoded) - len(from_text)
+        if extra > max(cls.EXTRA_WORD_TOLERANCE, len(from_text) // 10):
+            return False, ratio
+        return WordMatcher.passes(checked), ratio
 
     @staticmethod
     def normalized_words(text: str) -> list[str]:
@@ -456,7 +476,7 @@ class FishReconstructionRenderer:
             raise ValueError("generated_words_unverified")
         pool = acceptable or candidates
         best = max(pool, key=lambda c: (-1.0 if c.similarity is None else c.similarity, -c.take))
-        if best.similarity is not None and best.similarity < self.min_similarity:
+        if best.similarity_reliable and best.similarity < self.min_similarity:
             raise ValueError("voice_match_below_threshold")
         return best
 
@@ -578,7 +598,10 @@ class FishReconstructionRenderer:
                 candidates.append(candidate)
                 if candidate.acceptable and (
                     candidate.similarity is None
-                    or candidate.similarity >= self.min_similarity + self.EARLY_STOP_MARGIN
+                    or (
+                        candidate.similarity_reliable
+                        and candidate.similarity >= self.min_similarity + self.EARLY_STOP_MARGIN
+                    )
                 ):
                     break
             best = self.choose_take(candidates)
