@@ -245,7 +245,12 @@ verified and at least 0.1 above the floor, and keeps the most similar verified
 take. If no take says the new words the job fails with
 `generated_words_unverified`; if none reaches the floor it fails with
 `voice_match_below_threshold`. Both mean "regenerate with another seed or a
-better reference", not "approve anyway". Segments report `takes`,
+better reference", not "approve anyway". A take that decodes into clearly more
+words than requested (more than one extra, or 10 % for long edits) is rejected
+as well. Takes under 1.5 s, such as a lone "Hi" with no sentence around it, are
+ranked by similarity but never failed on it, because speaker embeddings need a
+couple of seconds of speech; the word check still applies and
+`similarity_reliable` is false on those takes. Segments report `takes`,
 `selected_take`, `voice_similarity`, and `words_verified`; the outcome's
 `word_accuracy_verified` is true only when every generated segment passed. Words
 the CTC model cannot spell (digits, symbols) are reported as unverifiable rather
