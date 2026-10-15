@@ -49,8 +49,19 @@ command -v docker >/dev/null || {
 docker buildx version >/dev/null
 docker info >/dev/null
 if [[ "$push" == true ]]; then
-  docker buildx build --network=host --platform linux/amd64 \
-    --target "$target" --tag "$tag" --build-arg "HEAR_BUILD_REVISION=$build_revision" --build-arg "HEAR_FISH_LICENSE_APPROVED=$fish_license_approved" --push - < "$context"
+  # The build is cached in the builder, so a retry after a registry or DNS hiccup
+  # on the runner ("lookup ghcr.io ... i/o timeout") only repeats the push.
+  attempt=1
+  until docker buildx build --network=host --platform linux/amd64 \
+    --target "$target" --tag "$tag" --build-arg "HEAR_BUILD_REVISION=$build_revision" --build-arg "HEAR_FISH_LICENSE_APPROVED=$fish_license_approved" --push - < "$context"; do
+    if (( attempt >= 4 )); then
+      echo "image push failed after $attempt attempts: $tag" >&2
+      exit 1
+    fi
+    echo "image push attempt $attempt failed; retrying in $((attempt * 20)) s" >&2
+    sleep $((attempt * 20))
+    attempt=$((attempt + 1))
+  done
 else
   docker buildx build --network=host --platform linux/amd64 \
     --target "$target" --tag "$tag" --build-arg "HEAR_BUILD_REVISION=$build_revision" --build-arg "HEAR_FISH_LICENSE_APPROVED=$fish_license_approved" --load - < "$context"
