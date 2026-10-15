@@ -32,7 +32,7 @@ ENDPOINTS_QUERY = """{
 }"""
 
 SAVE_ENDPOINT_MUTATION = """mutation($input: EndpointInput!) {
-  saveEndpoint(input: $input) { id name gpuIds workersMin workersMax workersStandby }
+  saveEndpoint(input: $input) { id name gpuIds workersMin workersMax }
 }"""
 
 
@@ -102,7 +102,7 @@ class RunPodApi:
             "scalerValue": endpoint.get("scalerValue"),
             "workersMin": endpoint.get("workersMin"),
             "workersMax": endpoint.get("workersMax"),
-            "workersStandby": endpoint.get("workersStandby"),
+            # EndpointInput has no workersStandby; RunPod derives it from workersMax.
             "networkVolumeId": endpoint.get("networkVolumeId") or None,
             "locations": endpoint.get("locations") or None,
         }
@@ -121,12 +121,8 @@ class RunPodApi:
         changes: dict[str, Any] = {}
         if pool != endpoint["gpuIds"]:
             changes["gpuIds"] = pool
-        if workers_max is not None and (
-            endpoint.get("workersMax") != workers_max
-            or endpoint.get("workersStandby") != workers_max
-        ):
+        if workers_max is not None and endpoint.get("workersMax") != workers_max:
             changes["workersMax"] = workers_max
-            changes["workersStandby"] = workers_max
         if not changes:
             return None
         return self.save_endpoint(endpoint, **changes)
