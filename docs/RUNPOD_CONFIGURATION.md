@@ -71,6 +71,11 @@ TRANSFORMERS_OFFLINE="1"
 HF_DATASETS_OFFLINE="1"
 ```
 
+The gateway registers itself with the backend every 30 s
+(`HEAR_REGISTRATION_INTERVAL_SECONDS`, 0 disables) using the Pod's proxy URL derived
+from `RUNPOD_POD_ID`, or `HEAR_PUBLIC_GATEWAY_URL` when set; see
+`GO_AI_DISPATCH_PLAN.md` §5.1. A replaced Pod therefore needs no backend change.
+
 Defaults that apply without being set: `HEAR_MAGIC_CLEAN_PARALLELISM=8`,
 `HEAR_MAGIC_CLEAN_CHUNK_SECONDS=300`, `HEAR_MASTERING_PARALLELISM=8`,
 `WHISPER_SEGMENT_SECONDS=30`, `WHISPER_VAD_WORKERS=4`,

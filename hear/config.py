@@ -74,6 +74,13 @@ class RuntimeSettings(BaseModel):
     serverless_preload_models: bool = Field(default=False, alias="HEAR_SERVERLESS_PRELOAD_MODELS")
     backend_internal_url: AnyHttpUrl | None = Field(default=None, alias="HEAR_BACKEND_INTERNAL_URL")
     backend_service_key: SecretStr | None = Field(default=None, alias="HEAR_BACKEND_SERVICE_KEY")
+    # The Pod gateway registers its public URL with the backend every interval so a
+    # replaced Pod is found without anyone editing backend config. Derived from
+    # RUNPOD_POD_ID when unset; 0 disables registration.
+    public_gateway_url: AnyHttpUrl | None = Field(default=None, alias="HEAR_PUBLIC_GATEWAY_URL")
+    registration_interval_seconds: float = Field(
+        default=30, ge=0, le=3600, alias="HEAR_REGISTRATION_INTERVAL_SECONDS"
+    )
     host_max_concurrent_jobs: int = Field(
         default=1, ge=1, le=16, alias="HEAR_HOST_MAX_CONCURRENT_JOBS"
     )

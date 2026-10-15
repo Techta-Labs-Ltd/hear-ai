@@ -16,6 +16,7 @@ from hear.runtime.cleaner.asset_probe import PinnedAssetProbe
 from hear.runtime.gateway import RabbitMQGateway
 from hear.runtime.ownership import DeploymentOwnership
 from hear.runtime.roles import WorkerRole
+from hear.services.registration import WorkerRegistrar
 from hear.services.sound_cleanup.assets import SoundCleanupAssets
 
 
@@ -67,12 +68,45 @@ class GatewayEntrypoint:
             return False
 
     @classmethod
+    def registrar(cls, settings: RuntimeSettings, runtime, roles: set[WorkerRole]):
+        """The self-registration loop, or None with a logged reason."""
+        logger = logging.getLogger(__name__)
+        if settings.registration_interval_seconds <= 0:
+            logger.warning("worker_registration disabled: HEAR_REGISTRATION_INTERVAL_SECONDS=0")
+            return None
+        gateway_url = WorkerRegistrar.derive_gateway_url(
+            {**os.environ, "HEAR_PUBLIC_GATEWAY_URL": str(settings.public_gateway_url or "")}
+        )
+        if gateway_url is None:
+            logger.warning(
+                "worker_registration disabled: set HEAR_PUBLIC_GATEWAY_URL (no RUNPOD_POD_ID)"
+            )
+            return None
+        if settings.backend_internal_url is None or settings.backend_service_key is None:
+            logger.warning("worker_registration disabled: backend URL or service key missing")
+            return None
+        return WorkerRegistrar(
+            backend_url=str(settings.backend_internal_url),
+            service_key=settings.backend_service_key.get_secret_value(),
+            gateway_url=gateway_url,
+            worker_id=settings.worker_id or f"pod-{os.environ.get('RUNPOD_POD_ID', 'local')}",
+            worker_generation=settings.worker_generation or settings.image_revision or "unknown",
+            roles=[role.value for role in roles],
+            image_revision=settings.image_revision,
+            engine_revision=settings.engine_revision,
+            lane_status=runtime.lane_status,
+            interval_seconds=settings.registration_interval_seconds,
+        )
+
+    @classmethod
     def create_app(cls) -> FastAPI:
         settings = RuntimeSettings.from_environment(dict(os.environ))
+        roles = cls.roles()
         runtime = RabbitMQGateway(
             settings.rabbitmq_url or "amqp://guest:guest@127.0.0.1:5672/%2F",
-            cls.roles(),
+            roles,
         )
+        registrar = cls.registrar(settings, runtime, roles)
         gateway = PodGateway(
             runtime,
             settings.pod_api_key.get_secret_value() if settings.pod_api_key else "",
@@ -85,9 +119,13 @@ class GatewayEntrypoint:
         @asynccontextmanager
         async def lifespan(_app: FastAPI):
             await runtime.start()
+            if registrar is not None:
+                registrar.start()
             try:
                 yield
             finally:
+                if registrar is not None:
+                    await registrar.close()
                 await runtime.close()
 
         app = FastAPI(
