@@ -137,6 +137,7 @@ jobs:
           test -n "$HEAR_BACKEND_SERVICE_KEY" || { echo 'HEAR_BACKEND_SERVICE_KEY secret missing'; exit 1; }
           test -n "$HEAR_BACKEND_POLICY_JSON" || { echo 'HEAR_BACKEND_POLICY_JSON variable missing'; exit 1; }
       - name: Roll the template and endpoint
+        id: roll
         run: |
           digest="$(cat ${{ matrix.tag }}.digest)"
           PYTHONPATH=. python scripts/deploy_serverless.py --plan deploy/runpod/${{ matrix.role }}.json \
@@ -144,14 +145,34 @@ jobs:
             --env-from HEAR_BACKEND_SERVICE_KEY,HEAR_BACKEND_POLICY_JSON \
             --output rollout-${{ matrix.role }}.json
       - name: Cold-start canary against the backend
+        id: canary
         run: |
           endpoint="$(python -c "import json; print(json.load(open('rollout-${{ matrix.role }}.json'))['endpoint_id'])")"
           PYTHONPATH=. python -m scripts.serverless_canary --endpoint-id "$endpoint" --role ${{ matrix.canary_role }} \
             --synthetic --timeout 1500 --output canary-${{ matrix.role }}.json
+      - name: Roll the template back to the previous image
+        # A failed canary must not leave an unproven image live. The endpoint keeps
+        # its plan worker cap and GPU exclusions either way.
+        if: ${{ failure() && steps.roll.outcome == 'success' }}
+        run: |
+          previous="$(python -c "import json; print(json.load(open('rollout-${{ matrix.role }}.json')).get('previous_image') or '')")"
+          test -n "$previous" || { echo 'no previous image recorded; nothing to roll back to'; exit 0; }
+          PYTHONPATH=. python scripts/deploy_serverless.py --plan deploy/runpod/${{ matrix.role }}.json \
+            --image "$previous" \
+            --env-from HEAR_BACKEND_SERVICE_KEY,HEAR_BACKEND_POLICY_JSON \
+            --output rollback-${{ matrix.role }}.json
+      - name: Fleet check after the rollout
+        if: ${{ always() && steps.roll.outcome == 'success' }}
+        run: |
+          PYTHONPATH=. python scripts/fleet_health.py --plans-dir deploy/runpod --min-balance 25 \
+            --output fleet-${{ matrix.role }}.json || echo 'fleet check reported findings; see the artifact'
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: rollout-${{ matrix.role }}
           path: |
             rollout-${{ matrix.role }}.json
             canary-${{ matrix.role }}.json
+            rollback-${{ matrix.role }}.json
+            fleet-${{ matrix.role }}.json
           retention-days: 30

@@ -248,10 +248,69 @@ exposed as `GET /api/v1/admin/ai/stats?from=&to=` and as Prometheus gauges
 
 Pod concurrency is read from `/capabilities`: `concurrency.host_total`,
 `concurrency.per_type` (e.g. `{"pipeline":7,"magic_clean_natural":2,"reconstruction":1}`)
-and the lanes in `/readyz`. Serverless endpoint IDs come from config
-(`RUNPOD_ENDPOINTS_JSON`, role → endpoint); `workersMax` is read once a day from the
-RunPod REST API and stored in `transport_health.detail` so the admin limit cannot
-exceed it.
+and the lanes in `/readyz`. The Pod's address itself is never configured: it comes
+from the worker registry (§5.1). Serverless endpoints are resolved **by name**
+(`hear-ai-pipeline-llm`, `hear-ai-cleaner`, `hear-ai-reconstruction`) through the
+RunPod REST API (`GET /v1/endpoints`) at startup, once an hour, and again whenever a
+dispatch returns 404, so a recreated endpoint with a new ID is picked up without a
+config change; `RUNPOD_ENDPOINTS_JSON` remains only as an override. `workersMax`
+is read with the same call and stored in `transport_health.detail` so the admin
+limit cannot exceed it; a `workersMax` of 0 marks the transport unroutable and
+raises an alert.
+
+### 5.1 Worker registry: Pods announce themselves
+
+A Pod gets a new ID every time it is replaced. On 2026-10-15 the backend still
+held the previous Pod's URL and dispatched into the void. The Pod gateway now
+registers itself, and the backend dispatches only to what has registered.
+
+Every `HEAR_REGISTRATION_INTERVAL_SECONDS` (30 s) the gateway sends
+`POST {HEAR_BACKEND_INTERNAL_URL}/internal/ai/runtime/workers/heartbeat` with
+`X-Service-Key` (the same key as the catalogue fetch):
+
+```json
+{
+  "schema_version": 1,
+  "transport": "pod",
+  "worker_id": "runpod-6q0tm0g5hfm590-gateway",
+  "worker_generation": "pod-0646ff8…",
+  "roles": ["magic_clean_natural", "pipeline", "reconstruction"],
+  "image_revision": "pod-0646ff8…",
+  "engine_revision": "0646ff8…",
+  "gateway_url": "https://6q0tm0g5hfm590-8000.proxy.runpod.net",
+  "capabilities_url": "https://6q0tm0g5hfm590-8000.proxy.runpod.net/capabilities",
+  "status": "ready",
+  "lanes": {"pipeline": {"status": "ready", "consumers": 1, "queued": 0, "queue_capacity": 64, "queue": "pipeline.default"}},
+  "interval_seconds": 30,
+  "sent_at": "2026-10-15T09:12:03.412Z"
+}
+```
+
+`status` is `ready` (every lane ready), `loading`, `draining`, or `offline` (sent
+once on shutdown). `gateway_url` is `HEAR_PUBLIC_GATEWAY_URL` when set, else derived
+from `RUNPOD_POD_ID` and `HTTP_PORT`.
+
+Backend behaviour:
+
+1. Table `ai_workers(worker_id pk, transport, gateway_url, roles jsonb, status,
+   lanes jsonb, image_revision, engine_revision, worker_generation, interval_seconds,
+   last_seen_at, first_seen_at)`. The heartbeat upserts by `worker_id`; a
+   `worker_generation` older than the stored one is ignored (a stale replica
+   restarting must not overwrite a newer one).
+2. Dispatch picks Pod targets from `ai_workers` where `transport = 'pod'`,
+   `status = 'ready'`, the role is in `roles`, and `last_seen_at` is within
+   `3 × interval_seconds`. A worker past that window is `stale`; `offline` and
+   `stale` workers receive nothing. The old `HEAR_HTTP_URL` setting is dropped.
+3. `GET /capabilities` is fetched from `capabilities_url` on first sight and when
+   `image_revision` changes, so profile catalogues and concurrency follow the
+   worker, never the config.
+4. Alerts: no ready Pod worker for any role for 5 minutes, a worker flapping
+   between `ready` and `loading` more than 3 times in 10 minutes, or a Serverless
+   endpoint at `workersMax 0`. The same conditions appear in
+   `GET /api/v1/admin/ai/transports`.
+5. Authentication is the service key only; the registry accepts `gateway_url`
+   hosts matching `*.proxy.runpod.net` or an allowlist, so a leaked key cannot
+   redirect dispatch to an arbitrary host.
 
 ## 6. The envelope we send (unchanged worker contract)
 

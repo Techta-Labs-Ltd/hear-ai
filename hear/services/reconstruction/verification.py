@@ -1,9 +1,3 @@
-"""Torch-free verification logic: CTC alignment, word checking and splice planning.
-
-The models live in `hear.inference.speech_verifier`; everything here works on
-plain arrays so the renderer, its tests and the planner never import torch.
-"""
-
 from __future__ import annotations
 
 import re

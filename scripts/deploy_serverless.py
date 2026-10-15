@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from hear.config import RuntimeSettings
 from hear.runtime.ownership import BackendOwnershipPolicy
 from hear.runtime.roles import WorkerRole
+from hear.tools.runpod_api import GRAPHQL_BASE, RunPodApi
 
 
 class PlanPreflight:
@@ -87,20 +88,21 @@ class RunPodServerlessDeployer:
         *,
         rest_base: str = REST_BASE,
         run_base: str = RUN_BASE,
+        graphql_base: str = GRAPHQL_BASE,
         client: httpx.Client | None = None,
     ) -> None:
-        if not api_key.strip():
-            raise ValueError("runpod_api_key_required")
-        self._rest = rest_base.rstrip("/")
-        self._run = run_base.rstrip("/")
-        self._client = client or httpx.Client(timeout=httpx.Timeout(60.0))
-        self._headers = {"Authorization": f"Bearer {api_key.strip()}"}
+        self._api = RunPodApi(
+            api_key,
+            rest_base=rest_base,
+            run_base=run_base,
+            graphql_base=graphql_base,
+            client=client,
+        )
+        self._rest = self._api.rest_base
+        self._run = self._api.run_base
 
     def _call(self, method: str, url: str, payload: dict[str, Any] | None = None) -> Any:
-        response = self._client.request(method, url, json=payload, headers=self._headers)
-        if response.status_code >= 400:
-            raise RuntimeError(f"runpod_api_{response.status_code}:{method}:{url}")
-        return response.json() if response.content else {}
+        return self._api.call(method, url, payload)
 
     @staticmethod
     def require_digest(image: str) -> str:
@@ -127,16 +129,43 @@ class RunPodServerlessDeployer:
         payload.update({"imageName": self.require_digest(image), "isServerless": True})
         return self._call("POST", f"{self._rest}/templates", payload)
 
+    # Plan-only keys that the REST endpoint schema does not know.
+    PLAN_ONLY_ENDPOINT_KEYS = ("gpuExcludes",)
+
     def ensure_endpoint(self, endpoint: dict[str, Any], template_id: str) -> dict:
         existing = {
             item["name"]: item for item in self._call("GET", f"{self._rest}/endpoints") or []
         }
-        payload = {**endpoint, "templateId": template_id}
+        payload = {
+            key: value for key, value in endpoint.items() if key not in self.PLAN_ONLY_ENDPOINT_KEYS
+        }
+        payload["templateId"] = template_id
         current = existing.get(endpoint["name"])
         if current is not None:
             payload.pop("computeType", None)
-            return self._call("PATCH", f"{self._rest}/endpoints/{current['id']}", payload)
-        return self._call("POST", f"{self._rest}/endpoints", payload)
+            saved = self._call("PATCH", f"{self._rest}/endpoints/{current['id']}", payload)
+        else:
+            saved = self._call("POST", f"{self._rest}/endpoints", payload)
+        # A cap that silently stayed at 0 means no worker ever starts; refuse to
+        # report a rollout as done when the plan's cap did not land.
+        if "workersMax" in saved and saved["workersMax"] != endpoint.get("workersMax"):
+            raise RuntimeError(
+                f"endpoint_workers_max_mismatch:{saved['workersMax']}!={endpoint.get('workersMax')}"
+            )
+        return saved
+
+    def apply_gpu_exclusions(self, endpoint_id: str, excludes: list[str]) -> dict | None:
+        """Keep excluded GPU types out of the endpoint's pool; REST cannot express this."""
+        if not excludes:
+            return None
+        account = self._api.account()
+        record = next(
+            (item for item in account.get("endpoints") or [] if item.get("id") == endpoint_id),
+            None,
+        )
+        if record is None:
+            raise RuntimeError(f"endpoint_not_visible_in_graphql:{endpoint_id}")
+        return self._api.save_endpoint_gpu_exclusions(record, excludes)
 
     def health(self, endpoint_id: str) -> dict:
         return self._call("GET", f"{self._run}/{endpoint_id}/health")
@@ -159,20 +188,31 @@ class RunPodServerlessDeployer:
 
     def deploy(self, plan: dict[str, Any], template_id: str | None, image: str) -> dict:
         template_id = template_id or self.find_template(plan["template"]["name"])
+        previous_image = None
         if template_id:
+            # Recorded so a failed canary can roll the template straight back.
+            before = self._call("GET", f"{self._rest}/templates/{template_id}") or {}
+            previous_image = before.get("imageName")
             template = self.update_template(template_id, plan["template"], image)
         else:
             template = self.create_template(plan["template"], image)
             template_id = str(template["id"])
         endpoint = self.ensure_endpoint(plan["endpoint"], template_id)
+        exclusions = None
+        if endpoint.get("id"):
+            exclusions = self.apply_gpu_exclusions(
+                endpoint["id"], list(plan["endpoint"].get("gpuExcludes") or [])
+            )
         return {
             "template_id": template_id,
             "image": image,
+            "previous_image": previous_image,
             "endpoint_id": endpoint.get("id"),
             "endpoint_name": endpoint.get("name"),
             "base_url": f"{self._run}/{endpoint.get('id')}",
             "health": self.health(endpoint["id"]) if endpoint.get("id") else None,
             "template_name": template.get("name"),
+            "gpu_pool": None if exclusions is None else exclusions.get("gpuIds"),
         }
 
     @classmethod

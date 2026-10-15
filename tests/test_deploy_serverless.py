@@ -34,7 +34,11 @@ def deployer(responder, calls):
 
     client = httpx.Client(transport=httpx.MockTransport(handle))
     return RunPodServerlessDeployer(
-        "rpa_test", rest_base="https://rest.test/v1", run_base="https://run.test/v2", client=client
+        "rpa_test",
+        rest_base="https://rest.test/v1",
+        run_base="https://run.test/v2",
+        graphql_base="https://gql.test/graphql",
+        client=client,
     )
 
 
@@ -74,9 +78,83 @@ def test_existing_endpoint_is_patched_not_duplicated():
             return httpx.Response(200, json={})
         raise AssertionError(request.url.path)
 
-    deployer(respond, calls).deploy(PLAN, "tpl1", DIGEST)
-    assert [m for m, _, _ in calls] == ["PATCH", "GET", "PATCH", "GET"]
-    assert "computeType" not in calls[2][2]
+    result = deployer(respond, calls).deploy(PLAN, "tpl1", DIGEST)
+    assert [m for m, _, _ in calls] == ["GET", "PATCH", "GET", "PATCH", "GET"]
+    assert "computeType" not in calls[3][2]
+    assert result["previous_image"] is None and result["gpu_pool"] is None
+
+
+def test_gpu_exclusions_are_written_to_the_graphql_pool_and_previous_image_recorded():
+    calls = []
+    plan = {
+        **PLAN,
+        "endpoint": {**PLAN["endpoint"], "gpuExcludes": ["NVIDIA B300 SXM6 AC MIG 1g.34gb"]},
+    }
+
+    def respond(request):
+        path = request.url.path
+        if path == "/v1/endpoints" and request.method == "GET":
+            return httpx.Response(200, json=[{"id": "ep9", "name": "hear-ai-pipeline"}])
+        if path == "/v1/endpoints/ep9":
+            body = json.loads(request.content)
+            assert "gpuExcludes" not in body
+            return httpx.Response(
+                200, json={"id": "ep9", "name": "hear-ai-pipeline", "workersMax": 1}
+            )
+        if path == "/v1/templates/tpl1" and request.method == "GET":
+            return httpx.Response(
+                200, json={"id": "tpl1", "imageName": "ghcr.io/x@sha256:" + "b" * 64}
+            )
+        if path == "/v1/templates/tpl1":
+            return httpx.Response(200, json={"id": "tpl1"})
+        if path == "/v2/ep9/health":
+            return httpx.Response(200, json={})
+        if path == "/graphql":
+            body = json.loads(request.content)
+            if "saveEndpoint" in body["query"]:
+                return httpx.Response(
+                    200, json={"data": {"saveEndpoint": body["variables"]["input"]}}
+                )
+            record = {
+                "id": "ep9",
+                "name": "hear-ai-pipeline",
+                "templateId": "tpl1",
+                "gpuIds": "AMPERE_48",
+                "workersMax": 1,
+                "workersStandby": 1,
+                "workersMin": 0,
+            }
+            return httpx.Response(200, json={"data": {"myself": {"endpoints": [record]}}})
+        raise AssertionError(path)
+
+    result = deployer(respond, calls).deploy(plan, "tpl1", DIGEST)
+    assert result["previous_image"] == "ghcr.io/x@sha256:" + "b" * 64
+    assert result["gpu_pool"] == "AMPERE_48,-NVIDIA B300 SXM6 AC MIG 1g.34gb"
+    saves = [
+        body
+        for method, path, body in calls
+        if path == "/graphql" and "saveEndpoint" in body["query"]
+    ]
+    assert saves[0]["variables"]["input"]["gpuIds"] == "AMPERE_48,-NVIDIA B300 SXM6 AC MIG 1g.34gb"
+
+
+def test_a_worker_cap_that_did_not_land_fails_the_rollout():
+    calls = []
+
+    def respond(request):
+        path = request.url.path
+        if path == "/v1/endpoints" and request.method == "GET":
+            return httpx.Response(200, json=[{"id": "ep9", "name": "hear-ai-pipeline"}])
+        if path == "/v1/endpoints/ep9":
+            return httpx.Response(
+                200, json={"id": "ep9", "name": "hear-ai-pipeline", "workersMax": 0}
+            )
+        if path == "/v1/templates/tpl1":
+            return httpx.Response(200, json={"id": "tpl1"})
+        raise AssertionError(path)
+
+    with pytest.raises(RuntimeError, match="endpoint_workers_max_mismatch:0!=1"):
+        deployer(respond, calls).deploy(PLAN, "tpl1", DIGEST)
 
 
 def test_unpinned_images_are_refused():

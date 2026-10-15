@@ -52,6 +52,9 @@
     "gpuTypeIds": [
       "NVIDIA A40",
       "NVIDIA RTX A6000"
+    ],
+    "gpuExcludes": [
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb"
     ]
   }
 }

@@ -71,6 +71,11 @@ TRANSFORMERS_OFFLINE="1"
 HF_DATASETS_OFFLINE="1"
 ```
 
+The gateway registers itself with the backend every 30 s
+(`HEAR_REGISTRATION_INTERVAL_SECONDS`, 0 disables) using the Pod's proxy URL derived
+from `RUNPOD_POD_ID`, or `HEAR_PUBLIC_GATEWAY_URL` when set; see
+`GO_AI_DISPATCH_PLAN.md` §5.1. A replaced Pod therefore needs no backend change.
+
 Defaults that apply without being set: `HEAR_MAGIC_CLEAN_PARALLELISM=8`,
 `HEAR_MAGIC_CLEAN_CHUNK_SECONDS=300`, `HEAR_MASTERING_PARALLELISM=8`,
 `WHISPER_SEGMENT_SECONDS=30`, `WHISPER_VAD_WORKERS=4`,
@@ -164,3 +169,33 @@ The committed plans in `deploy/runpod/*.json` are the source for these values;
 rolls an endpoint (it stamps `HEAR_ENGINE_REVISION` from the digest and refuses a
 plan whose workers would not start). Raise `workersMax` in the plan and redeploy to
 add throughput; cost is per GPU-second used, not per worker.
+
+## Keeping the fleet up
+
+Three things took every lane down on 2026-10-15, and each now has a guard.
+
+| Failure | What happened | Guard |
+| --- | --- | --- |
+| Workers on hardware the image was not built for | RunPod added Blackwell MIG slices to its 24 GB pool; `hear-ai-pipeline-llm` workers were scheduled on `RTX PRO 6000 Blackwell MIG 1g.24gb`, crashed, and the endpoint showed five unhealthy workers with jobs stuck in queue | Each plan in `deploy/runpod/*.json` carries `gpuExcludes`; the deploy script writes them into the endpoint's GPU pool through GraphQL after every rollout. Workers also refuse MIG partitions at readiness (`HEAR_REJECT_MIG_GPUS`, default on) and log `gpu_unsupported device=…`, and `HEAR_ALLOWED_GPU_NAME_PATTERN` can pin the accepted cards |
+| Worker cap set to 0 | `hear-ai-cleaner` and `hear-ai-reconstruction` had `workersMax 0`, so no worker could ever start | The deploy fails when the saved cap differs from the plan; the fleet check reports `workers_max_below_plan` every 30 minutes |
+| Failed canary left a new image live | The cold-start canary timed out but the template kept the unproven image | The deploy workflow rolls the template back to the recorded `previous_image` when the canary fails |
+
+The scheduled **Fleet health** workflow (`.github/workflows/fleet-health.yml`) runs
+`scripts/fleet_health.py` every 30 minutes and fails, which notifies the repository
+owners, on: a cap below the plan, unhealthy workers, jobs queued with no live
+worker, a worker on a GPU type outside the plan, a missing exclusion, a balance
+under $25, or a Pod gateway whose `/readyz` is not 200 (set the repository
+variable `HEAR_POD_GATEWAY_URL`). Run it by hand with `workflow_dispatch`, and tick
+`repair` to restore caps and exclusions. Locally:
+
+```bash
+RUNPOD_DEPLOY_API_KEY=<key> PYTHONPATH=. python scripts/fleet_health.py \
+  --plans-dir deploy/runpod --pod-url https://<pod-id>-8000.proxy.runpod.net --repair
+```
+
+Repair only touches `workersMax`, `workersStandby` and the GPU exclusions; it never
+changes templates, images or the Pod.
+
+The Pod ID above is the one recorded on 2026-10-04. The account's Pod has since
+been replaced; confirm the live ID in the RunPod console and update this table,
+`BACKEND_CONNECTION.md`, and the backend's gateway URL together.
