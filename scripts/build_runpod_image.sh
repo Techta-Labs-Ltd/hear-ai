@@ -51,9 +51,15 @@ docker info >/dev/null
 if [[ "$push" == true ]]; then
   # The build is cached in the builder, so a retry after a registry or DNS hiccup
   # on the runner ("lookup ghcr.io ... i/o timeout") only repeats the push.
+  # Layers are cached in the registry next to the images, so a rebuild only
+  # redoes the stages whose inputs changed instead of apt, uv and the model
+  # download every time. The cache ref lives in the image repository.
+  cache_ref="${tag%%:*}:buildcache-${target}"
   attempt=1
   until docker buildx build --network=host --platform linux/amd64 \
-    --target "$target" --tag "$tag" --build-arg "HEAR_BUILD_REVISION=$build_revision" --build-arg "HEAR_FISH_LICENSE_APPROVED=$fish_license_approved" --push - < "$context"; do
+    --target "$target" --tag "$tag" --build-arg "HEAR_BUILD_REVISION=$build_revision" --build-arg "HEAR_FISH_LICENSE_APPROVED=$fish_license_approved" \
+    --cache-from "type=registry,ref=$cache_ref" --cache-to "type=registry,ref=$cache_ref,mode=max,image-manifest=true,oci-mediatypes=true" \
+    --push - < "$context"; do
     if (( attempt >= 4 )); then
       echo "image push failed after $attempt attempts: $tag" >&2
       exit 1

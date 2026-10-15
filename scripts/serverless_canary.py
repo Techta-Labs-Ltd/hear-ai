@@ -1,13 +1,4 @@
-"""Submit one attempt to a RunPod Serverless endpoint and report what the worker did.
-
-With a backend-issued envelope this proves the full path: claim, execution,
-events and outcome callbacks. With a synthetic envelope it proves the image
-boots, models preload, the handler runs and the worker reaches the backend
-(the backend then rejects the unknown attempt, which is the expected outcome).
-"""
-
 from __future__ import annotations
-
 import argparse
 import asyncio
 import json
@@ -29,11 +20,22 @@ class ServerlessCanary:
 
     DEFAULT_BASE_URL = "https://api.runpod.ai/v2"
     TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
+    # If no worker has been ready or running this long after submission while
+    # workers keep turning unhealthy, the image is not starting: stop waiting.
+    NEVER_READY_SECONDS = 300.0
 
-    def __init__(self, api_key: str, *, base_url: str = DEFAULT_BASE_URL) -> None:
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0))
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = DEFAULT_BASE_URL,
+        client: httpx.AsyncClient | None = None,
+        never_ready_seconds: float = NEVER_READY_SECONDS,
+    ) -> None:
+        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60.0))
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {api_key.strip()}"}
+        self._never_ready_seconds = never_ready_seconds
 
     async def _get(self, path: str) -> dict:
         response = await self._client.get(f"{self._base_url}/{path}", headers=self._headers)
@@ -76,7 +78,11 @@ class ServerlessCanary:
                 "operation": "remove_segments" if job_type == "reconstruction" else None,
                 "options": {
                     "magic_clean": {"profile": "natural"},
-                    "reconstruction": {"same_speaker": False, "segment_start": 0.0, "segment_end": 1.0},
+                    "reconstruction": {
+                        "same_speaker": False,
+                        "segment_start": 0.0,
+                        "segment_end": 1.0,
+                    },
                 }.get(job_type, {}),
                 "artifact_prefix": f"creators/canary/audio/jobs/{job_id}/{job_id}-attempt",
                 "deadline": (datetime.now(UTC) + timedelta(minutes=20)).isoformat(),
@@ -91,13 +97,18 @@ class ServerlessCanary:
     ) -> dict:
         health_before = await self._get(f"{endpoint_id}/health")
         started = time.perf_counter()
-        receipt = await self._post(f"{endpoint_id}/run", {"input": envelope.model_dump(mode="json")})
+        receipt = await self._post(
+            f"{endpoint_id}/run", {"input": envelope.model_dump(mode="json")}
+        )
         provider_job_id = str(receipt.get("id") or "")
         if not provider_job_id:
             raise RuntimeError("serverless_receipt_missing_job_id")
         states: list[str] = []
         stream: list[dict[str, Any]] = []
         final: dict | None = None
+        verdict = "timeout"
+        health_after: dict = {}
+        worker_seen = False
         while time.perf_counter() - started < wait_seconds:
             status = await self._get(f"{endpoint_id}/status/{provider_job_id}")
             state = str(status.get("status") or "UNKNOWN")
@@ -112,8 +123,29 @@ class ServerlessCanary:
                     stream.append(item.get("output", item))
             if state in self.TERMINAL:
                 final = status
+                verdict = str(status.get("status"))
+                break
+            health_after = await self._get(f"{endpoint_id}/health")
+            workers = health_after.get("workers") or {}
+            alive = sum(int(workers.get(key) or 0) for key in ("ready", "running", "idle"))
+            worker_seen = worker_seen or alive > 0 or state == "IN_PROGRESS"
+            elapsed = time.perf_counter() - started
+            if (
+                not worker_seen
+                and elapsed >= self._never_ready_seconds
+                and int(workers.get("unhealthy") or 0) > 0
+            ):
+                # Workers are being started and dying; waiting out the full budget
+                # only burns runner minutes and leaves another job in the queue.
+                verdict = "workers_never_ready"
                 break
             await asyncio.sleep(3)
+        if final is None:
+            # Do not leave the canary queued: a stale job holds a worker slot later.
+            try:
+                await self._post(f"{endpoint_id}/cancel/{provider_job_id}", {})
+            except httpx.HTTPError:
+                pass
         await self._client.aclose()
         return {
             "endpoint_id": endpoint_id,
@@ -121,12 +153,13 @@ class ServerlessCanary:
             "provider_job_id": provider_job_id,
             "attempt_id": envelope.attempt_id,
             "states": states,
-            "final_state": str(final.get("status")) if final else "timeout",
+            "final_state": verdict,
             "error": str(final.get("error")) if final and final.get("error") else None,
             "worker_events": [item.get("event") for item in stream],
             "stream": stream[:20],
             "seconds": round(time.perf_counter() - started, 1),
             "health_before": health_before,
+            "health_after": health_after,
         }
 
     @classmethod
@@ -154,7 +187,9 @@ class ServerlessCanary:
             envelope = AttemptEnvelope.model_validate_json(args.envelope.read_text())
         else:
             raw_policy = os.environ.get("HEAR_BACKEND_POLICY_JSON") or (
-                dotenv_values(args.policy_env).get("HEAR_BACKEND_POLICY_JSON") if args.policy_env.is_file() else None
+                dotenv_values(args.policy_env).get("HEAR_BACKEND_POLICY_JSON")
+                if args.policy_env.is_file()
+                else None
             )
             policy = json.loads(raw_policy or "{}")
             job_type = {
