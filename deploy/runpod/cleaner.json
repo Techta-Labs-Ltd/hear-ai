@@ -54,6 +54,9 @@
     "name": "hear-ai-cleaner",
     "gpuTypeIds": [
       "NVIDIA RTX A5000"
+    ],
+    "gpuExcludes": [
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb"
     ]
   }
 }

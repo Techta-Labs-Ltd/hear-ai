@@ -51,6 +51,12 @@ class RuntimeSettings(BaseModel):
     # A worker on a card smaller than this reports not ready instead of failing every
     # job with CUDA out-of-memory (Serverless then rents a different GPU). 0 disables.
     min_gpu_memory_gib: float = Field(default=0, ge=0, alias="HEAR_MIN_GPU_MEMORY_GIB")
+    # RunPod can schedule a worker onto a GPU type the plan never listed (its 24 GB
+    # pool gained Blackwell MIG slices). The images are not built for MIG partitions,
+    # so such a worker reports not ready with the device name in its log instead of
+    # crash-looping. An optional regex narrows the accepted device names further.
+    reject_mig_gpus: bool = Field(default=True, alias="HEAR_REJECT_MIG_GPUS")
+    allowed_gpu_name_pattern: str = Field(default="", alias="HEAR_ALLOWED_GPU_NAME_PATTERN")
     pod_api_key: SecretStr | None = Field(default=None, alias="HEAR_POD_API_KEY")
     rabbitmq_url: str | None = Field(default=None, alias="HEAR_RABBITMQ_URL")
     pod_max_concurrent_jobs: int = Field(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -83,8 +84,42 @@ class RuntimeBootstrap:
         if self._settings.min_gpu_memory_gib > 0:
             minimum = self._settings.min_gpu_memory_gib
             current.add_check("gpu_memory", lambda: self._gpu_has_capacity(minimum))
+        if self._settings.reject_mig_gpus or self._settings.allowed_gpu_name_pattern:
+            pattern = self._settings.allowed_gpu_name_pattern
+            reject_mig = self._settings.reject_mig_gpus
+            current.add_check("gpu_supported", lambda: self._gpu_supported(pattern, reject_mig))
         self._readiness[role] = current
         return current
+
+    @staticmethod
+    def _gpu_device_name() -> str | None:
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return None
+            return str(torch.cuda.get_device_name(0))
+        except Exception:
+            return None
+
+    @classmethod
+    def _gpu_supported(cls, pattern: str, reject_mig: bool, name: str | None = None) -> bool:
+        """Whether the card this worker landed on is one the image was built for.
+
+        No CUDA device is not this check's failure: other checks report that.
+        """
+        name = name if name is not None else cls._gpu_device_name()
+        if name is None:
+            return True
+        if reject_mig and "MIG" in name.upper().split():
+            logging.getLogger(__name__).error(
+                "gpu_unsupported reason=mig_partition device=%s", name
+            )
+            return False
+        if pattern and re.search(pattern, name) is None:
+            logging.getLogger(__name__).error("gpu_unsupported reason=pattern device=%s", name)
+            return False
+        return True
 
     @staticmethod
     def _gpu_has_capacity(minimum_gib: float) -> bool:

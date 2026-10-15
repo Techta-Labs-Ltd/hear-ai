@@ -59,6 +59,9 @@
       "NVIDIA RTX A5000",
       "NVIDIA GeForce RTX 3090",
       "NVIDIA L4"
+    ],
+    "gpuExcludes": [
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb"
     ]
   }
 }
