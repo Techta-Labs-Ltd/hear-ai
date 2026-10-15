@@ -143,12 +143,11 @@ def test_repair_restores_caps_and_excludes_every_unplanned_gpu_seen():
         and pipeline["gpuIds"] == f"AMPERE_24,-{MIG24},-NVIDIA RTX PRO 4000 Blackwell"
     )
     assert pipeline["workersMax"] == 5 and pipeline["templateId"] == "tpl"
-    assert (
-        cleaner["workersMax"] == 3
-        and cleaner["workersStandby"] == 3
-        and cleaner["gpuIds"] == f"AMPERE_24,-NVIDIA L4,-{MIG24}"
-    )
+    assert cleaner["workersMax"] == 3 and cleaner["gpuIds"] == f"AMPERE_24,-NVIDIA L4,-{MIG24}"
     assert "networkVolumeId" not in cleaner and "locations" not in cleaner
+    # RunPod's EndpointInput rejects unknown fields; the live rollout on 2026-10-15
+    # failed on exactly this one.
+    assert "workersStandby" not in pipeline and "workersStandby" not in cleaner
 
 
 def test_repair_leaves_a_compliant_endpoint_alone():

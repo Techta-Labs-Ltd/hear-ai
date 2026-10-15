@@ -105,6 +105,8 @@ jobs:
     timeout-minutes: 60
     environment: production
     strategy:
+      # One role's failed rollout must not cancel the others mid-flight.
+      fail-fast: false
       max-parallel: 2
       matrix:
         include:
