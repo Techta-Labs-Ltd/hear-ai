@@ -153,6 +153,9 @@ class FishReconstructionRenderer:
     # A take may decode into a word or two more than asked (CTC splits words); a
     # take that says a whole extra phrase is not the requested edit.
     EXTRA_WORD_TOLERANCE = 1
+    # A number or symbol is one token in the text but several spoken words
+    # ("2026" is "twenty twenty-six", "1,500" is "one thousand five hundred").
+    SPOKEN_WORDS_PER_UNSPELLABLE_TOKEN = 5
 
     def __init__(
         self,
@@ -336,8 +339,13 @@ class FishReconstructionRenderer:
         if not checked:
             return None, None
         ratio = round(sum(checked) / len(checked), 3)
-        extra = len(decoded) - len(from_text)
-        if extra > max(cls.EXTRA_WORD_TOLERANCE, len(from_text) // 10):
+        spelled = [word for word in from_text if word]
+        unspellable = len(from_text) - len(spelled)
+        extra = len(decoded) - len(spelled)
+        allowed = max(cls.EXTRA_WORD_TOLERANCE, len(spelled) // 10) + (
+            unspellable * cls.SPOKEN_WORDS_PER_UNSPELLABLE_TOKEN
+        )
+        if extra > allowed:
             return False, ratio
         return WordMatcher.passes(checked), ratio
 
