@@ -199,3 +199,40 @@ changes templates, images or the Pod.
 The Pod ID above is the one recorded on 2026-10-04. The account's Pod has since
 been replaced; confirm the live ID in the RunPod console and update this table,
 `BACKEND_CONNECTION.md`, and the backend's gateway URL together.
+
+### Workers that exit within seconds on every GPU type
+
+On 2026-10-15, after the MIG exclusions were in place, RunPod started workers for
+all three endpoints on A5000, L4, A40 and A6000 cards and every one exited within
+seconds of being rented. A container that dies that fast on fresh hardware has
+not run the application: either the image could not be pulled or the entrypoint
+failed before the first log line. The images are private on GHCR, pulled with the
+registry credential `hear-ai-token` (`containerRegistryAuthId
+cmusm0r4r008o7xydkedy1g67`) on every template, so an expired or revoked GitHub
+token takes every worker down at once while CI, which pulls with its own token,
+stays green.
+
+Check, in this order:
+
+1. RunPod console → the endpoint → Workers → any exited worker → Logs. A pull
+   failure reads `failed to pull image … unauthorized`; a Python traceback means
+   the image started.
+2. If it is the credential: create a GitHub token with `read:packages`, set it on
+   the `hear-ai-token` registry credential in RunPod → Settings → Container
+   Registry Auth, and note its expiry date in the team calendar. RunPod has no API
+   to validate it, so the fleet check cannot.
+3. Workers restart on their own once the pull succeeds; the queued jobs drain.
+
+The deploy canary no longer waits its full 25 minutes in this state: once five
+minutes pass with no worker ever ready and workers turning unhealthy, it reports
+`workers_never_ready`, cancels its own queued job and fails the rollout.
+
+### Build time
+
+Each published image is 10 GB or more because the models are baked in. The
+publish build caches its layers in the registry
+(`ghcr.io/techta-labs-ltd/hear-ai:buildcache-<target>`), so a rebuild redoes only
+the stages whose inputs changed; the push of unchanged layers is skipped by the
+registry. The quality workflow's ten-image matrix runs only when image inputs
+change (Dockerfile, runtime lock, patches, model manifest, entry scripts) or on
+`workflow_dispatch`; every push still runs the two-minute quality job.

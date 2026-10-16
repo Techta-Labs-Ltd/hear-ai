@@ -117,12 +117,36 @@ class RunPodApi:
 
         Returns the saved record, or None when nothing needed changing.
         """
-        pool = self.pool_with_exclusions(endpoint["gpuIds"], excludes)
-        changes: dict[str, Any] = {}
-        if pool != endpoint["gpuIds"]:
-            changes["gpuIds"] = pool
-        if workers_max is not None and endpoint.get("workersMax") != workers_max:
-            changes["workersMax"] = workers_max
-        if not changes:
+        remaining = list(excludes)
+        skipped: list[str] = []
+        while True:
+            pool = self.pool_with_exclusions(endpoint["gpuIds"], remaining)
+            changes: dict[str, Any] = {}
+            if pool != endpoint["gpuIds"]:
+                changes["gpuIds"] = pool
+            if workers_max is not None and endpoint.get("workersMax") != workers_max:
+                changes["workersMax"] = workers_max
+            if not changes:
+                return None
+            try:
+                saved = self.save_endpoint(endpoint, **changes)
+            except RuntimeError as exc:
+                # A type outside every selected pool can never be scheduled here, so
+                # RunPod refuses to list it; drop that one and keep the others.
+                name = self._rejected_exclusion(str(exc))
+                if name is None or name not in remaining:
+                    raise
+                remaining.remove(name)
+                skipped.append(name)
+                continue
+            if skipped:
+                saved = {**saved, "skipped_exclusions": skipped}
+            return saved
+
+    @staticmethod
+    def _rejected_exclusion(message: str) -> str | None:
+        marker = 'Invalid exclusion "-'
+        if marker not in message:
             return None
-        return self.save_endpoint(endpoint, **changes)
+        rest = message.split(marker, 1)[1]
+        return rest.split('"', 1)[0] or None

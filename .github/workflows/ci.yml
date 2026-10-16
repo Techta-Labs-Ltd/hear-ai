@@ -1,5 +1,8 @@
 name: Runtime quality checks
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -18,8 +21,32 @@ jobs:
       - run: uv run --project deploy/runtime python -m hear.tools.check_architecture
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg libsox-dev
       - run: uv run --project deploy/runtime python -m pytest tests tests/integration -q
-  docker-images:
+  image-inputs:
+    # The ten-image matrix below takes 10 to 50 minutes per image and saturates the
+    # runner pool for hours. Build it only when the image inputs changed, or on demand.
     needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            images:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'deploy/runtime/**'
+              - 'deploy/cleaner/**'
+              - 'patches/**'
+              - 'hear/model_manifest.json'
+              - 'scripts/package_image_context.py'
+              - 'scripts/run_serverless.sh'
+              - 'scripts/run_pod_stack.sh'
+  docker-images:
+    needs: [quality, image-inputs]
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.image-inputs.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

@@ -160,8 +160,65 @@ def test_committed_plans_exclude_blackwell_mig_and_load_by_name(tmp_path):
 
     plans = FleetHealth.load_plans(Path("deploy/runpod"))
     assert set(plans) == {"hear-ai-pipeline-llm", "hear-ai-cleaner", "hear-ai-reconstruction"}
-    assert all(any("MIG" in item for item in plan["gpuExcludes"]) for plan in plans.values())
+    # The 24 GB pool gained Blackwell MIG slices; the 48 GB pool (A40/A6000) has
+    # none, and RunPod rejects an exclusion for a type outside the pool.
+    assert all(
+        "MIG" in item
+        for name in ("hear-ai-pipeline-llm", "hear-ai-cleaner")
+        for item in plans[name]["gpuExcludes"]
+    )
+    assert plans["hear-ai-reconstruction"]["gpuExcludes"] == []
     assert (
         plans["hear-ai-reconstruction"]["workersMax"] == 2
         and plans["hear-ai-cleaner"]["workersMax"] == 3
     )
+
+
+def test_repair_drops_an_exclusion_runpod_says_is_outside_the_pool():
+    rejected = {"n": 0}
+    endpoints = [endpoint("hear-ai-cleaner", 3, "AMPERE_24,-NVIDIA L4")]
+    saved = []
+
+    def handle(request):
+        path = request.url.path
+        if path == "/graphql":
+            body = json.loads(request.content)
+            if "saveEndpoint" in body["query"]:
+                gpu_ids = body["variables"]["input"]["gpuIds"]
+                if "-NVIDIA B300 SXM6 AC MIG 1g.34gb" in gpu_ids and rejected["n"] == 0:
+                    rejected["n"] += 1
+                    return httpx.Response(
+                        200,
+                        json={
+                            "errors": [
+                                {
+                                    "message": 'Invalid exclusion "-NVIDIA B300 SXM6 AC MIG 1g.34gb": the GPU type does not belong to any selected GPU pool.'
+                                }
+                            ]
+                        },
+                    )
+                saved.append(body["variables"]["input"])
+                return httpx.Response(
+                    200, json={"data": {"saveEndpoint": body["variables"]["input"]}}
+                )
+            visible = [{k: v for k, v in e.items() if k != "_health"} for e in endpoints]
+            return httpx.Response(
+                200, json={"data": {"myself": {"clientBalance": 100, "endpoints": visible}}}
+            )
+        if path.endswith("/health"):
+            return httpx.Response(200, json=endpoints[0]["_health"])
+        raise AssertionError(path)
+
+    client = httpx.Client(transport=httpx.MockTransport(handle))
+    api = RunPodApi(
+        "rpa_test",
+        rest_base="https://rest.test/v1",
+        run_base="https://run.test/v2",
+        graphql_base="https://gql.test/graphql",
+        client=client,
+    )
+    result = api.save_endpoint_gpu_exclusions(
+        endpoints[0], ["NVIDIA B300 SXM6 AC MIG 1g.34gb", MIG24], workers_max=3
+    )
+    assert result["skipped_exclusions"] == ["NVIDIA B300 SXM6 AC MIG 1g.34gb"]
+    assert saved[0]["gpuIds"] == f"AMPERE_24,-NVIDIA L4,-{MIG24}" and rejected["n"] == 1
