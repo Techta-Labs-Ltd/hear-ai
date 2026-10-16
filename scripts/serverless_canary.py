@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import argparse
 import asyncio
 import json
@@ -20,8 +21,6 @@ class ServerlessCanary:
 
     DEFAULT_BASE_URL = "https://api.runpod.ai/v2"
     TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
-    # If no worker has been ready or running this long after submission while
-    # workers keep turning unhealthy, the image is not starting: stop waiting.
     NEVER_READY_SECONDS = 300.0
 
     def __init__(

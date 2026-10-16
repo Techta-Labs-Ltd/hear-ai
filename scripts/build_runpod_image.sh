@@ -49,6 +49,12 @@ command -v docker >/dev/null || {
 docker buildx version >/dev/null
 docker info >/dev/null
 if [[ "$push" == true ]]; then
+  # Registry cache export needs a container-backed builder; under `bazel run`
+  # the client's selected builder is not visible, so pick one by name here.
+  builder="${HEAR_BUILDX_BUILDER:-hear-ai-cache}"
+  if ! docker buildx inspect "$builder" >/dev/null 2>&1; then
+    docker buildx create --name "$builder" --driver docker-container --driver-opt network=host >/dev/null
+  fi
   # The build is cached in the builder, so a retry after a registry or DNS hiccup
   # on the runner ("lookup ghcr.io ... i/o timeout") only repeats the push.
   # Layers are cached in the registry next to the images, so a rebuild only
@@ -56,7 +62,7 @@ if [[ "$push" == true ]]; then
   # download every time. The cache ref lives in the image repository.
   cache_ref="${tag%%:*}:buildcache-${target}"
   attempt=1
-  until docker buildx build --network=host --platform linux/amd64 \
+  until docker buildx build --builder "$builder" --network=host --platform linux/amd64 \
     --target "$target" --tag "$tag" --build-arg "HEAR_BUILD_REVISION=$build_revision" --build-arg "HEAR_FISH_LICENSE_APPROVED=$fish_license_approved" \
     --cache-from "type=registry,ref=$cache_ref" --cache-to "type=registry,ref=$cache_ref,mode=max,image-manifest=true,oci-mediatypes=true" \
     --push - < "$context"; do
