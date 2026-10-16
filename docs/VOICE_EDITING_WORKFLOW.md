@@ -8,7 +8,12 @@ is the product-side counterpart.
 ## 1. Select words, not time ranges
 
 The pipeline's transcription returns `segments[].words[{word, start, end, prob}]`.
-The editor works on that word list:
+`prob` is a measured per-word confidence from an independent CTC model
+(`word_confidence_source: "wav2vec2_ctc"`), 0 to 0.999. It is `null` for a word
+the model cannot spell (digits, symbols) and for every word of a transcript made
+before scoring existed, in which case `word_confidence_available` is false.
+**A missing score is "unknown", never "bad": it must not block anything.** The
+editor works on that word list:
 
 1. The user highlights one or more **contiguous words** and types the
    replacement. They never edit times and never edit the original words.
@@ -39,7 +44,9 @@ the track's **voice sample**:
 
 - 8 to 15 seconds of continuous speech by the same speaker (same channel for
   independent stereo voices; set `reference.channel`).
-- Every word has `prob` ≥ 0.9 and no gap between words exceeds 500 ms.
+- No gap between words exceeds 500 ms and no word has a zero-length stamp.
+- When scores exist, every word has `prob` ≥ 0.9; when the transcript has no
+  scores, use the timing rules alone and label the sample "unverified".
 - Not inside a segment the pipeline marked silent or music, and not overlapping
   the edit.
 - Prefer the candidate closest in time to the edit (mood and pace match).
@@ -54,8 +61,8 @@ edit is allowed: a job without a reference under 5 s fails on purpose.
 
 Disable the edit affordance, with a reason shown, when:
 
-- any selected word has `prob` under 0.6, or `word_confidence_available` is
-  false (re-run transcription first);
+- any selected word has a `prob` under 0.6 (a `null` score is allowed; show
+  "unverified" and offer Re-transcribe as an optional improvement, never a gate);
 - the selection lies in a silent or music segment, or spans two sentences;
 - the track is stereo with independent voices and no channel was chosen;
 - the language is not English (`en`/`en-GB` only);

@@ -56,6 +56,8 @@ class RuntimeSettings(BaseModel):
     # so such a worker reports not ready with the device name in its log instead of
     # crash-looping. An optional regex narrows the accepted device names further.
     reject_mig_gpus: bool = Field(default=True, alias="HEAR_REJECT_MIG_GPUS")
+    # Per-word transcript confidence from wav2vec2 CTC; the Qwen aligner has none.
+    word_confidence_enabled: bool = Field(default=True, alias="HEAR_WORD_CONFIDENCE_ENABLED")
     allowed_gpu_name_pattern: str = Field(default="", alias="HEAR_ALLOWED_GPU_NAME_PATTERN")
     pod_api_key: SecretStr | None = Field(default=None, alias="HEAR_POD_API_KEY")
     rabbitmq_url: str | None = Field(default=None, alias="HEAR_RABBITMQ_URL")

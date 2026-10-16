@@ -11,7 +11,7 @@ report events and the outcome to the owning backend.
 | Job | Worker role | Processing |
 | --- | --- | --- |
 | `pipeline` | `pipeline` | Transcription, moderation, categorization, discovery, and audio export |
-| `transcription` | `pipeline` or `transcription` | Qwen ASR with aligned timestamps |
+| `transcription` | `pipeline` or `transcription` | Qwen ASR with aligned timestamps and wav2vec2 CTC per-word confidence |
 | `reconstruction` | `reconstruction` | Fish Speech S2 Pro (bf16) edits verified by wav2vec2 CTC and WavLM-SV, timeline assembly |
 | `magic_clean` | `magic_clean_natural` | DeepFilterNet3 with four cleaning profiles |
 

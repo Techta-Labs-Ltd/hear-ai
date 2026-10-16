@@ -108,6 +108,7 @@ class TranscriptionService:
         native: NativeExecutor | None = None,
         min_avg_logprob: float = -0.75,
         vad_pool=None,
+        scorer=None,
     ):
         if not 1 <= chunk_seconds <= 600 or batch_size < 1 or long_audio_batch_size < 1:
             raise ValueError("invalid_transcription_window_policy")
@@ -118,6 +119,8 @@ class TranscriptionService:
         self._native = native
         self._policy = TranscriptionResultPolicy(min_avg_logprob)
         self._vad_pool = vad_pool
+        # Measures a real per-word confidence; the aligner itself has none.
+        self._scorer = scorer
 
     @staticmethod
     def _libsndfile_can_read(path: str) -> bool:
@@ -173,30 +176,56 @@ class TranscriptionService:
     def _probe_duration(path: str) -> float:
         try:
             probe = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", path],
-                capture_output=True, text=True, check=True, timeout=60,
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    path,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
             )
             return max(0.0, float(probe.stdout.strip() or 0))
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as exc:
-            raise CleanExecutionError(
-                ErrorCode.INVALID_AUDIO, "source_audio_undecodable"
-            ) from exc
+            raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "source_audio_undecodable") from exc
 
     @staticmethod
     def _decode_range(path: str, target: str, start: float, length: float | None) -> None:
         try:
             subprocess.run(
-                ["ffmpeg", "-nostdin", "-v", "error", "-y",
-                 *(["-ss", f"{start:.6f}"] if start > 0 else []), "-i", path,
-                 *(["-t", f"{length:.6f}"] if length is not None else []),
-                 "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", target],
-                capture_output=True, check=True, timeout=FFMPEG_FALLBACK_TIMEOUT_SECONDS,
+                [
+                    "ffmpeg",
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-y",
+                    *(["-ss", f"{start:.6f}"] if start > 0 else []),
+                    "-i",
+                    path,
+                    *(["-t", f"{length:.6f}"] if length is not None else []),
+                    "-map",
+                    "0:a:0",
+                    "-vn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-f",
+                    "f32le",
+                    target,
+                ],
+                capture_output=True,
+                check=True,
+                timeout=FFMPEG_FALLBACK_TIMEOUT_SECONDS,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            raise CleanExecutionError(
-                ErrorCode.INVALID_AUDIO, "source_audio_undecodable"
-            ) from exc
+            raise CleanExecutionError(ErrorCode.INVALID_AUDIO, "source_audio_undecodable") from exc
 
     @staticmethod
     def _read_window(source, frames: int):
@@ -259,7 +288,9 @@ class TranscriptionService:
             finalize_combined_result(combined), language=language, short_utterance=short_utterance
         )
         # "No speech" and "silent" differ: music beds and intros are audible without words.
-        result["silent"] = result["no_speech"] and state["audible_seconds"] <= SILENT_MAX_AUDIBLE_SECONDS
+        result["silent"] = (
+            result["no_speech"] and state["audible_seconds"] <= SILENT_MAX_AUDIBLE_SECONDS
+        )
         result["audio_level"] = {
             "audible_seconds": state["audible_seconds"],
             "loudest_second_dbfs": round(state["loudest_dbfs"], 1),
@@ -272,6 +303,9 @@ class TranscriptionService:
             "window_seconds": self._chunk_seconds,
             "alignment_enabled": True,
         }
+        result["word_confidence_source"] = (
+            getattr(self._scorer, "source", "external") if self._scorer is not None else None
+        )
         return result
 
     async def _ffmpeg_decode(self, path: str) -> str:
@@ -298,30 +332,62 @@ class TranscriptionService:
                         if self._native is not None
                         else await NativeExecutor.run_blocking_to_completion(operation)
                     )
-                    run.performance["decode_resample_seconds"] += time.perf_counter() - window_started
+                    run.performance["decode_resample_seconds"] += (
+                        time.perf_counter() - window_started
+                    )
                     if samples.size == 0:
                         # The header overstates the length (truncated MP3): the audio has ended.
                         break
                     result = await self._transcribe_window(samples, run.batch_size, run.language)
+                    await self._score_words(run, result, samples)
                     self._append(run, result, samples, offset)
                     if run.progress is not None:
                         await run.progress.publish(source.tell() / total_frames * 100.0)
                 return
         # Windows are read and VAD-segmented in worker processes ahead of the GPU.
-        windows = [(start, min(frames, total_frames - start)) for start in range(first, total_frames, frames)]
+        windows = [
+            (start, min(frames, total_frames - start))
+            for start in range(first, total_frames, frames)
+        ]
         async for window in self._vad_pool.stream(path, windows):
             run.performance["decode_resample_seconds"] += window.read_seconds
-            run.performance["vad_seconds"] = run.performance.get("vad_seconds", 0.0) + window.vad_seconds
+            run.performance["vad_seconds"] = (
+                run.performance.get("vad_seconds", 0.0) + window.vad_seconds
+            )
             if window.samples.size == 0:
                 # Planned from an overstated header; the audio ended before this window.
                 continue
             result = await self._transcribe_window(
                 window.samples, run.batch_size, run.language, segments=window.segments
             )
+            await self._score_words(run, result, window.samples)
             self._append(run, result, window.samples, window.start_frame / rate)
             if run.progress is not None:
                 done = window.start_frame + min(frames, total_frames - window.start_frame)
                 await run.progress.publish(done / total_frames * 100.0)
+
+    async def _score_words(self, run: _WindowRun, result: dict, samples) -> None:
+        """Replace the aligner's placeholder scores with measured ones, in place."""
+        if self._scorer is None:
+            return
+        words = [w for seg in result.get("segments", []) for w in (seg.get("words") or [])]
+        if not words:
+            return
+        started = time.perf_counter()
+        operation = partial(self._scorer.score_window, samples, words)
+        scores = (
+            await self._native.run(self._scorer.score_window, samples, words)
+            if self._native is not None
+            else await NativeExecutor.run_blocking_to_completion(operation)
+        )
+        for word, score in zip(words, scores, strict=True):
+            if score is None:
+                word.pop("score", None)
+            else:
+                word["score"] = float(score)
+        run.performance["word_confidence_seconds"] = run.performance.get(
+            "word_confidence_seconds", 0.0
+        ) + (time.perf_counter() - started)
 
     def _append(self, run: _WindowRun, result: dict, samples, offset: float) -> None:
         self._account(run.performance, result)
@@ -344,12 +410,18 @@ class TranscriptionService:
             [np.sqrt(np.mean(np.square(block, dtype=np.float64), axis=1)) for block in frames]
         )
         dbfs = 20.0 * np.log10(np.maximum(levels, 1e-10))
-        return int(np.count_nonzero(dbfs > AUDIBLE_DBFS)), float(max(dbfs.max(), SILENCE_FLOOR_DBFS))
+        return int(np.count_nonzero(dbfs > AUDIBLE_DBFS)), float(
+            max(dbfs.max(), SILENCE_FLOOR_DBFS)
+        )
 
-    async def _transcribe_window(self, samples, batch_size: int, language: str | None, *, segments=None) -> dict:
+    async def _transcribe_window(
+        self, samples, batch_size: int, language: str | None, *, segments=None
+    ) -> dict:
         started = time.perf_counter()
         if segments is None:
-            result = await self._model_client.transcribe_window(samples, batch_size, language or "en")
+            result = await self._model_client.transcribe_window(
+                samples, batch_size, language or "en"
+            )
         else:
             result = await self._model_client.transcribe_window(
                 samples, batch_size, language or "en", segments=segments
@@ -420,7 +492,11 @@ class TranscriptionService:
                 if end <= start:
                     # The aligner emits a zero-length stamp for some function words; give
                     # them a 20 ms span bounded by the next word so timelines stay monotonic.
-                    limit = float(raw_words[index + 1]["start"]) if index + 1 < len(raw_words) else start + 0.02
+                    limit = (
+                        float(raw_words[index + 1]["start"])
+                        if index + 1 < len(raw_words)
+                        else start + 0.02
+                    )
                     end = max(start, min(start + 0.02, limit))
                 score = w.get("score")
                 # The forced aligner places words but has no per-word confidence; the

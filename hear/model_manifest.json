@@ -208,6 +208,8 @@
       "revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156",
       "relative_path": "wav2vec2-base-960h",
       "roles": [
+        "pipeline",
+        "transcription",
         "reconstruction"
       ],
       "required_files": [

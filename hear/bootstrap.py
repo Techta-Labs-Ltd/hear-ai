@@ -200,6 +200,7 @@ class RuntimeBootstrap:
         )
         readiness = self.readiness(WorkerRole.TRANSCRIPTION)
         readiness.add_check("asr", lambda: self._engine_healthy(engine))
+        scorer = self._word_confidence_scorer(readiness)
         service = TranscriptionService(
             engine,
             chunk_seconds=self._settings.whisper_chunk_seconds,
@@ -208,6 +209,7 @@ class RuntimeBootstrap:
             native=native,
             min_avg_logprob=self._settings.whisper_min_avg_logprob,
             vad_pool=self._vad_pool(),
+            scorer=scorer,
         )
         audio = AudioIO(
             client,
@@ -327,6 +329,7 @@ class RuntimeBootstrap:
             native=audio_native,
             min_avg_logprob=self._settings.whisper_min_avg_logprob,
             vad_pool=self._vad_pool(),
+            scorer=self._word_confidence_scorer(self.readiness(WorkerRole.PIPELINE)),
         )
         audio = AudioIO(
             client,
@@ -569,6 +572,18 @@ class RuntimeBootstrap:
             FishReconstructionRenderer.RATE * self._settings.reconstruction_max_seconds,
             ledger=self._scratch_ledger(),
         )
+
+    def _word_confidence_scorer(self, readiness):
+        """The wav2vec2 CTC scorer, or None when disabled by configuration."""
+        if not self._settings.word_confidence_enabled:
+            logging.getLogger(__name__).warning(
+                "word_confidence disabled: transcripts will carry no per-word scores"
+            )
+            return None
+        module = importlib.import_module("hear.inference.word_confidence")
+        scorer = module.WordConfidenceScorer(self._model_path("wav2vec2-base-960h"))
+        readiness.add_check("word_confidence", lambda: self._engine_healthy(scorer))
+        return scorer
 
     def _model_path(self, logical_name: str) -> Path:
         return self._manifest.local_path(self._model_root, logical_name, self._settings.model_paths)
