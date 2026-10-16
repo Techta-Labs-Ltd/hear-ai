@@ -314,3 +314,36 @@ def test_a_take_that_says_more_than_asked_is_rejected(tmp_path):
     # One extra decoded word is tolerated: CTC sometimes splits a word in two.
     outcome, _, _ = run(tmp_path, hi_alone(), FakeVerifier([0.9], decoded=["HI", "THERE"]))
     assert outcome["result"]["reconstructed_audio"]["segments"][0]["words_verified"] is True
+
+
+def test_numbers_spoken_as_several_words_do_not_fail_the_check():
+    from hear.contracts.reconstruction import SpeechEdit
+
+    text = (
+        "A very warm welcome to everyone joining us for our 2026 conference, "
+        "\u201cComing of Age Here and Thriving.\u201d"
+    )
+    edit = SpeechEdit(segment_start=1, segment_end=6, new_text=text, original_text="x")
+    spoken = (
+        "A VERY WARM WELCOME TO EVERYONE JOINING US FOR OUR TWENTY TWENTY SIX "
+        "CONFERENCE COMING OF AGE HERE AND THRIVING"
+    ).split()
+    verdict, ratio = FishReconstructionRenderer.judge_words(
+        edit, VerificationResult(None, tuple(spoken), 0.9, False)
+    )
+    assert verdict is True and ratio == 1.0
+    longer = spoken[:10] + "TWO THOUSAND AND TWENTY SIX".split() + spoken[13:]
+    assert (
+        FishReconstructionRenderer.judge_words(
+            edit, VerificationResult(None, tuple(longer), 0.9, False)
+        )[0]
+        is True
+    )
+    # An added phrase is still caught.
+    padded = spoken + "AND WE HOPE YOU ENJOY THE WHOLE DAY WITH US".split()
+    assert (
+        FishReconstructionRenderer.judge_words(
+            edit, VerificationResult(None, tuple(padded), 0.9, False)
+        )[0]
+        is False
+    )
