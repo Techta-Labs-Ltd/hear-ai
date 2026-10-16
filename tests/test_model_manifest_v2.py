@@ -22,7 +22,7 @@ class TestModelManifest:
     def test_transcription_loads_only_asr_models(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))
         names = {model.logical_name for model in manifest.models_for(WorkerRole.TRANSCRIPTION)}
-        assert names == {"qwen3-asr-1.7b", "qwen3-forced-aligner"}
+        assert names == {"qwen3-asr-1.7b", "qwen3-forced-aligner", "wav2vec2-base-960h"}
 
     def test_reconstruction_has_only_required_model_families(self):
         manifest = ModelManifest(Path("hear/model_manifest.json"))

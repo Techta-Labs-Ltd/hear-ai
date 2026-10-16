@@ -205,8 +205,9 @@ replaces; shorter same-speaker edits fail with
 Rebuild always needs an explicit reference when `same_speaker` is true.
 
 Choose the reference, not the edit, for voice quality: 8–15 seconds of
-confidently transcribed, uninterrupted speech by the same speaker, near the edit,
-with the aligner's words verbatim as `text`. The worker rejects references that
+uninterrupted speech by the same speaker, near the edit, with the aligner's words
+verbatim as `text`; prefer words with a high `prob` when the transcript carries
+scores, and never refuse an edit because scores are absent. The worker rejects references that
 are mostly silent (`voice_reference_mostly_silent`), clipped
 (`voice_reference_clipped`), or whose text length does not fit the interval
 (`voice_reference_text_length_mismatch`), and reports `voice_reference`

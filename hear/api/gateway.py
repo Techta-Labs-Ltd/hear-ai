@@ -123,6 +123,14 @@ class PodGateway:
                 ),
             },
             "magic_clean": catalogue,
+            "transcription": {
+                "engine": "qwen3_asr",
+                "word_timestamps": "qwen3_forced_aligner",
+                "word_confidence": "wav2vec2_ctc"
+                if os.environ.get("HEAR_WORD_CONFIDENCE_ENABLED", "true").lower()
+                in {"1", "true", "yes", "on"}
+                else None,
+            },
             "reconstruction": {
                 "engine": "fish_speech_s2_pro",
                 "mode": "text_to_speech_editing",
