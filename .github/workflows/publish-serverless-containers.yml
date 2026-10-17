@@ -36,6 +36,10 @@ jobs:
             serverless: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # The Pod image is not deployed by this workflow. Its build has lost the
+    # runner mid-push (2026-10-16), and as a required matrix leg that skipped
+    # the Serverless deploy entirely; it now reports without blocking.
+    continue-on-error: ${{ !matrix.serverless }}
     outputs:
       digests: ${{ steps.collect.outputs.digests }}
     env:
